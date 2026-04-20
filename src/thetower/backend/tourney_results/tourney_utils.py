@@ -560,41 +560,6 @@ def check_all_live_entry(player_id: str) -> bool:
     return False
 
 
-def get_live_data_date() -> Optional[datetime.datetime]:
-    """Return the most recent data timestamp available across all leagues.
-
-    Checks live checkpoints first; falls back to the most recent archive file.
-    Returns None if no data is found.
-    """
-    csv_data = get_csv_data()
-    best: Optional[datetime.datetime] = None
-
-    for league in leagues:
-        live_path = Path(csv_data) / "current_tourney" / league
-        try:
-            last_file = max((p for p in live_path.glob("*.csv.gz") if p.stat().st_size > 0), default=None)
-            if last_file is not None:
-                candidate = get_time(last_file)
-                if best is None or candidate > best:
-                    best = candidate
-                continue
-        except Exception:
-            pass
-
-        # Fall back to archive
-        archive_dir = Path(csv_data) / f"{league}_live"
-        try:
-            archives = list_archives(archive_dir)
-            if archives:
-                mtime = datetime.datetime.fromtimestamp(archives[-1].stat().st_mtime, tz=datetime.timezone.utc)
-                if best is None or mtime > best:
-                    best = mtime
-        except Exception:
-            pass
-
-    return best
-
-
 def load_battle_conditions() -> MappingProxyType:
     """
     Load battle conditions from the database into an immutable dictionary.
