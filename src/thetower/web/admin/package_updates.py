@@ -7,11 +7,45 @@ and provides update checking/installation via git repositories.
 
 import asyncio
 import importlib.metadata
+import json
 import re
 import sys
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from packaging.version import parse as parse_version
+
+
+def _get_editable_local_path(package_name: str) -> Optional[str]:
+    """Return the local source path if package_name is installed as editable, else None."""
+    try:
+        candidates = [
+            d for d in importlib.metadata.distributions()
+            if d.name.lower().replace("-", "_") == package_name.lower().replace("-", "_")
+        ]
+        if not candidates:
+            return None
+        # Prefer dist-info entries over egg-info
+        candidates.sort(key=lambda d: (0 if str(getattr(d, "_path", "")).endswith(".dist-info") else 1))
+        dist = candidates[0]
+        # New-style editable (PEP 660): direct_url.json with dir_info.editable=True
+        du_text = dist.read_text("direct_url.json")
+        if du_text:
+            du = json.loads(du_text)
+            if du.get("dir_info", {}).get("editable") and du.get("url", "").startswith("file://"):
+                path_str = urlparse(du["url"]).path
+                if len(path_str) > 2 and path_str[0] == "/" and path_str[2] == ":":
+                    path_str = path_str[1:]  # strip leading / on Windows paths like /C:/...
+                return path_str
+        # Old-style editable: .egg-info in source tree (not site-packages)
+        path_attr = getattr(dist, "_path", None)
+        if path_attr:
+            path_str = str(path_attr)
+            if path_str.endswith(".egg-info") and "site-packages" not in path_str:
+                return str(path_attr.parent)
+    except Exception:
+        pass
+    return None
 
 
 def get_thetower_packages() -> List[Dict[str, any]]:
@@ -235,6 +269,20 @@ async def update_package(package_name: str, target_version: Optional[str] = None
             result["success"] = True
             result["new_version"] = target_version
             result["message"] = f"Successfully updated {package_name} to {target_version}\n\n{stdout.decode()}"
+
+            # If we just updated thetower-bot, restore thetower's editable install if applicable.
+            # thetower-bot declares thetower as a git dependency; pip may overwrite an editable
+            # install with a non-editable one even when --no-deps is used on the outer call.
+            if package_name in ("thetower-bot",):
+                editable_path = _get_editable_local_path("thetower")
+                if editable_path:
+                    restore_cmd = [sys.executable, "-m", "pip", "install", "-e", editable_path, "--quiet"]
+                    restore_proc = await asyncio.create_subprocess_exec(
+                        *restore_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                    )
+                    r_stdout, r_stderr = await restore_proc.communicate()
+                    restore_note = (r_stdout.decode() + r_stderr.decode()).strip() or "done."
+                    result["message"] += f"\n\n=== Restoring editable thetower from {editable_path} ===\n{restore_note}"
         else:
             result["message"] = f"Update failed:\n{stderr.decode()}\n{stdout.decode()}"
 
