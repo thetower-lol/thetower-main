@@ -217,7 +217,7 @@ async def check_package_updates(package_name: str, repo_url: Optional[str] = Non
     return result
 
 
-async def update_package(package_name: str, target_version: Optional[str] = None, repo_url: Optional[str] = None) -> Dict[str, any]:
+async def update_package(package_name: str, target_version: Optional[str] = None, repo_url: Optional[str] = None, with_deps: bool = False) -> Dict[str, any]:
     """
     Update a package to a specific version or latest.
 
@@ -225,6 +225,7 @@ async def update_package(package_name: str, target_version: Optional[str] = None
         package_name: Name of the installed package
         target_version: Specific version tag (e.g., "v0.2.0"), or None for latest
         repo_url: Repository URL (optional, will be read from metadata if not provided)
+        with_deps: If True, also update dependencies (omit --no-deps)
 
     Returns:
         dict with keys: success, message, new_version
@@ -255,11 +256,13 @@ async def update_package(package_name: str, target_version: Optional[str] = None
             target_version = update_check["latest_version"]
 
         # Build pip install command
-        # Format: pip install --upgrade --force-reinstall git+<url>@<tag>
+        # Format: pip install --upgrade --force-reinstall [--no-deps] git+<url>@<tag>
         install_url = f"git+{repo_url}@{target_version}"
 
         # Execute pip install
-        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall", "--no-deps", install_url]  # Don't reinstall dependencies
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--force-reinstall", install_url]
+        if not with_deps:
+            cmd.append("--no-deps")  # Default: don't reinstall dependencies
 
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
@@ -313,7 +316,7 @@ def check_package_updates_sync(package_name: str, repo_url: Optional[str] = None
         return {"current_version": None, "latest_version": None, "update_available": False, "repository_url": None, "error": str(e)}
 
 
-def update_package_sync(package_name: str, target_version: Optional[str] = None, repo_url: Optional[str] = None) -> Dict[str, any]:
+def update_package_sync(package_name: str, target_version: Optional[str] = None, repo_url: Optional[str] = None, with_deps: bool = False) -> Dict[str, any]:
     """
     Synchronous wrapper for update_package.
 
@@ -321,6 +324,7 @@ def update_package_sync(package_name: str, target_version: Optional[str] = None,
         package_name: Name of the installed package
         target_version: Specific version tag or None for latest
         repo_url: Repository URL (optional)
+        with_deps: If True, also update dependencies
 
     Returns:
         dict with update result
@@ -328,7 +332,7 @@ def update_package_sync(package_name: str, target_version: Optional[str] = None,
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(update_package(package_name, target_version, repo_url))
+        result = loop.run_until_complete(update_package(package_name, target_version, repo_url, with_deps))
         loop.close()
         return result
     except Exception as e:

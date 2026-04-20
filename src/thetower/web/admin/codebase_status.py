@@ -669,7 +669,7 @@ def codebase_status_page():
                             st.markdown("")  # Add spacing
 
                             # Action buttons
-                            col_a, col_b = st.columns(2)
+                            col_a, col_b, col_c = st.columns(3)
 
                             with col_a:
                                 if st.button("🔄 Update", key="update_main_package", help="Update main thetower package to latest version"):
@@ -683,6 +683,17 @@ def codebase_status_page():
                                         show_operation_result(success=result["success"], title=title, message=result["message"])
 
                             with col_b:
+                                if st.button("🔄 + deps", key="update_main_package_deps", help="Update main thetower package and all dependencies"):
+                                    with st.spinner("Updating main thetower package with deps..."):
+                                        result = update_package_sync(main_pkg["name"], repo_url=main_pkg["repository_url"], with_deps=True)
+                                        title = (
+                                            f"✅ {main_pkg['name']} updated to {result['new_version']}\n🔄 Please restart services for changes to take effect"
+                                            if result["success"]
+                                            else f"❌ Failed to update {main_pkg['name']}"
+                                        )
+                                        show_operation_result(success=result["success"], title=title, message=result["message"])
+
+                            with col_c:
                                 if st.button("⚡ Force", key="force_main_package", help="Force reinstall main package from main branch"):
                                     with st.spinner("Force installing main thetower package..."):
                                         result = update_package_sync(main_pkg["name"], target_version="main", repo_url=main_pkg["repository_url"])
@@ -773,7 +784,7 @@ def codebase_status_page():
 
                         # Action buttons
                         if pkg["repository_url"]:
-                            col_a, col_b = st.columns(2)
+                            col_a, col_b, col_c = st.columns(3)
 
                             with col_a:
                                 update_key = f"update_{idx}_{pkg['name'].replace('-', '_')}"
@@ -788,6 +799,18 @@ def codebase_status_page():
                                         show_operation_result(success=result["success"], title=title, message=result["message"])
 
                             with col_b:
+                                deps_key = f"updatedeps_{idx}_{pkg['name'].replace('-', '_')}"
+                                if st.button("🔄 + deps", key=deps_key, help=f"Update {pkg['name']} and all dependencies"):
+                                    with st.spinner(f"Updating {pkg['name']} with deps..."):
+                                        result = update_package_sync(pkg["name"], repo_url=pkg["repository_url"], with_deps=True)
+                                        title = (
+                                            f"✅ {pkg['name']} updated to {result['new_version']}"
+                                            if result["success"]
+                                            else f"❌ Failed to update {pkg['name']}"
+                                        )
+                                        show_operation_result(success=result["success"], title=title, message=result["message"])
+
+                            with col_c:
                                 force_key = f"force_{idx}_{pkg['name'].replace('-', '_')}"
                                 if st.button("⚡ Force", key=force_key, help=f"Force reinstall {pkg['name']} (main branch)"):
                                     with st.spinner(f"Force installing {pkg['name']}..."):
