@@ -327,7 +327,7 @@ def render_package_deps(package_name: str, key_prefix: str, show_sync: bool = Fa
             sync_key = f"sync_deps_{key_prefix}"
             if st.button("🔄 Sync", key=sync_key, help="Re-run pip install to sync dependency versions with pinned values"):
                 with st.spinner("Syncing dependencies..."):
-                    sync_result = sync_dependencies(extras=[s for s in dep_sections if s not in ("core", "dev")])
+                    sync_result = sync_dependencies(extras=[s for s in dep_sections if s not in ("core", "dev")], package_name=package_name)
                 show_operation_result(
                     success=sync_result["success"],
                     title="✅ Dependencies synced" if sync_result["success"] else "❌ Sync failed",
@@ -767,7 +767,7 @@ def codebase_status_page():
 
                         # Show info for bot package
                         if pkg["type"] == "bot":
-                            st.info("🔄 Restart discord_bot and bot-webui services after updating")
+                            st.info("🔄 Restart discord_bot and tower-bot_site services after updating")
 
                         st.markdown("")  # Add spacing
 
@@ -798,7 +798,7 @@ def codebase_status_page():
                                         )
                                         show_operation_result(success=result["success"], title=title, message=result["message"])
 
-            render_package_deps(pkg["name"], f"ext_{idx}")
+            render_package_deps(pkg["name"], f"ext_{idx}", show_sync=True)
             st.markdown("---")
 
     # Instructions

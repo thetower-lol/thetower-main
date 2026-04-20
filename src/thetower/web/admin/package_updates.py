@@ -287,16 +287,17 @@ def update_package_sync(package_name: str, target_version: Optional[str] = None,
         return {"success": False, "message": str(e), "new_version": None}
 
 
-def sync_dependencies(extras: Optional[List[str]] = None) -> Dict[str, any]:
+def sync_dependencies(extras: Optional[List[str]] = None, package_name: str = "thetower") -> Dict[str, any]:
     """
-    Re-run pip install for thetower with the given extras to bring installed
+    Re-run pip install for a thetower package with the given extras to bring installed
     dependency versions in line with what is pinned in pyproject.toml.
 
     In editable (dev) installs, installs from the local project path.
     In regular (prod) installs, installs from the repository URL.
 
     Args:
-        extras: List of extra names to include (e.g. ["web", "bot"]).  Defaults to web and bot.
+        extras: List of extra names to include (e.g. ["web", "bot"]).  Defaults to web.
+        package_name: Name of the package to sync (default "thetower").
 
     Returns:
         dict with keys: success, message
@@ -312,7 +313,7 @@ def sync_dependencies(extras: Optional[List[str]] = None) -> Dict[str, any]:
         repo_url: Optional[str] = None
 
         for dist in importlib.metadata.distributions():
-            if dist.name.lower() != "thetower":
+            if dist.name.lower() != package_name.lower():
                 continue
             if hasattr(dist, "_path") and dist._path:
                 path_str = str(dist._path)
@@ -347,10 +348,10 @@ def sync_dependencies(extras: Optional[List[str]] = None) -> Dict[str, any]:
             target = f"{editable_path}[{extras_str}]" if extras_str else editable_path
             cmd = [sys.executable, "-m", "pip", "install", "-e", target]
         elif repo_url:
-            target = f"thetower[{extras_str}] @ git+{repo_url}" if extras_str else f"git+{repo_url}"
+            target = f"{package_name}[{extras_str}] @ git+{repo_url}" if extras_str else f"git+{repo_url}"
             cmd = [sys.executable, "-m", "pip", "install", "--upgrade", target]
         else:
-            result["message"] = "Could not determine install source for thetower."
+            result["message"] = f"Could not determine install source for {package_name}."
             return result
 
         import subprocess

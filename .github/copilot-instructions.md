@@ -7,9 +7,10 @@
 Multi-service platform for "The Tower" game tournament results and community management:
 
 - **Django Backend** (`src/thetower/backend/`): SQLite database with tourney results, player moderation, REST API
-- **Discord Bot** (`src/thetower/bot/`): Multi-guild bot with cog-based architecture for validation, roles, stats, live data
 - **Streamlit Web** (`src/thetower/web/`): Public/admin interfaces for visualizing tournament data and statistics
 - **Background Services**: Automated result fetching, data imports, recalculation workers, live bracket generation
+
+> **Discord Bot**: Moved to the `thetower-bot` repository (`github.com/ndsimpson/thetower-bot`). The bot depends on this package for Django models and tournament data.
 
 ## Copilot Coding Workflow
 
@@ -130,13 +131,6 @@ src/thetower/
 │   │   ├── import/  # CSV import logic
 │   │   └── management/  # Django management commands
 │   └── sus/         # Player moderation/ban system
-├── bot/             # Discord bot
-│   ├── bot.py       # Main bot entry point
-│   ├── basecog.py   # Base class for all cogs
-│   ├── cogs/        # Feature modules (11 cogs: validation, roles, stats, etc.)
-│   │   └── */ui/    # UI components organized by function (core, user, admin, settings)
-│   ├── utils/       # ConfigManager, PermissionManager, TaskTracker, DataManager
-│   └── exceptions.py  # Custom exceptions (UserUnauthorized, ChannelUnauthorized)
 └── web/             # Streamlit interfaces
     ├── pages.py     # Main entry point with page routing
     ├── admin/       # Admin interface (service status, migrations, codebase analysis)
@@ -153,131 +147,7 @@ src/thetower/
 - Always use Django ORM - never raw SQL
 - SQLite timeout set to 60s in settings to handle concurrent access
 
-### Discord Bot Cog Architecture
-
-All bot features extend `BaseCog` (`src/thetower/bot/basecog.py` - 1000+ lines):
-
-- **Per-guild settings**: `self.get_setting(guild_id, key)`, `self.set_setting(guild_id, key, value)`
-- **Data persistence**: `self.load_data()`, `self.save_data_if_modified()` with `DataManager`
-- **Task tracking**: `async with self.task_tracker.task_context("task_name"):` for background tasks
-- **Ready state**: Wait for `await self.ready.wait()` before accessing guild data
-- **Settings UI**: Each cog defines `settings_view_class` for `CogManager` to integrate into global `/settings` command
-- **Permission context**: `PermissionContext` dataclass with `.has_any_group()`, `.has_all_groups()`, `.has_django_group()`, `.has_discord_role()`
-- **Django permissions**: `self.get_user_django_groups(user)` for centralized Django group checking
-
-Example cog structure (see [../docs/cog_design.md](../docs/cog_design.md) for detailed architecture guide):
-
-```python
-class MyCog(BaseCog, name="My Feature"):
-    settings_view_class = MySettingsView  # For global settings integration
-
-    # Define default settings as class attributes (automatically loaded by BaseCog)
-    guild_settings = {"enabled": True, "channel_id": None}
-    global_settings = {"admin_groups": ["Moderators"]}
-
-    def __init__(self, bot):
-        super().__init__(bot)
-        # BaseCog automatically registers cog on bot and handles initialization
-
-    async def _initialize_cog_specific(self, tracker) -> None:
-        """Initialize cog-specific functionality."""
-        # Load cog-specific data
-        tracker.update_status("Loading data")
-        await self.load_data()
-
-    @app_commands.command(name="mycommand")
-    async def my_slash(self, interaction: discord.Interaction):
-        # Slash command implementation - await self.ready.wait() if needed
-```
-
-**Current cogs** (10 total):
-
-- `battle_conditions`: Battle condition predictor (towerbcs integration)
-- `django_admin`: Web admin interface access via Discord
-- `manage_sus`: Player moderation and ban management
-- `player_lookup`: Player stats and history lookup
-- `tourney_live_data`: Live tournament data fetching and display
-- `tourney_roles`: Tournament role assignment automation
-- `tourney_role_colors`: Role color management
-- `tourney_stats`: Tournament statistics and analysis
-- `unified_advertise`: Cross-guild advertisement system
-- `validation`: Player verification system
-
-### External Cog Plugin System
-
-**CogManager** (`src/thetower/bot/utils/cogmanager.py`) supports loading cogs from multiple sources via Python entry points:
-
-- **Built-in cogs**: `src/thetower/bot/cogs/` (always available)
-- **External cog packages**: Auto-discovered via `importlib.metadata.entry_points()` group `"thetower.bot.cogs"`
-- **Discovery**: Happens at bot startup, can be refreshed via `/settings` → Bot Settings → Cog Management → "Refresh Cog Sources"
-- **No hardcoding needed**: External packages self-register by declaring entry points in their `pyproject.toml`
-
-**Creating external cog packages** (follow TourneyReminderCog / VerifyCog as the canonical examples):
-
-1. Create separate repository with **flat** src layout — the cog package IS the root, no nested `cogs/` subdirectory:
-
-    ```
-    my-cog-repo/
-    ├── pyproject.toml      # setuptools-scm versioning, thetower git dep, entry point
-    ├── setup.py            # dynamic URL injection at build time
-    ├── .flake8             # mirrors thetower.lol flake8 settings
-    ├── .gitattributes      # LF normalization
-    └── src/
-        └── my_package/
-            ├── __init__.py     # contains async setup(bot) function
-            ├── _version.py     # generated by setuptools-scm, do not edit
-            ├── cog.py
-            └── ui/
-                ├── __init__.py
-                ├── core.py
-                └── settings.py
-    ```
-
-2. Declare entry point in `pyproject.toml` — point at the **top-level package**, not a sub-module:
-
-    ```toml
-    [project]
-    name = "thetower-my-cog"
-    dynamic = ["version", "urls"]
-    dependencies = ["thetower @ git+https://github.com/ndsimpson/thetower.lol.git"]
-
-    [project.entry-points."thetower.bot.cogs"]
-    my_cog_name = "my_package"   # points at src/my_package/, NOT my_package.cogs
-
-    [build-system]
-    requires = ["setuptools>=61.0", "wheel", "setuptools-scm"]
-    build-backend = "setuptools.build_meta"
-
-    [tool.setuptools_scm]
-    write_to = "src/my_package/_version.py"
-    ```
-
-3. The `__init__.py` exposes `setup()` directly — CogManager detects it and treats the package as a single-cog source:
-
-    ```python
-    # src/my_package/__init__.py
-    async def setup(bot):
-        from .cog import MyCog
-        await bot.add_cog(MyCog(bot))
-    ```
-
-4. External cogs inherit `BaseCog` normally:
-
-    ```python
-    # src/my_package/cog.py
-    from thetower.bot.basecog import BaseCog
-
-    class MyCog(BaseCog, name="My Feature"):
-        # Full BaseCog functionality available
-    ```
-
-5. Install and discover:
-    ```powershell
-    pip install git+https://github.com/yourname/my-cog-repo.git
-    # In Discord: /settings → Bot Settings → Cog Management → Click "Refresh Cog Sources"
-    ```
-
-**Benefits**: Separate repositories for sensitive/proprietary cogs, optional features, or experimental code without cluttering main repo.
+> **Discord Bot**: Lives in `thetower-bot` repo and imports models from this package. Do not add bot-specific code here.
 
 ## Development Workflows
 
@@ -292,12 +162,7 @@ pip install -e .
 
 # Optional dependency groups
 pip install -e ".[dev]"   # pytest, black, isort, flake8
-pip install -e ".[bot]"   # Discord bot only
 pip install -e ".[web]"   # Streamlit only
-
-# Optional: Install battle conditions predictor (separate package, requires repo access)
-pip install -e ../towerbcs  # If available in workspace
-# OR: pip install git+<towerbcs-repo-url>
 
 # Centralized bytecode caching (recommended - keeps __pycache__ out of git)
 python scripts\manage_bytecode.py setup
@@ -315,9 +180,6 @@ streamlit run src\thetower\web\pages.py
 cd src\thetower\backend
 python manage.py collectstatic  # Collect static files first
 $env:DEBUG="true"; python manage.py runserver
-
-# Discord bot (requires environment variables)
-$env:DISCORD_TOKEN="..."; $env:DISCORD_APPLICATION_ID="..."; python -m thetower.bot.bot
 
 # Background services (run as modules)
 python -m thetower.backend.tourney_results.import.import_results
@@ -351,16 +213,15 @@ thetower-init-streamlit
 Service files in use:
 
 - Web: `tower-public_site.service`, `tower-admin_site.service`, `tower-hidden_site.service`
-- Bot: `discord_bot.service` (unified bot, replaces old fish_bot/validation_bot)
 - Data: `import_results.service`, `get_results.service`, `get_live_results.service`
 - Workers: `tower-recalc_worker.service`, `generate_live_bracket_cache.service`
+
+> **Bot services** (`discord_bot.service`, `tower-bot_site.service`) are managed from the `thetower-bot` repository.
 
 **Environment variables** in service files:
 
 - `DJANGO_SETTINGS_MODULE=thetower.backend.towerdb.settings`
-- `DISCORD_TOKEN`, `DISCORD_APPLICATION_ID`, `DISCORD_BOT_CONFIG=/data`
 - `HIDDEN_FEATURES=true` (enables admin features)
-- `BASE_URL=hidden.thetower.lol` (for bot URL generation)
 - `ANTHROPIC_API_KEY` (for AI features)
 
 **Paths**:
@@ -368,7 +229,6 @@ Service files in use:
 - Database: `/data/tower.sqlite3`
 - Uploads: `/data/uploads/`
 - Static files: `/data/static/`
-- Bot config: `/data/` (guild configs, data persistence)
 - Streamlit working directory: `/opt/thetower/` (extracted from installed package via `thetower-init-streamlit`)
 
 **Deployment**: Code deployments are automated through the web admin interface (hidden.thetower.lol) - package updates and service restarts are handled through the UI (see [src/thetower/web/admin/](../src/thetower/web/admin/) for deployment tools).
@@ -389,9 +249,9 @@ Service files in use:
 ### Package Management
 
 - **Use `pyproject.toml` exclusively** - no `requirements.txt`
-- Dependencies: `[project.dependencies]` for core, `[project.optional-dependencies]` for dev/bot/web
+- Dependencies: `[project.dependencies]` for core, `[project.optional-dependencies]` for dev/web
 - Pin exact versions for reproducibility (e.g., `Django==5.2.4`)
-- Entry points: `[project.scripts]` defines `thetower-web` and `thetower-bot` commands
+- Entry points: `[project.scripts]` defines `thetower-web` command
 - Update dependencies: Edit `pyproject.toml`, then `pip install -e .`
 
 ### Django Conventions
@@ -402,51 +262,28 @@ Service files in use:
 - **Admin**: Customize in `admin.py` for each app, register models with sensible list_display
 - **Database**: SQLite with 60s timeout, shared across all services via `/data/tower.sqlite3`
 
-### Discord Bot Patterns
-
-- **Slash commands only**: Use `@app_commands.command()`, no text commands (`command_prefix=[]` in bot init)
-- **Permission checks**: Use `PermissionManager.check_command_permissions()`, raise `UserUnauthorized`/`ChannelUnauthorized`
-- **Guild isolation**: All cog data keyed by `guild_id`, settings per-guild via `BaseCog.get_setting()`
-- **UI organization**: Discord UI components in `cogs/*/ui/` directories (core, user, admin, settings subdirs)
-- **Background tasks**: Wrap in `async with self.task_tracker.task_context("name"):` for monitoring
-- **Ready state**: Always `await self.ready.wait()` before accessing guild data in cog methods
-- **Exception handling**: Cogs raise custom exceptions, bot's global error handler formats user-friendly messages
-- **Embed attachment images**: When a message is sent with a file attachment and the embed references it via `attachment://filename`, editing that message later (without re-uploading the file) causes Discord to render the image **twice** — once inside the embed and once as a standalone attachment preview. Before calling `message.edit(embed=emb)`, replace the `attachment://` URL with the real CDN URL: use `_resolve_attachment_image(emb, msg)` from `validation/ui/core.py`, or inline: `if emb.image and emb.image.url.startswith("attachment://") and msg.attachments: emb.set_image(url=msg.attachments[0].url)`
-
 ### Logging
 
 - Module-level: `logger = logging.getLogger(__name__)` consistently
-- Bot cogs: Use `self.logger` (inherited from BaseCog) or `self._logger` internally
 - Format: `"%(asctime)s UTC [%(name)s] %(levelname)s: %(message)s"` with UTC timestamps
 - Control: `LOG_LEVEL` environment variable (INFO/DEBUG/WARNING)
-- Discord logging: Separate logger with `propagate=False` to avoid duplicates
 
 ### Data Files & Paths
 
 #### Production (Linux)
 
-- **Data directory**: `/data/` - database, uploads, static, bot configs
+- **Data directory**: `/data/` - database, uploads, static
 - **Database**: `/data/tower.sqlite3`
 - **Uploads**: `/data/uploads/` (CSV files for import)
 - **Static**: `/data/static/` (Django collectstatic output)
-- **Bot config**: `/data/` (DataManager saves guild-specific JSON files)
 - **Bytecode cache**: `.cache/python/` (via `scripts/manage_bytecode.py setup`) - keeps `__pycache__` out of git
 
 #### Local Development (Windows)
 
 - **Django data directory**: `c:\data\django\` — maps to `/data/` on production
-- **Bot config**: `c:\data\django\` (guild-specific JSON files)
 - **Results cache**: `c:\data\results_cache\`
-- **Discord data**: `c:\data\discord\`
 
 ## Critical Integration Points
-
-### Django ↔ Discord Bot
-
-- Bot imports Django models directly after `django.setup()`
-- Example: `from thetower.backend.sus.models import KnownPlayer`
-- Access tourney results, roles, player data via Django ORM
-- Bot modifies database (e.g., verification, role assignments)
 
 ### Streamlit ↔ Django
 
@@ -462,11 +299,8 @@ Service files in use:
 
 ## Key Files Reference
 
-- `src/thetower/bot/basecog.py`: Base class for all bot cogs
-- `src/thetower/bot/utils/`: ConfigManager, PermissionManager, TaskTracker, DataManager
 - `src/thetower/backend/tourney_results/models.py`: Core database schema
 - `src/thetower/backend/towerdb/settings.py`: Django configuration
-- `../docs/cog_design.md`: Detailed cog architecture guide (read for complex bot features)
 - `scripts/manage_bytecode.py`: Centralized bytecode cache management (run `setup` first)
 - `pyproject.toml`: All dependencies, build config, entry points, and tool settings (black, pytest, isort, flake8)
 - `src/thetower/scripts/setup_streamlit.py`: Script to extract Streamlit pages for production deployment

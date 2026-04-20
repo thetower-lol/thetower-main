@@ -317,7 +317,7 @@ def service_status_page():
         "bot-webui": {
             "name": "Bot Web UI",
             "description": "Discord bot web interface (bot.thetower.lol)",
-            "service": "bot-webui.service",
+            "service": "tower-bot_site.service",
             "restart_allowed": True,
         },
         "get_results": {
