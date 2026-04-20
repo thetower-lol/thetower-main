@@ -81,14 +81,13 @@ if days_until > BC_DAYS_EARLY:
 </body></html>""",
         height=230,
     )
-    st.stop()
+else:
+    st.markdown(f"## Tournament {'is today!' if days_until == 0 else f'is on {tourney_date}'}")
 
-st.markdown(f"## Tournament {'is today!' if days_until == 0 else f'is on {tourney_date}'}")
-
-st.dataframe(
-    pd.DataFrame.from_dict({league: predict_future_tournament(tourney_id, league) for league in leagues}, orient="index").transpose().fillna(""),
-    width="stretch",
-)
+    st.dataframe(
+        pd.DataFrame.from_dict({league: predict_future_tournament(tourney_id, league) for league in leagues}, orient="index").transpose().fillna(""),
+        width="stretch",
+    )
 
 # Log execution time at the end of the file
 t2_stop = perf_counter()
