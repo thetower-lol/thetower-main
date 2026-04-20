@@ -314,6 +314,12 @@ def service_status_page():
             "service": "discord_bot.service",
             "restart_allowed": True,
         },
+        "bot-webui": {
+            "name": "Bot Web UI",
+            "description": "Discord bot web interface (bot.thetower.lol)",
+            "service": "bot-webui.service",
+            "restart_allowed": True,
+        },
         "get_results": {
             "name": "Get Results",
             "description": "Service that fetches tournament data (start-only)",

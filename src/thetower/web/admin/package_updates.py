@@ -42,6 +42,9 @@ def get_thetower_packages() -> List[Dict[str, any]]:
                     elif "Private :: thetower.cog" in classifier:
                         package_type = "cog"
                         break
+                    elif "Private :: thetower.bot" in classifier:
+                        package_type = "bot"
+                        break
                     elif "Private :: thetower.module" in classifier:
                         package_type = "module"
                         break
@@ -301,7 +304,7 @@ def sync_dependencies(extras: Optional[List[str]] = None) -> Dict[str, any]:
     result: Dict[str, any] = {"success": False, "message": ""}
 
     if extras is None:
-        extras = ["web", "bot"]
+        extras = ["web"]
 
     try:
         # Determine install source — editable vs regular

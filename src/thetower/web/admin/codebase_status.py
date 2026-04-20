@@ -721,7 +721,7 @@ def codebase_status_page():
                         st.markdown("**Package Info**")
 
                         # Package type emoji
-                        type_emoji = {"cog": "🔌", "module": "📦", "main": "🏠", "unknown": "❓"}.get(pkg["type"], "❓")
+                        type_emoji = {"cog": "🔌", "module": "📦", "main": "🏠", "bot": "🤖", "unknown": "❓"}.get(pkg["type"], "❓")
 
                         # Install type badge
                         install_badge = "📝 Editable" if pkg.get("install_type") == "editable" else "📦 Regular"
@@ -764,6 +764,10 @@ def codebase_status_page():
                         # Show info for cogs
                         if pkg["type"] == "cog":
                             st.info("🤖 Cog reload or bot restart may be needed after updating")
+
+                        # Show info for bot package
+                        if pkg["type"] == "bot":
+                            st.info("🔄 Restart discord_bot and bot-webui services after updating")
 
                         st.markdown("")  # Add spacing
 
@@ -841,6 +845,7 @@ def codebase_status_page():
         **Package Types:**
         - 🔌 **Cog**: External Discord bot cog (`Private::thetower.cog`)
         - 📦 **Module**: External Python module (`Private::thetower.module`)
+        - 🤖 **Bot**: Discord bot package (`Private::thetower.bot`) — updated independently from main
         - 🏠 **Main**: Main thetower application (`Private::thetower.main`)
 
         **Package Update Options:**
