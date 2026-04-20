@@ -29,6 +29,12 @@ def bracket_analysis():
     include_shun = include_shun_enabled_for("live_bracket_analysis")
     df, _, ldf, _, _ = get_processed_data(league, include_shun)
 
+    # Sidebar option to include single-player brackets
+    show_singles = st.sidebar.checkbox("Show full fidelity", value=False)
+    if not show_singles:
+        bracket_sizes = ldf.groupby("bracket")["wave"].transform("count")
+        ldf = ldf[bracket_sizes > 1]
+
     # Get bracket statistics
     bracket_stats = get_bracket_stats(ldf)
     st.write(f"Total closed brackets until now: {bracket_stats['total_brackets']}")

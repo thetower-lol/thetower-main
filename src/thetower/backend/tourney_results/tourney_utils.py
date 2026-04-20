@@ -476,7 +476,16 @@ def check_live_entry(league: str, player_id: str, fast: bool = False) -> bool:
                 if last_file is None:
                     raise ValueError
             except ValueError:
-                raise ValueError("No current data, wait until the tourney day")
+                # No live checkpoints — fall back to the most recent archive file
+                archive_dir = Path(csv_data) / f"{league}_live"
+                archives = list_archives(archive_dir)
+                if not archives:
+                    raise ValueError("No current data, wait until the tourney day")
+                df = read_archive(archives[-1])
+                if df.empty or player_id not in df["player_id"].values:
+                    return False
+                excluded_ids = get_sus_ids() | get_banned_ids()
+                return player_id not in excluded_ids
             t_glob = perf_counter()
             last_date = get_time(last_file)
             try:
@@ -544,6 +553,41 @@ def check_all_live_entry(player_id: str) -> bool:
     t1_stop = perf_counter()
     logging.info(f"check_all_live_entry({player_id}): not found, total={1000*(t1_stop-t1_start):.0f}ms")
     return False
+
+
+def get_live_data_date() -> Optional[datetime.datetime]:
+    """Return the most recent data timestamp available across all leagues.
+
+    Checks live checkpoints first; falls back to the most recent archive file.
+    Returns None if no data is found.
+    """
+    csv_data = get_csv_data()
+    best: Optional[datetime.datetime] = None
+
+    for league in leagues:
+        live_path = Path(csv_data) / "current_tourney" / league
+        try:
+            last_file = max((p for p in live_path.glob("*.csv.gz") if p.stat().st_size > 0), default=None)
+            if last_file is not None:
+                candidate = get_time(last_file)
+                if best is None or candidate > best:
+                    best = candidate
+                continue
+        except Exception:
+            pass
+
+        # Fall back to archive
+        archive_dir = Path(csv_data) / f"{league}_live"
+        try:
+            archives = list_archives(archive_dir)
+            if archives:
+                mtime = datetime.datetime.fromtimestamp(archives[-1].stat().st_mtime, tz=datetime.timezone.utc)
+                if best is None or mtime > best:
+                    best = mtime
+        except Exception:
+            pass
+
+    return best
 
 
 def load_battle_conditions() -> MappingProxyType:
