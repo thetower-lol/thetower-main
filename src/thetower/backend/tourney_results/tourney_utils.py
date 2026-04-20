@@ -404,6 +404,11 @@ def get_latest_live_df(league: str, shun: bool = False) -> pd.DataFrame:
         df = reconstruct_at(archive_df, at)
         if df.empty:
             raise ValueError("No current data, wait until the tourney day")
+        # Normalize all rows to the same datetime so global/bracket ranking works correctly.
+        # reconstruct_at gives each player their last-updated snapshot_time; callers that
+        # filter to latest_datetime == df.datetime.max() would miss players whose wave
+        # didn't change in the final snapshot, producing empty global_row and no stats.
+        df["datetime"] = at
         lookup = get_player_id_lookup()
         df["real_name"] = [lookup.get(pid, name) for pid, name in zip(df.player_id, df.name)]
         df["real_name"] = df["real_name"].astype(str)
