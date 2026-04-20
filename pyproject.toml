@@ -28,10 +28,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-bot = [
-    "discord.py==2.7.0",
-]
-
 web = [
     "streamlit==1.54.0",
     "streamlit-extras==0.6.0",
@@ -67,7 +63,6 @@ Issues = "https://github.com/ndsimpson/thetower.lol/issues"
 
 [project.scripts]
 thetower-web = "thetower.web.pages:main"
-thetower-bot = "thetower.bot.bot:main"
 thetower-init-streamlit = "thetower.scripts.setup_streamlit:main"
 thetower-backup = "thetower.backend.backup.service:main"
 
