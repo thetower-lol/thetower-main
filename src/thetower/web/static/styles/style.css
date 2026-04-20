@@ -1,14 +1,14 @@
 :root {
     --secondary-background: #262730;
-    --active-element: #FF4B4B;
-    --text: #FAFAFA;
+    --active-element: #ff4b4b;
+    --text: #fafafa;
 }
 
 a {
     color: var(--text) !important;
     text-decoration: underline;
     text-decoration-style: dotted;
-    text-decoration-color: #CCCCCC;
+    text-decoration-color: #cccccc;
 }
 a:hover {
     text-decoration: underline;
@@ -37,7 +37,8 @@ tr {
     border: 0 !important;
     height: 45px;
 }
-th, td {
+th,
+td {
     border: 0 !important;
 }
 
