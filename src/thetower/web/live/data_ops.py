@@ -12,6 +12,7 @@ from thetower.backend.env_config import get_csv_data
 from thetower.backend.tourney_results.archive_utils import (
     build_tourney_archive,
     group_snapshots_by_tourney,
+    list_archives,
     list_snapshots,
     read_archive,
     reconstruct_all_snapshots,
@@ -690,9 +691,16 @@ def get_data_refresh_timestamp(league: str) -> datetime.datetime | None:
     """
     try:
         snaps = list_snapshots(_get_snapshot_path(league))
-        if not snaps:
-            return None
-        return get_time(snaps[-1])
+        if snaps:
+            return get_time(snaps[-1])
+        # Fall back to the latest timestamp in the most recent archive file.
+        archives = list_archives(_get_archive_path(league))
+        if archives:
+            df = read_archive(archives[-1])
+            if not df.empty:
+                ts = df["snapshot_time"].max()
+                return ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
+        return None
     except Exception as exc:
         logging.warning(f"Failed to get data refresh timestamp for {league}: {exc}")
         return None
@@ -768,6 +776,18 @@ def _load_archive_df(league: str) -> tuple[pd.DataFrame, list]:
 
     snaps = list_snapshots(snap_path)
     if not snaps:
+        # No staging snapshots present (operator may have cleaned them up).
+        # Attempt to fall back to the most recent pre-built archive file.
+        try:
+            archives = list_archives(archive_dir)
+            if archives:
+                arch_file = archives[-1]
+                logger.info(f"No staging snapshots; falling back to archive {arch_file.name}")
+                df = read_archive(arch_file)
+                expected_timestamps = list(df["snapshot_time"].unique()) if not df.empty else []
+                return df, expected_timestamps
+        except Exception:
+            logger.exception("Failed to read fallback archive; no current data available")
         raise ValueError("No current data, wait until the tourney day")
 
     groups = group_snapshots_by_tourney(snaps)

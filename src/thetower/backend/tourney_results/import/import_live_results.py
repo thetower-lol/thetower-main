@@ -142,7 +142,11 @@ def process_league(league: str, in_window: bool) -> bool:
     archive_updated = False
 
     for i, group in enumerate(groups):
-        is_completed = not in_window or (i < len(groups) - 1)
+        # Only clean up a tourney group once a newer group exists (i.e. the next
+        # tourney has started and produced its own snapshots).  This keeps the
+        # most-recent tourney's snapshots in place until the next one begins,
+        # so the live-results page can still serve data between tourneys.
+        is_completed = i < len(groups) - 1
 
         tourney_date = get_time(group[0]).strftime("%Y-%m-%d")
         archive_path = live_dir / f"{tourney_date}_archive.csv.gz"
