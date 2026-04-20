@@ -3,18 +3,22 @@
 Uses VACUUM INTO to produce a clean, WAL-safe snapshot of the live database,
 compresses it with gzip, saves it locally as a pending file, then uploads to
 the appropriate generational prefixes.  If the upload fails, the pending file
-is kept at DJANGO_DATA/db_backup_pending/YYYY-MM-DD.db.gz and retried hourly
-by upload_pending_db_backups() (called from the backup service).
+is kept locally and retried hourly by upload_pending_db_backups().
 
-R2 key layout:
-    db/daily/YYYY-MM-DD.db.gz       — every run
-    db/weekly/YYYY-Www.db.gz        — Sundays only
-    db/monthly/YYYY-MM.db.gz        — first day of month only
+R2 key layout (r2_prefix="db" for all databases):
+    db/daily/django_YYYY-MM-DD.db.gz        — tower.sqlite3, every run
+    db/daily/bot-config_YYYY-MM-DD.db.gz    — bot-config.sqlite3, every run
+    db/weekly/django_YYYY-MM-DD.db.gz       — Sundays only
+    db/monthly/django_YYYY-MM-DD.db.gz      — first day of month only
+
+Local pending files (in DJANGO_DATA/db_backup_pending/):
+    django_YYYY-MM-DD.db.gz          — tower.sqlite3
+    bot-config_YYYY-MM-DD.db.gz      — bot-config.sqlite3
 
 Lifecycle expiry (configured in Cloudflare dashboard, not here):
     db/daily/   → 9 days
-    db/weekly/  → 36 days  (lock: 35 days)
-    db/monthly/ → 13 months (lock: 13 months)
+    db/weekly/  → 36 days
+    db/monthly/ → 13 months
 """
 
 import gzip
@@ -44,13 +48,14 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _r2_keys_for_date(dt: datetime) -> list[str]:
+def _r2_keys_for_date(dt: datetime, r2_prefix: str = "db", filename_prefix: str | None = None) -> list[str]:
     """Return all R2 keys this backup should be uploaded to based on the UTC date."""
-    keys = [f"db/daily/{dt.strftime('%Y-%m-%d')}.db.gz"]
+    stem = f"{filename_prefix}_{dt.strftime('%Y-%m-%d')}" if filename_prefix else dt.strftime("%Y-%m-%d")
+    keys = [f"{r2_prefix}/daily/{stem}.db.gz"]
     if dt.weekday() == 6:  # Sunday
-        keys.append(f"db/weekly/{dt.strftime('%Y-W%W')}.db.gz")
+        keys.append(f"{r2_prefix}/weekly/{stem}.db.gz")
     if dt.day == 1:  # First of month
-        keys.append(f"db/monthly/{dt.strftime('%Y-%m')}.db.gz")
+        keys.append(f"{r2_prefix}/monthly/{stem}.db.gz")
     return keys
 
 
@@ -64,20 +69,23 @@ def _object_exists(client, bucket: str, key: str) -> bool:
         raise
 
 
-def _get_pending_dir() -> Path:
+def _get_pending_dir(override: Path | None = None) -> Path:
+    if override is not None:
+        return override
     return get_django_data() / "db_backup_pending"
 
 
-def _pending_path_for_date(dt: datetime) -> Path:
-    return _get_pending_dir() / f"{dt.strftime('%Y-%m-%d')}.db.gz"
+def _pending_path_for_date(dt: datetime, pending_dir: Path | None = None, filename_prefix: str | None = None) -> Path:
+    stem = f"{filename_prefix}_{dt.strftime('%Y-%m-%d')}" if filename_prefix else dt.strftime("%Y-%m-%d")
+    return _get_pending_dir(pending_dir) / f"{stem}.db.gz"
 
 
-def _upload_from_path(gz_path: Path, dt: datetime, client, bucket: str) -> dict:
+def _upload_from_path(gz_path: Path, dt: datetime, client, bucket: str, r2_prefix: str = "db", filename_prefix: str | None = None) -> dict:
     """Upload a compressed DB file to all applicable R2 generational keys for dt.
 
     Returns stats: keys_uploaded, keys_skipped, compressed_size_bytes, errors.
     """
-    r2_keys = _r2_keys_for_date(dt)
+    r2_keys = _r2_keys_for_date(dt, r2_prefix, filename_prefix)
     stats = {"keys_uploaded": 0, "keys_skipped": 0, "compressed_size_bytes": 0, "errors": 0}
 
     compressed_size = gz_path.stat().st_size
@@ -123,30 +131,35 @@ def _upload_from_path(gz_path: Path, dt: datetime, client, bucket: str) -> dict:
     return stats
 
 
-def upload_pending_db_backups() -> dict:
+def upload_pending_db_backups(r2_prefix: str = "db", pending_dir: Path | None = None, filename_prefix: str | None = None) -> dict:
     """Scan for locally-saved DB backups that failed to upload and retry them.
 
     Returns overall stats: checked, uploaded, skipped, deleted, errors.
     """
-    pending_dir = _get_pending_dir()
+    resolved_pending_dir = _get_pending_dir(pending_dir)
     overall: dict = {"checked": 0, "uploaded": 0, "skipped": 0, "deleted": 0, "errors": 0}
 
-    if not pending_dir.exists():
+    if not resolved_pending_dir.exists():
         return overall
 
     client = get_r2_client()
     bucket = get_r2_bucket()
 
-    for gz_path in sorted(pending_dir.glob("*.db.gz")):
+    glob_pattern = f"{filename_prefix}_*.db.gz" if filename_prefix else "*.db.gz"
+    date_suffix = ".db.gz"
+    date_prefix_strip = f"{filename_prefix}_" if filename_prefix else ""
+
+    for gz_path in sorted(resolved_pending_dir.glob(glob_pattern)):
         overall["checked"] += 1
         try:
-            dt = datetime.strptime(gz_path.name.replace(".db.gz", ""), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            date_str = gz_path.name.removeprefix(date_prefix_strip).removesuffix(date_suffix)
+            dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         except ValueError:
             logger.warning(f"Unrecognised pending DB backup filename: {gz_path.name} — skipping")
             continue
 
         logger.info(f"Retrying pending DB backup: {gz_path.name}")
-        stats = _upload_from_path(gz_path, dt, client, bucket)
+        stats = _upload_from_path(gz_path, dt, client, bucket, r2_prefix, filename_prefix)
         overall["uploaded"] += stats["keys_uploaded"]
         overall["skipped"] += stats["keys_skipped"]
         overall["errors"] += stats["errors"]
@@ -158,16 +171,29 @@ def upload_pending_db_backups() -> dict:
         else:
             logger.warning(f"Pending DB backup {gz_path.name} still has errors — will retry next hour")
 
-    log_run_summary("db_pending", overall)
+    log_run_summary(f"{r2_prefix}_pending", overall)
     return overall
 
 
-def backup_database() -> dict:
+def backup_database(
+    db_path: Path | None = None,
+    r2_prefix: str = "db",
+    pending_dir: Path | None = None,
+    filename_prefix: str | None = None,
+) -> dict:
     """Create a compressed SQLite snapshot, save it locally, then upload to R2.
 
-    The compressed file is persisted to DJANGO_DATA/db_backup_pending/ before
-    the upload attempt.  If the upload fails, the file stays there and
-    upload_pending_db_backups() will retry it hourly.
+    The compressed file is persisted locally before the upload attempt.  If the
+    upload fails, the file stays there and upload_pending_db_backups() will retry
+    it hourly.
+
+    Args:
+        db_path: Path to the SQLite file.  Defaults to DJANGO_DATA/tower.sqlite3.
+        r2_prefix: R2 key prefix, e.g. "db" or "bot-db".  Determines the key layout.
+        pending_dir: Directory to store locally-saved pending uploads.  Defaults to
+            DJANGO_DATA/db_backup_pending/.
+        filename_prefix: Optional prefix for the pending file name, e.g. "bot-config".
+            Produces ``bot-config_YYYY-MM-DD.db.gz``.  None → ``YYYY-MM-DD.db.gz``.
 
     Returns a stats dict: keys_uploaded, keys_skipped, compressed_size_bytes, errors.
     """
@@ -176,38 +202,40 @@ def backup_database() -> dict:
     bucket = get_r2_bucket()
     stats = {"keys_uploaded": 0, "keys_skipped": 0, "compressed_size_bytes": 0, "errors": 0}
 
-    db_path = get_django_data() / "tower.sqlite3"
-    pending_dir = _get_pending_dir()
-    pending_path = _pending_path_for_date(now)
+    if db_path is None:
+        db_path = get_django_data() / "tower.sqlite3"
+    resolved_pending_dir = _get_pending_dir(pending_dir)
+    pending_path = _pending_path_for_date(now, resolved_pending_dir, filename_prefix)
 
     # If a pending file already exists for today, upload it directly (avoids re-vacuuming)
     if pending_path.exists():
         logger.info(f"Found existing pending DB backup: {pending_path.name} — attempting upload")
-        upload_stats = _upload_from_path(pending_path, now, client, bucket)
+        upload_stats = _upload_from_path(pending_path, now, client, bucket, r2_prefix, filename_prefix)
         stats.update(upload_stats)
         if upload_stats["errors"] == 0:
             pending_path.unlink(missing_ok=True)
             logger.info("Pending DB backup successfully uploaded, removed local file")
         else:
             logger.warning(f"Upload had errors — keeping {pending_path.name} for retry")
-        log_run_summary("db", stats)
+        log_run_summary(r2_prefix, stats)
         return stats
 
     # Idempotent: if today's daily already exists in R2, nothing to do
-    daily_key = f"db/daily/{now.strftime('%Y-%m-%d')}.db.gz"
+    daily_stem = f"{filename_prefix}_{now.strftime('%Y-%m-%d')}" if filename_prefix else now.strftime("%Y-%m-%d")
+    daily_key = f"{r2_prefix}/daily/{daily_stem}.db.gz"
     if _object_exists(client, bucket, daily_key):
         logger.info(f"Daily backup already present in R2: {daily_key} — skipping")
-        stats["keys_skipped"] += len(_r2_keys_for_date(now))
-        log_run_summary("db", stats)
+        stats["keys_skipped"] += len(_r2_keys_for_date(now, r2_prefix, filename_prefix))
+        log_run_summary(r2_prefix, stats)
         return stats
 
     if not db_path.exists():
         logger.error(f"Database not found at {db_path}")
         stats["errors"] += 1
-        log_run_summary("db", stats)
+        log_run_summary(r2_prefix, stats)
         return stats
 
-    pending_dir.mkdir(parents=True, exist_ok=True)
+    resolved_pending_dir.mkdir(parents=True, exist_ok=True)
     # Use a temp dir on the same partition as the database to avoid filling tmpfs
     tmp_dir = Path(tempfile.mkdtemp(prefix="tower_dbbackup_", dir=db_path.parent))
     try:
@@ -233,14 +261,14 @@ def backup_database() -> dict:
     except Exception:
         logger.exception("Failed to create DB backup")
         stats["errors"] += 1
-        log_run_summary("db", stats)
+        log_run_summary(r2_prefix, stats)
         return stats
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     # Step 4: upload from the now-persistent pending location
     stats["compressed_size_bytes"] = pending_path.stat().st_size
-    upload_stats = _upload_from_path(pending_path, now, client, bucket)
+    upload_stats = _upload_from_path(pending_path, now, client, bucket, r2_prefix, filename_prefix)
     for k in ("keys_uploaded", "keys_skipped", "errors"):
         stats[k] += upload_stats[k]
 
@@ -250,5 +278,5 @@ def backup_database() -> dict:
     else:
         logger.warning(f"Upload had errors — keeping {pending_path.name} for hourly retry")
 
-    log_run_summary("db", stats)
+    log_run_summary(r2_prefix, stats)
     return stats

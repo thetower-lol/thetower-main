@@ -47,6 +47,17 @@ def get_django_data() -> Path:
     return Path(django_data)
 
 
+def get_bot_config_data() -> Path | None:
+    """
+    Get the DISCORD_BOT_CONFIG environment variable as a Path.
+
+    Returns:
+        Path to the bot config directory, or None if not set.
+    """
+    val = os.getenv("DISCORD_BOT_CONFIG")
+    return Path(val) if val else None
+
+
 def get_r2_config() -> dict:
     """Get and validate all required Cloudflare R2 environment variables.
 
