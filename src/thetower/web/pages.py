@@ -51,6 +51,7 @@ if st.session_state.get("options") is None:
 
 home_info_pages = [
     _page("historical/overview.py", title="Overview", icon="🏠", url_path="overview"),
+    _page("discord_bot.py", title="Discord Bot", icon="🆕", url_path="discordbot"),
     _page("historical/about.py", title="About", icon="👴", url_path="about"),
 ]
 
