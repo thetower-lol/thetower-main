@@ -1,12 +1,14 @@
 """Display tournament battle conditions in Streamlit interface."""
 
 import datetime
+import json
 import logging
 from time import perf_counter
 
-import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
+import pandas as pd
 from thetower.backend.tourney_results.constants import leagues
 
 # Try to import towerbcs with graceful fallback
@@ -36,28 +38,49 @@ BC_DAYS_EARLY = 1
 
 st.markdown("# Battle Conditions")
 if days_until > BC_DAYS_EARLY:
-    st.markdown(f"## Next Tournament is on {tourney_date}")
-    st.markdown("Battle conditions will be available in:")
-
-    @st.fragment(run_every=1)
-    def _countdown():
-        bc_dt = datetime.datetime.combine(tourney_date, datetime.time.min, tzinfo=datetime.timezone.utc) - datetime.timedelta(days=BC_DAYS_EARLY)
-        remaining = bc_dt - datetime.datetime.now(datetime.timezone.utc)
-        total_seconds = int(remaining.total_seconds())
-        if total_seconds <= 0:
-            st.rerun()
-            return
-        days_left = total_seconds // 86400
-        hours_left = (total_seconds % 86400) // 3600
-        minutes_left = (total_seconds % 3600) // 60
-        seconds_left = total_seconds % 60
-        cols = st.columns(4)
-        cols[0].metric("Days", days_left)
-        cols[1].metric("Hours", hours_left)
-        cols[2].metric("Minutes", minutes_left)
-        cols[3].metric("Seconds", seconds_left)
-
-    _countdown()
+    bc_dt = datetime.datetime.combine(tourney_date, datetime.time.min, tzinfo=datetime.timezone.utc) - datetime.timedelta(days=BC_DAYS_EARLY)
+    tourney_date_str = tourney_date.strftime("%A, %B %d, %Y")
+    phases = [
+        {"label": "🔮 Battle Conditions Revealed In", "sub": tourney_date_str, "t": int(bc_dt.timestamp() * 1000)},
+    ]
+    phases_json = json.dumps(phases)
+    components.html(
+        f"""<!DOCTYPE html>
+<html><head><style>body{{margin:0;padding:0;font-family:sans-serif;}}</style></head><body>
+<div style="text-align:center;padding:1.5rem;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:10px;margin:2px;box-shadow:0 4px 6px rgba(0,0,0,.3);">
+    <p id="phase-sub" style="margin:0 0 .6rem 0;color:#f0f0f0;font-size:1.05rem;font-weight:500;"></p>
+    <h2 id="phase-label" style="margin:0;color:white;font-size:1.5rem;"></h2>
+    <div style="display:flex;justify-content:center;align-items:flex-start;gap:.8rem;margin-top:1rem;flex-wrap:wrap;">
+        <div style="text-align:center;"><div id="cd-d" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Days</div></div>
+        <div style="font-size:2.4rem;font-weight:bold;color:rgba(255,255,255,.4);line-height:1;">:</div>
+        <div style="text-align:center;"><div id="cd-h" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Hours</div></div>
+        <div style="font-size:2.4rem;font-weight:bold;color:rgba(255,255,255,.4);line-height:1;">:</div>
+        <div style="text-align:center;"><div id="cd-m" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Mins</div></div>
+        <div style="font-size:2.4rem;font-weight:bold;color:rgba(255,255,255,.4);line-height:1;">:</div>
+        <div style="text-align:center;"><div id="cd-s" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Secs</div></div>
+    </div>
+</div>
+<script>
+(function(){{
+    var phases={phases_json};
+    function p(n){{return String(n).padStart(2,'0');}}
+    function tick(){{
+        var now=Date.now(),ph=phases[phases.length-1];
+        for(var i=0;i<phases.length;i++){{if(now<phases[i].t){{ph=phases[i];break;}}}}
+        document.getElementById('phase-label').innerText=ph.label;
+        document.getElementById('phase-sub').innerText=ph.sub;
+        var r=Math.max(0,ph.t-now);
+        document.getElementById('cd-d').innerText=p(Math.floor(r/86400000));
+        document.getElementById('cd-h').innerText=p(Math.floor(r%86400000/3600000));
+        document.getElementById('cd-m').innerText=p(Math.floor(r%3600000/60000));
+        document.getElementById('cd-s').innerText=p(Math.floor(r%60000/1000));
+    }}
+    tick();setInterval(tick,1000);
+}})();
+</script>
+</body></html>""",
+        height=230,
+    )
     st.stop()
 
 st.markdown(f"## Tournament {'is today!' if days_until == 0 else f'is on {tourney_date}'}")
