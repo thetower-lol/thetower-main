@@ -40,11 +40,11 @@ pip install -e ".[bot,web]"
 **Optional: Battle conditions predictor (separate package, requires repo access):**
 
 ```bash
-# Install towerbcs from local workspace folder if available
-pip install -e ../towerbcs
+# Install thetower-bcs from local workspace folder if available
+pip install -e ../thetower-bcs
 
 # Or install from git repository
-pip install git+<towerbcs-repo-url>
+pip install git+<thetower-bcs-repo-url>
 ```
 
 ### Production Environment (Pip-based)
@@ -53,13 +53,13 @@ pip install git+<towerbcs-repo-url>
 
 ```bash
 # Install from git repository
-pip install git+https://github.com/ndsimpson/thetower.lol.git
+pip install git+https://github.com/ndsimpson/thetower-main.git
 
 # Or install specific version/tag
-pip install git+https://github.com/ndsimpson/thetower.lol.git@v1.2.3
+pip install git+https://github.com/ndsimpson/thetower-main.git@v1.2.3
 
 # Optional: Install battle conditions predictor (separate package)
-pip install git+<towerbcs-repo-url>
+pip install git+<thetower-bcs-repo-url>
 
 # Extract Streamlit pages for web services (runs automatically via systemd ExecStartPre)
 thetower-init-streamlit

@@ -15,7 +15,7 @@ Use the `setup_private_package.py` script to automate the entire process:
 python scripts/setup_private_package.py <package_name> <github_url>
 
 # Examples
-python scripts/setup_private_package.py towerbcs https://github.com/username/repo
+python scripts/setup_private_package.py thetower-bcs https://github.com/username/repo
 python scripts/setup_private_package.py tourney_reminder https://github.com/username/cogname
 ```
 
@@ -266,7 +266,7 @@ The `/codebase` admin page checks for updates by running `git ls-remote` against
 
 **Root cause**: The package's `pyproject.toml` has a static `[project.urls]` entry instead of dynamic URL injection via `setup.py`.
 
-**Fix**: Ensure the package uses dynamic URL injection — the same pattern as `TourneyReminderCog`:
+**Fix**: Ensure the package uses dynamic URL injection — the same pattern as `cog-tourney-reminder`:
 
 1. In `pyproject.toml`, add `"urls"` to `dynamic` and remove the static `[project.urls]` section:
 

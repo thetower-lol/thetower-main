@@ -11,9 +11,9 @@ from simple_history.admin import SimpleHistoryAdmin
 from ..sus.models import PlayerId
 from .models import BattleCondition, Injection, NameDayWinner, PatchNew, PositionRole, PromptTemplate, RainPeriod, Role, TourneyResult, TourneyRow
 
-# Graceful towerbcs import handling
+# Graceful thetower_bcs import handling
 try:
-    from towerbcs import TournamentPredictor, predict_future_tournament
+    from thetower_bcs import TournamentPredictor, predict_future_tournament
 
     TOWERBCS_AVAILABLE = True
 except ImportError:
@@ -118,9 +118,9 @@ def generate_summary(modeladmin, request, queryset):
 
 @admin.action(description="Regenerate battle conditions")
 def regenerate_battle_conditions(modeladmin, request, queryset):
-    """Regenerate battle conditions for selected tournaments using towerbcs predictions."""
+    """Regenerate battle conditions for selected tournaments using thetower_bcs predictions."""
     if not TOWERBCS_AVAILABLE:
-        modeladmin.message_user(request, "Error: towerbcs package is not available. Cannot regenerate battle conditions.", level="ERROR")
+        modeladmin.message_user(request, "Error: thetower-bcs package is not available. Cannot regenerate battle conditions.", level="ERROR")
         return
 
     from datetime import datetime
@@ -264,7 +264,7 @@ class TourneyResultAdmin(SimpleHistoryAdmin):
     def regenerate_bcs_button(self, obj):
         """Display a button to regenerate battle conditions for this tournament."""
         if not TOWERBCS_AVAILABLE:
-            return "towerbcs not available"
+            return "thetower-bcs not available"
 
         url = f"{self.get_admin_url('regenerate_bcs', obj.pk)}"
         return format_html(
@@ -313,7 +313,7 @@ class TourneyResultAdmin(SimpleHistoryAdmin):
         obj = self.get_object(request, object_id)
 
         if not TOWERBCS_AVAILABLE:
-            self.message_user(request, "Error: towerbcs package is not available.", level="ERROR")
+            self.message_user(request, "Error: thetower-bcs package is not available.", level="ERROR")
             return self.response_change(request, obj)
 
         try:

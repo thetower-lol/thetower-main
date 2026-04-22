@@ -51,18 +51,19 @@ All deploy keys and SSH config live in `/var/lib/tower/.ssh/` (the tower user's 
 
 | Package                   | Key file                          | SSH alias                       |
 | ------------------------- | --------------------------------- | ------------------------------- |
-| towerbcs                  | `thetower_towerbcs_deploy`        | `github-tower-towerbcs`         |
+| thetower-bcs              | `thetower_bcs_deploy`             | `github-tower-thetower-bcs`     |
 | thetower-tourney-reminder | `thetower_tourneyreminder_deploy` | `github-tower-tourney-reminder` |
 | thetower-managed-polls    | `thetower_managed_polls_deploy`   | `github-tower-managed-polls`    |
+| thetower-bot              | `thetower_bot_deploy`             | `github-tower-thetower-bot`     |
 | thetower (main)           | `thetower_core_deploy`            | _(public repo, not needed)_     |
 
 ### SSH Config (`/var/lib/tower/.ssh/config`)
 
 ```
-Host github-tower-towerbcs
+Host github-tower-thetower-bcs
     HostName github.com
     User git
-    IdentityFile ~/.ssh/thetower_towerbcs_deploy
+    IdentityFile ~/.ssh/thetower_bcs_deploy
     IdentitiesOnly yes
     StrictHostKeyChecking no
 
@@ -77,6 +78,13 @@ Host github-tower-managed-polls
     HostName github.com
     User git
     IdentityFile ~/.ssh/thetower_managed_polls_deploy
+    IdentitiesOnly yes
+    StrictHostKeyChecking no
+
+Host github-tower-thetower-bot
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/thetower_bot_deploy
     IdentitiesOnly yes
     StrictHostKeyChecking no
 ```

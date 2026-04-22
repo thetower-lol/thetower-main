@@ -1009,13 +1009,13 @@ async def callback(self, interaction: discord.Interaction):
 - `unified_advertise`: Full-featured cog with admin/user UIs
 - `battle_conditions`: Cog with external API integration
 
-## External Cog Packages
+## Cog Packages
 
 Cogs can live in separate repositories and be installed as Python packages. CogManager discovers them via `importlib.metadata.entry_points()` group `"thetower.bot.cogs"`.
 
 ### Package Layout
 
-Use a **flat** src layout — the cog package is the root, with no nested `cogs/` subdirectory. See `TourneyReminderCog` and `VerifyCog` as canonical examples:
+Use a **flat** src layout — the cog package is the root, with no nested `cogs/` subdirectory. See `cog-tourney-reminder` and `VerifyCog` as canonical examples:
 
 ```
 my-cog-repo/

@@ -154,8 +154,8 @@ src/thetower/
 ### Setup & Installation
 
 ```powershell
-# Windows PowerShell - activate venv
-.\.venv\Scripts\Activate.ps1
+# Windows PowerShell - activate the shared venv (at org root)
+& c:\Users\nicho\gitroot\thetower.lol\.venv\Scripts\Activate.ps1
 
 # Install project with all dependencies
 pip install -e .
@@ -195,10 +195,10 @@ Production uses **pip-based deployment** (no git checkout):
 
 ```bash
 # Install main package from git repository
-pip install git+https://github.com/ndsimpson/thetower.lol.git
+pip install git+https://github.com/ndsimpson/thetower-main.git
 
 # Or install specific version/tag
-pip install git+https://github.com/ndsimpson/thetower.lol.git@v1.2.3
+pip install git+https://github.com/ndsimpson/thetower-main.git@v1.2.3
 
 # Extract Streamlit pages to /opt/thetower/ (runs automatically via systemd ExecStartPre)
 thetower-init-streamlit
@@ -311,7 +311,7 @@ Service files in use:
 - Command chaining: Use `;` (NOT `&&`)
 - Path separators: `\` in PowerShell commands, `/` for Python Path objects
 - Environment variables: `$env:VAR_NAME="value"` (temporary) or `[System.Environment]::SetEnvironmentVariable()` (persistent)
-- Virtual env activation: `.\.venv\Scripts\Activate.ps1`
+- Virtual env activation: `c:\Users\nicho\gitroot\thetower.lol\.venv\Scripts\Activate.ps1`
 - Common gotchas: PowerShell doesn't support `&&` chaining, use `;` instead for sequential commands
 
 ``

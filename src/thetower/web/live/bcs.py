@@ -11,9 +11,9 @@ import streamlit.components.v1 as components
 import pandas as pd
 from thetower.backend.tourney_results.constants import leagues
 
-# Try to import towerbcs with graceful fallback
+# Try to import thetower_bcs with graceful fallback
 try:
-    from towerbcs import TournamentPredictor, predict_future_tournament
+    from thetower_bcs import TournamentPredictor, predict_future_tournament
 
     TOWERBCS_AVAILABLE = True
 except ImportError:
@@ -24,11 +24,11 @@ except ImportError:
 logging.info("Starting battle conditions analysis")
 t2_start = perf_counter()
 
-# Check if towerbcs is available
+# Check if thetower_bcs is available
 if not TOWERBCS_AVAILABLE:
     st.markdown("# Battle Conditions")
     st.error("⚠️ Battle Conditions module not available")
-    st.markdown("The `towerbcs` package is not installed. To use battle conditions prediction, install it with: `pip install -e /path/to/towerbcs`")
+    st.markdown("The `thetower-bcs` package is not installed. To use battle conditions prediction, install it with: `pip install -e /path/to/thetower-bcs`")
     st.stop()
 
 tourney_id, tourney_date, days_until, _ = TournamentPredictor.get_tournament_info()

@@ -16,9 +16,9 @@ django.setup()
 
 from thetower.backend.tourney_results.models import TourneyResult
 
-# Try to import towerbcs with graceful fallback
+# Try to import thetower_bcs with graceful fallback
 try:
-    from towerbcs import TournamentPredictor, predict_future_tournament
+    from thetower_bcs import TournamentPredictor, predict_future_tournament
 
     TOWERBCS_AVAILABLE = True
 except ImportError:
@@ -31,10 +31,10 @@ st.markdown("# Battle Conditions Mismatch Analysis")
 
 
 if not TOWERBCS_AVAILABLE:
-    st.error("⚠️ TowerBCS package not available")
+    st.error("⚠️ thetower-bcs package not available")
     st.markdown(
         """
-    The `towerbcs` package is not installed. To use battle conditions prediction, run the update script: `python src/thetower/scripts/install_towerbcs.py`
+    The `thetower-bcs` package is not installed. To use battle conditions prediction, install it with: `pip install -e /path/to/thetower-bcs`
     """
     )
     st.stop()
@@ -52,7 +52,7 @@ def get_tourney_id_for_date(date):
     return tourney_id
 
 
-# Minimum date for BC prediction (towerbcs predictor starts on 2024-10-19)
+# Minimum date for BC prediction (thetower_bcs predictor starts on 2024-10-19)
 MIN_PREDICTION_DATE = pd.Timestamp("2024-10-19").date()
 
 
@@ -142,5 +142,5 @@ else:
 
     st.markdown("---")
     st.markdown(
-        f"*Note: Only tournaments from {MIN_PREDICTION_DATE} onwards are analyzed. Tournament IDs are derived using the towerbcs predictor scheduling logic.*"
+        f"*Note: Only tournaments from {MIN_PREDICTION_DATE} onwards are analyzed. Tournament IDs are derived using the thetower_bcs predictor scheduling logic.*"
     )

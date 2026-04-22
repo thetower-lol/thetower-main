@@ -6,9 +6,9 @@ from django.core.management.base import BaseCommand
 
 from ...models import BattleCondition, TourneyResult
 
-# Graceful towerbcs import handling
+# Graceful thetower_bcs import handling
 try:
-    from towerbcs import TournamentPredictor, predict_future_tournament
+    from thetower_bcs import TournamentPredictor, predict_future_tournament
 
     TOWERBCS_AVAILABLE = True
 except ImportError:
@@ -56,13 +56,13 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        # Check if towerbcs is available
+        # Check if thetower_bcs is available
         if not TOWERBCS_AVAILABLE:
             self.stdout.write(
                 self.style.ERROR(
-                    "Error: towerbcs package is not available.\n"
-                    "This command requires towerbcs to predict battle conditions.\n"
-                    "Please install towerbcs and try again."
+                    "Error: thetower-bcs package is not available.\n"
+                    "This command requires thetower-bcs to predict battle conditions.\n"
+                    "Please install thetower-bcs and try again."
                 )
             )
             return

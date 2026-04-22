@@ -14,7 +14,7 @@ Usage:
     python scripts/setup_private_package.py <package_name> <github_url>
 
 Examples:
-    python scripts/setup_private_package.py towerbcs https://github.com/username/repo
+    python scripts/setup_private_package.py thetower-bcs https://github.com/username/repo
     python scripts/setup_private_package.py cogname ssh://git@github.com/owner/repo.git
 """
 
@@ -365,9 +365,9 @@ def install_package(alias: str, owner: str, repo: str) -> bool:
 def main():
     parser = argparse.ArgumentParser(
         description="Setup SSH deploy key and install a private package from GitHub",
-        epilog="Example: python scripts/setup_private_package.py towerbcs https://github.com/ndsimpson/thetower.lol-bc-generator",
+        epilog="Example: python scripts/setup_private_package.py thetower-bcs https://github.com/ndsimpson/thetower-bcs",
     )
-    parser.add_argument("package_name", help="Short name for the package (e.g., towerbcs, managed_polls)")
+    parser.add_argument("package_name", help="Short name for the package (e.g., thetower-bcs, managed_polls)")
     parser.add_argument("github_url", help="GitHub repository URL (HTTPS or SSH format)")
     parser.add_argument("--skip-install", action="store_true", help="Only set up SSH, don't pip install")
     parser.add_argument("--force", action="store_true", help="Overwrite existing key and alias")

@@ -23,14 +23,14 @@ from ..models import BattleCondition, TourneyResult
 from ..overview_cache import regenerate_overview_cache
 from ..tourney_utils import create_tourney_rows, get_summary
 
-# Graceful towerbcs import handling
+# Graceful thetower_bcs import handling
 try:
-    from towerbcs import TournamentPredictor, predict_future_tournament
+    from thetower_bcs import TournamentPredictor, predict_future_tournament
 
     TOWERBCS_AVAILABLE = True
-    logging.info("towerbcs package loaded successfully")
+    logging.info("thetower_bcs package loaded successfully")
 except ImportError as e:
-    logging.warning(f"towerbcs package not available: {e}")
+    logging.warning(f"thetower_bcs package not available: {e}")
     logging.warning("Battle condition predictions will be skipped")
     # Create dummy functions to prevent errors
     TOWERBCS_AVAILABLE = False
@@ -75,7 +75,7 @@ def execute():
 
         last_file = last_files[-1]
 
-        # Get tournament info and conditions (skip if towerbcs not available)
+        # Get tournament info and conditions (skip if thetower_bcs not available)
         conditions = []
         if TOWERBCS_AVAILABLE:
             try:
@@ -86,7 +86,7 @@ def execute():
                 logging.error(f"Error predicting battle conditions: {e}")
                 conditions = []
         else:
-            logging.info("Skipping battle condition prediction (towerbcs not available)")
+            logging.info("Skipping battle condition prediction (thetower_bcs not available)")
 
         try:
             with open(last_file, "rb") as infile:

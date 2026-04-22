@@ -12,9 +12,9 @@ from thetower.backend.tourney_results.constants import Graph, Options, leagues, 
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.overview_cache import read_overview_cache
 
-# Try to import towerbcs for tournament countdown
+# Try to import thetower_bcs for tournament countdown
 try:
-    from towerbcs import TournamentPredictor, predict_future_tournament
+    from thetower_bcs import TournamentPredictor, predict_future_tournament
 
     TOWERBCS_AVAILABLE = True
 except ImportError:
@@ -39,7 +39,7 @@ def render_tournament_countdown():
       Results Available In → Next Tournament Starts In (for tourney_date).
     """
     if not TOWERBCS_AVAILABLE:
-        st.info("ℹ️ Tournament countdown unavailable - towerbcs package not installed")
+        st.info("ℹ️ Tournament countdown unavailable - thetower-bcs package not installed")
         return
 
     try:
