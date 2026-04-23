@@ -1,45 +1,77 @@
-# Project-specific
-SECRET_KEY
-TODO.md
-thetower.egg-info
-data
-db.sqlite3*
-uploads
-results_cache
-backups
-unrelated_scripts
-thetower/backend/uploads_500*
-Tower_Relics/
-Tower_Skins/
-try_tesseract
-htmx_components/
-secrets
-/.vscode
-.aider*
-.env
-
-# Log files
-*.log
-app.log
-
-# Python egg-info directories
-*.egg-info/
-
-# Python bytecode files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+*.egg-info/
+*.egg
+MANIFEST
+.Python
+build/
+dist/
+wheels/
+sdist/
 
-# Custom bytecode cache location
-.cache/
-
-# Generated version file
-src/thetower/_version.py
-
-# Virtual Environment
-.venv/
+# Virtual environments
+.env
+.venv
 env/
 venv/
 ENV/
+env.bak/
+venv.bak/
+
+# Testing
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+.hypothesis/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# Dev tools
+.cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+SECRET_KEY
+TODO.md
+db.sqlite3*
+data/
+uploads/
+results_cache/
+backups/
+unrelated_scripts/
+thetower/backend/uploads_500*
+Tower_Relics/
+Tower_Skins/
+try_tesseract/
+htmx_components/
+secrets/
+.aider*
 thetower.lol.code-workspace
 include_shun.json
+
+# Generated
+src/thetower/_version.py
