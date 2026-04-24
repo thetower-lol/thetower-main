@@ -13,6 +13,8 @@ from typing import Optional, Tuple
 
 import streamlit as st
 
+from thetower.web.util import fmt_dt
+
 logger = logging.getLogger(__name__)
 
 
@@ -141,7 +143,7 @@ def get_service_start_time(service_name: str) -> Optional[str]:
                         time_ago = "Just now"
 
                     # Format the display string
-                    formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    formatted_time = fmt_dt(dt)
                     return f"{formatted_time}\n({time_ago})"
 
                 except ValueError:
@@ -376,8 +378,7 @@ def service_status_page():
         if st.button("🔄 Refresh Now"):
             st.rerun()
     with col2:
-        utc_time = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        st.markdown(f"*Last updated: {utc_time} UTC*")
+        st.markdown(f"*Last updated: {fmt_dt(datetime.now(timezone.utc), fmt='%H:%M:%S %Z')}*")
 
     # How many log lines to show for each service
     log_lines = st.slider("Log lines to show in service status", min_value=1, max_value=50, value=15)

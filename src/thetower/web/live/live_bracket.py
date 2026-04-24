@@ -21,7 +21,7 @@ from thetower.web.live.data_ops import (
     require_tournament_data,
 )
 from thetower.web.live.ui_components import setup_common_ui
-from thetower.web.util import add_player_id
+from thetower.web.util import add_player_id, fmt_dt
 
 
 @require_tournament_data
@@ -37,7 +37,7 @@ def live_bracket():
     refresh_timestamp = get_data_refresh_timestamp(league)
     if refresh_timestamp:
         time_ago = format_time_ago(refresh_timestamp)
-        st.caption(f"📊 Data last refreshed: {time_ago} ({refresh_timestamp.strftime('%Y-%m-%d %H:%M:%S')} UTC)")
+        st.caption(f"📊 Data last refreshed: {time_ago} ({fmt_dt(refresh_timestamp)})")
         # Indicate whether shunned players are included for this page (only on hidden site)
         hidden_features = os.environ.get("HIDDEN_FEATURES")
         if hidden_features:
@@ -327,7 +327,7 @@ def live_bracket():
     # Use loc for datetime conversion
     tdf.loc[:, "datetime"] = pd.to_datetime(tdf["datetime"])
     bracket_start_time = tdf["datetime"].min()
-    st.info(f"Bracket started at approx.: {bracket_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    st.info(f"Bracket started at approx.: {fmt_dt(bracket_start_time)}")
 
     # Process display names and create visualization
     tdf = process_display_names(tdf)

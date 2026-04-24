@@ -5,7 +5,7 @@ import streamlit as st
 from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.tourney_utils import check_live_entry
-from thetower.web.util import get_league_selection, get_options
+from thetower.web.util import fmt_dt, get_league_selection, get_options
 
 
 def get_league_for_player(player_id: str) -> str:
@@ -54,7 +54,7 @@ def render_data_status(league: str, page_key: str):
     refresh_timestamp = get_data_refresh_timestamp(league)
     if refresh_timestamp:
         time_ago = format_time_ago(refresh_timestamp)
-        st.caption(f"📊 Data last refreshed: {time_ago} ({refresh_timestamp.strftime('%Y-%m-%d %H:%M:%S')} UTC)")
+        st.caption(f"📊 Data last refreshed: {time_ago} ({fmt_dt(refresh_timestamp)})")
     else:
         st.caption("📊 Data refresh time: Unknown")
 

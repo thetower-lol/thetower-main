@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Tuple
 import streamlit as st
 
 from thetower.web.admin.package_updates import check_package_updates_sync, get_thetower_packages, sync_dependencies, update_package_sync
+from thetower.web.util import fmt_dt
 
 
 @st.dialog("Operation Result", width="large")
@@ -428,8 +429,7 @@ def codebase_status_page():
         if st.button("🔄 Refresh Status"):
             st.rerun()
     with col2:
-        utc_time = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        st.markdown(f"*Last updated: {utc_time} UTC*")
+        st.markdown(f"*Last updated: {fmt_dt(datetime.now(timezone.utc), fmt='%H:%M:%S %Z')}*")
 
     st.markdown("---")
 

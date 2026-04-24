@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from thetower.web.admin._access_log_common import all_paths_for_dates, catalog_files, get_log_dir, parse_files
+from thetower.web.util import fmt_dt
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,9 @@ else:
 # --- Display ---
 if filtered:
     df = pd.DataFrame(filtered, columns=["dt", "site", "ip", "path", "qs", "ctx"])
-    df.columns = ["Datetime (UTC)", "Site", "IP", "Path", "Query String", "Context"]
+    # Convert UTC timestamps to user's local timezone for display
+    df["dt"] = pd.to_datetime(df["dt"], format="%Y-%m-%d %H:%M:%S UTC", utc=True).apply(lambda ts: fmt_dt(ts, fmt="%Y-%m-%d %H:%M:%S %Z"))
+    df.columns = pd.Index(["Datetime", "Site", "IP", "Path", "Query String", "Context"])
     st.dataframe(df, width="stretch", hide_index=True)
 else:
     st.info("No entries match the current filters.")

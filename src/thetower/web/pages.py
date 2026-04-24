@@ -1,12 +1,14 @@
 # Standard library imports
 import os
 import time
+import zoneinfo
 from importlib.metadata import version
 from pathlib import Path
 
 # Third-party imports
 import django
 import streamlit as st
+from streamlit_js_eval import streamlit_js_eval
 
 from thetower.backend.tourney_results.constants import Graph, Options
 from thetower.web.maintenance import get_maintenance_state
@@ -157,11 +159,125 @@ if active_period:
     if rainenabled:
         makeitrain()
 
+# Read from localStorage and detect browser timezone (both return None on first render)
+_stored_tz = streamlit_js_eval(
+    js_expressions="localStorage.getItem('thetower_user_timezone')",
+    key="tz_localstorage_read",
+)
+_browser_tz = streamlit_js_eval(
+    js_expressions="Intl.DateTimeFormat().resolvedOptions().timeZone",
+    key="browser_tz_detect",
+)
+_stored_24h = streamlit_js_eval(
+    js_expressions="localStorage.getItem('thetower_time_24h')",
+    key="time24h_localstorage_read",
+)
+_all_timezones = sorted(zoneinfo.available_timezones())
+
+
+def _on_tz_change() -> None:
+    """Mark timezone as user-picked so it gets saved to localStorage."""
+    st.session_state.tz_user_picked = True
+    st.session_state.tz_is_user_set = True
+
+
+def _reset_tz() -> None:
+    """Reset to browser-detected timezone and clear localStorage preference."""
+    st.session_state.user_timezone = st.session_state.tz_sniffed
+    st.session_state.tz_is_user_set = False
+    st.session_state.tz_user_picked = False
+    st.session_state.tz_clear_count = st.session_state.get("tz_clear_count", 0) + 1
+
+
+def _on_time_format_change() -> None:
+    """Mark time format as user-picked so it gets saved to localStorage."""
+    st.session_state.time_24h_changed = True
+
+
+# Initialise session state defaults
+if "user_timezone" not in st.session_state:
+    st.session_state.user_timezone = "UTC"
+if "tz_user_picked" not in st.session_state:
+    st.session_state.tz_user_picked = False
+if "tz_is_user_set" not in st.session_state:
+    st.session_state.tz_is_user_set = False
+if "tz_sniffed" not in st.session_state:
+    st.session_state.tz_sniffed = None
+# Restore 24h preference from localStorage once JS resolves (never overwrite after that)
+if not st.session_state.get("time_24h_initialized") and _stored_24h is not None:
+    st.session_state.time_24h = _stored_24h != "false"
+    st.session_state.time_24h_initialized = True
+elif "time_24h" not in st.session_state:
+    st.session_state.time_24h = True  # default until JS resolves
+
+# Capture sniffed timezone the first time JS responds
+if _browser_tz in _all_timezones and not st.session_state.tz_sniffed:
+    st.session_state.tz_sniffed = _browser_tz
+
+# On first JS response: prefer stored preference, fall back to browser-detected timezone
+if not st.session_state.get("tz_initialized"):
+    if _stored_tz and _stored_tz in _all_timezones:
+        st.session_state.user_timezone = _stored_tz
+        st.session_state.tz_is_user_set = True
+        st.session_state.tz_initialized = True
+    elif _browser_tz in _all_timezones:
+        st.session_state.user_timezone = _browser_tz
+        st.session_state.tz_initialized = True
+
+with st.sidebar:
+    _tz_label = "Timezone ✏️" if st.session_state.tz_is_user_set else "Timezone"
+    _can_reset = st.session_state.tz_is_user_set and st.session_state.tz_sniffed
+    if _can_reset:
+        st.markdown(f"**{_tz_label}**")
+        _tz_sel_col, _tz_reset_col = st.columns([5, 1])
+        with _tz_sel_col:
+            st.selectbox(
+                _tz_label,
+                options=_all_timezones,
+                key="user_timezone",
+                on_change=_on_tz_change,
+                label_visibility="collapsed",
+            )
+        with _tz_reset_col:
+            st.button("🔁", help="Reset to browser-detected timezone", on_click=_reset_tz, type="tertiary")
+    else:
+        st.selectbox(_tz_label, options=_all_timezones, key="user_timezone", on_change=_on_tz_change)
+    st.toggle("24-hour clock", key="time_24h", on_change=_on_time_format_change)
+
+# Persist manually-chosen timezone to localStorage (never persists the auto-sniffed value)
+if st.session_state.tz_user_picked:
+    _tz_to_save = st.session_state.user_timezone
+    streamlit_js_eval(
+        js_expressions=f"localStorage.setItem('thetower_user_timezone', '{_tz_to_save}'); true",
+        key=f"tz_localstorage_write_{_tz_to_save}",
+    )
+    st.session_state.tz_user_picked = False
+
+# Clear localStorage when user resets to browser timezone (key changes per reset to force re-execution)
+if st.session_state.get("tz_clear_count", 0) > 0:
+    streamlit_js_eval(
+        js_expressions="localStorage.removeItem('thetower_user_timezone'); true",
+        key=f"tz_localstorage_clear_{st.session_state.tz_clear_count}",
+    )
+
+# Persist 24h/12h preference to localStorage only when user changed the toggle
+if st.session_state.get("time_24h_changed"):
+    _time_24h_val = "true" if st.session_state.time_24h else "false"
+    streamlit_js_eval(
+        js_expressions=f"localStorage.setItem('thetower_time_24h', '{_time_24h_val}'); true",
+        key=f"time24h_localstorage_write_{_time_24h_val}",
+    )
+    st.session_state.time_24h_changed = False
+
 st.html(
     """
 <style>
     .stMainBlockContainer {
         max-width:60rem;
+    }
+    /* Collapse the invisible iframes produced by streamlit_js_eval */
+    iframe[title="streamlit_js_eval.streamlit_js_eval"] {
+        display: none;
     }
 </style>
 """

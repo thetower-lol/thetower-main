@@ -20,6 +20,7 @@ from thetower.web.admin._access_log_common import (
     parse_files,
     parse_render_files,
 )
+from thetower.web.util import get_user_tz
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +137,13 @@ with st.spinner("Loading render timing data…"):
     render_rows = parse_render_files(render_paths)
 df_render = pd.DataFrame(render_rows) if render_rows else pd.DataFrame(columns=["render_id", "dt", "elapsed_ms"])
 
-# Parse timestamps
+# Parse timestamps and convert to user's local timezone for display groupings
 df["timestamp"] = pd.to_datetime(df["dt"], format="%Y-%m-%d %H:%M:%S UTC", utc=True, errors="coerce")
 df = df.dropna(subset=["timestamp"])
-df["date"] = df["timestamp"].dt.date
-df["hour"] = df["timestamp"].dt.floor("h")
+_user_tz = get_user_tz()
+df["local_ts"] = df["timestamp"].dt.tz_convert(_user_tz)
+df["date"] = df["local_ts"].dt.date
+df["hour"] = df["local_ts"].dt.floor("h")
 
 # Apply quick preset cutoff or hour-of-day filter
 if _cutoff is not None:
@@ -193,8 +196,8 @@ with tab_time:
 
     if granularity == "Hourly":
         counts = df.groupby("hour").size().reset_index(name="Requests")
-        counts.rename(columns={"hour": "Time (UTC)"}, inplace=True)
-        fig = px.bar(counts, x="Time (UTC)", y="Requests", title="Requests per Hour")
+        counts.rename(columns={"hour": "Time"}, inplace=True)
+        fig = px.bar(counts, x="Time", y="Requests", title="Requests per Hour")
     else:
         counts = df.groupby("date").size().reset_index(name="Requests")
         counts.rename(columns={"date": "Date"}, inplace=True)

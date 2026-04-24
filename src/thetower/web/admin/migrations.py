@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 
 import streamlit as st
 
+from thetower.web.util import fmt_dt
+
 
 def get_django_migrations_status():
     """
@@ -134,8 +136,7 @@ def migrations_page():
         if st.button("🔄 Refresh Status"):
             st.rerun()
     with col2:
-        utc_time = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        st.markdown(f"*Last updated: {utc_time} UTC*")
+        st.markdown(f"*Last updated: {fmt_dt(datetime.now(timezone.utc), fmt='%H:%M:%S %Z')}*")
 
     st.markdown("---")
 

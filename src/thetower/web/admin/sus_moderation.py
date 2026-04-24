@@ -8,6 +8,7 @@ from thetower.backend.sus.models import ModerationRecord
 from thetower.backend.tourney_results.data import get_player_id_lookup
 from thetower.backend.tourney_results.formatting import make_player_url
 from thetower.backend.tourney_results.models import TourneyRow
+from thetower.web.util import fmt_dt
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -147,7 +148,7 @@ def render_sus_moderation_page():
     # Format dates for display
     display_df["formatted_last_tournament"] = display_df["last_tournament_date"].apply(lambda x: x.strftime("%Y-%m-%d") if pd.notnull(x) else "Never")
 
-    display_df["formatted_sus_created"] = display_df["sus_created_at"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M") if pd.notnull(x) else "")
+    display_df["formatted_sus_created"] = display_df["sus_created_at"].apply(lambda x: fmt_dt(x, fmt="%Y-%m-%d %H:%M") if pd.notnull(x) else "")
 
     display_df["days_since_display"] = display_df["days_since_last_tournament"].apply(lambda x: f"{x} days" if pd.notnull(x) else "Never")
 

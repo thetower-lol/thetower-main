@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 
 import streamlit as st
 
+from thetower.web.util import fmt_dt
+
 logger = logging.getLogger(__name__)
 
 _PREFIXES = {
@@ -86,7 +88,7 @@ def backup_status_page() -> None:
             _fetch_prefix_stats.clear()
             st.rerun()
     with col_updated:
-        st.caption(f"Data cached for 5 minutes · Last render: {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
+        st.caption(f"Data cached for 5 minutes · Last render: {fmt_dt(datetime.now(timezone.utc), fmt='%H:%M:%S %Z')}")
 
     if not _credentials_available():
         st.warning(
@@ -137,7 +139,7 @@ def backup_status_page() -> None:
                         {
                             "Filename": obj["Key"].split("/")[-1],
                             "Size": _fmt_bytes(obj["Size"]),
-                            "Uploaded": last_mod.strftime("%Y-%m-%d %H:%M UTC"),
+                            "Uploaded": fmt_dt(last_mod, fmt="%Y-%m-%d %H:%M"),
                             "Age": _time_ago(last_mod),
                         }
                     )
@@ -186,9 +188,14 @@ def _render_activity_log() -> None:
 
     last_summary = next((e for e in events if e.get("type") == "run_summary"), None)
     if last_summary:
-        ts = last_summary.get("ts", "")
+        ts_raw = last_summary.get("ts", "")
         run_type = last_summary.get("run", "?")
-        st.caption(f"Last run: {run_type} · {ts[:19].replace('T', ' ')} UTC")
+        try:
+            ts_dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+            ts_str = fmt_dt(ts_dt, fmt="%Y-%m-%d %H:%M:%S %Z")
+        except (ValueError, AttributeError):
+            ts_str = ts_raw[:19].replace("T", " ")
+        st.caption(f"Last run: {run_type} · {ts_str}")
 
     # Recent events table
     with st.expander("Recent Events", expanded=True):
@@ -197,7 +204,12 @@ def _render_activity_log() -> None:
 
         rows = []
         for e in filtered[:100]:
-            ts = e.get("ts", "")[:19].replace("T", " ")
+            ts_raw = e.get("ts", "")
+            try:
+                ts_dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                ts = fmt_dt(ts_dt, fmt="%Y-%m-%d %H:%M:%S")
+            except (ValueError, AttributeError):
+                ts = ts_raw[:19].replace("T", " ")
             etype = e.get("type", "")
             if etype == "tar_upload":
                 detail = f"{e.get('league')}/{e.get('file')} ({_fmt_bytes(e.get('size', 0))})"
@@ -209,7 +221,7 @@ def _render_activity_log() -> None:
                 detail = " · ".join(f"{k}={v}" for k, v in e.items() if k not in ("type", "ts", "run"))
             else:
                 detail = str(e)
-            rows.append({"Time (UTC)": ts, "Type": etype, "Detail": detail})
+            rows.append({"Time": ts, "Type": etype, "Detail": detail})
 
         if rows:
             st.dataframe(rows, use_container_width=True, hide_index=True)

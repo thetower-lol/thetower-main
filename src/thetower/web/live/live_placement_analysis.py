@@ -16,7 +16,7 @@ from thetower.web.live.data_ops import (
     require_tournament_data,
 )
 from thetower.web.live.ui_components import render_data_status, setup_common_ui
-from thetower.web.util import add_player_id
+from thetower.web.util import add_player_id, fmt_dt
 
 
 @require_tournament_data
@@ -58,7 +58,7 @@ def live_placement_analysis():
                     ts_utc = ts.astimezone(datetime.timezone.utc)
 
                 refresh_text = format_time_ago(ts_utc)
-                ts_display = ts_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+                ts_display = fmt_dt(ts_utc)
 
             st.caption(f"📊 Data last refreshed: {refresh_text} ({ts_display})")
     except Exception:
@@ -346,8 +346,10 @@ def live_placement_analysis():
         }
     )
 
-    # Keep original datetime format for checkpoint display
-    checkpoint_df["Checkpoint"] = checkpoint_df["Checkpoint"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    # Convert checkpoint timestamps to user's local timezone for display
+    checkpoint_df["Checkpoint"] = pd.to_datetime(checkpoint_df["Checkpoint"]).apply(
+        lambda ts: fmt_dt(ts.replace(tzinfo=datetime.timezone.utc) if ts.tzinfo is None else ts, fmt="%Y-%m-%d %H:%M:%S")
+    )
 
     st.write(f"Analysis for wave {wave_to_analyze} (averaged by 30-minute checkpoints):")
     # Display condensed dataframe

@@ -1,5 +1,6 @@
 import datetime
 import html
+import zoneinfo
 
 import pandas as pd
 import plotly.express as px
@@ -7,6 +8,42 @@ import streamlit as st
 from streamlit_extras.let_it_rain import rain
 
 from thetower.backend.tourney_results.constants import Graph, Options, leagues
+
+
+def get_user_tz() -> zoneinfo.ZoneInfo:
+    """Return the ZoneInfo for the user's selected timezone (falls back to UTC)."""
+    tz_name = getattr(st.session_state, "user_timezone", "UTC") or "UTC"
+    try:
+        return zoneinfo.ZoneInfo(tz_name)
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        return zoneinfo.ZoneInfo("UTC")
+
+
+def _apply_time_format(fmt: str) -> str:
+    """Rewrite 24-hour strftime tokens to 12-hour when the user prefers 12h."""
+    if getattr(st.session_state, "time_24h", True):
+        return fmt
+    # Replace longest pattern first so %H:%M:%S doesn't partially match %H:%M
+    for pattern, replacement in (
+        ("%H:%M:%S", "%I:%M:%S %p"),
+        ("%H:%M", "%I:%M %p"),
+    ):
+        if pattern in fmt:
+            return fmt.replace(pattern, replacement)
+    return fmt
+
+
+def fmt_dt(dt: datetime.datetime, fmt: str = "%Y-%m-%d %H:%M:%S %Z") -> str:
+    """Convert a UTC-aware datetime to the user's local timezone and format it.
+
+    If *dt* is naive it is assumed to be UTC.
+    The 24h/12h preference from session state is applied automatically.
+    """
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(get_user_tz()).strftime(_apply_time_format(fmt))
 
 
 def links_toggle():
