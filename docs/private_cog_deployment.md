@@ -326,7 +326,7 @@ Complete example for the Managed_PollsCog:
 
 ```bash
 # Automated (recommended)
-python scripts/setup_private_package.py managed_polls https://github.com/ndsimpson/Managed_PollsCog
+python scripts/setup_private_package.py managed_polls https://github.com/thetower-lol/Managed_PollsCog
 
 # Or manually:
 
@@ -336,7 +336,7 @@ ssh-keygen -t ed25519 -C "thetower-managed-polls-deploy" -f ~/.ssh/thetower_mana
 # 2. Display and copy public key
 cat ~/.ssh/thetower_managed_polls_deploy.pub
 
-# 3. Add to GitHub at: https://github.com/ndsimpson/Managed_PollsCog/settings/keys
+# 3. Add to GitHub at: https://github.com/thetower-lol/Managed_PollsCog/settings/keys
 
 # 4. Add SSH alias (dedicated per-repo alias)
 # In ~/.ssh/config:
@@ -354,7 +354,7 @@ ssh-add ~/.ssh/thetower_managed_polls_deploy
 ssh -T git@github-tower-managed-polls
 
 # 7. Install
-pip install git+ssh://git@github-tower-managed-polls/ndsimpson/Managed_PollsCog.git
+pip install git+ssh://git@github-tower-managed-polls/thetower-lol/Managed_PollsCog.git
 
 # 8. Verify
 pip show thetower-managed-polls

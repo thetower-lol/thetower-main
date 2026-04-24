@@ -187,7 +187,7 @@ python -m thetower.backend.tourney_results.get_results
 ## Installation
 
 ```bash
-pip install git+https://github.com/ndsimpson/thetower-main.git
+pip install git+https://github.com/thetower-lol/thetower-main.git
 thetower-init-streamlit  # Extract Streamlit pages to /opt/thetower/
 ```
 

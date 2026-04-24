@@ -365,7 +365,7 @@ def install_package(alias: str, owner: str, repo: str) -> bool:
 def main():
     parser = argparse.ArgumentParser(
         description="Setup SSH deploy key and install a private package from GitHub",
-        epilog="Example: python scripts/setup_private_package.py thetower-bcs https://github.com/ndsimpson/thetower-bcs",
+        epilog="Example: python scripts/setup_private_package.py thetower-bcs https://github.com/thetower-lol/thetower-bcs",
     )
     parser.add_argument("package_name", help="Short name for the package (e.g., thetower-bcs, managed_polls)")
     parser.add_argument("github_url", help="GitHub repository URL (HTTPS or SSH format)")

@@ -53,10 +53,10 @@ pip install git+<thetower-bcs-repo-url>
 
 ```bash
 # Install from git repository
-pip install git+https://github.com/ndsimpson/thetower-main.git
+pip install git+https://github.com/thetower-lol/thetower-main.git
 
 # Or install specific version/tag
-pip install git+https://github.com/ndsimpson/thetower-main.git@v1.2.3
+pip install git+https://github.com/thetower-lol/thetower-main.git@v1.2.3
 
 # Optional: Install battle conditions predictor (separate package)
 pip install git+<thetower-bcs-repo-url>

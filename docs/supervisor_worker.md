@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Supervisor Worker is a proposed enhancement to the Tower system (ndsimpson/thetower-main), consolidating multiple background services (e.g., recalc worker, Zendesk queue, live bracket cache) into a single, concurrent queue/cache manager. This simplifies deployment, monitoring, and resource management while allowing extensible job handling without core code changes.
+The Supervisor Worker is a proposed enhancement to the Tower system (thetower-lol/thetower-main), consolidating multiple background services (e.g., recalc worker, Zendesk queue, live bracket cache) into a single, concurrent queue/cache manager. This simplifies deployment, monitoring, and resource management while allowing extensible job handling without core code changes.
 
 ## Core Architecture
 

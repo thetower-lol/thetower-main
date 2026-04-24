@@ -60,8 +60,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://thetower.lol"
-Repository = "https://github.com/ndsimpson/thetower-main"
-Issues = "https://github.com/ndsimpson/thetower-main/issues"
+Repository = "https://github.com/thetower-lol/thetower-main"
+Issues = "https://github.com/thetower-lol/thetower-main/issues"
 
 [project.scripts]
 thetower-web = "thetower.web.pages:main"
