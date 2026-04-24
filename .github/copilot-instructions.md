@@ -27,9 +27,10 @@ When writing or modifying code, follow these steps automatically:
     - Ensure no blank lines contain whitespace
     - Fix any linting errors shown in Problems panel
 4. **Verify** the code adheres to project standards (150-char line length, type hints, etc.)
-5. **Pause with `vscode_askQuestions`** — ask the user:
-    - "Ready to commit?" with options: **Yes — commit now** / **No — keep working** / freeform (for instructions or feedback)
+5. **BLOCKING REQUIREMENT — Pause with `vscode_askQuestions`** — ALWAYS call the tool, never skip:
+    - Ask "Ready to commit?" with options: **Yes — commit now** / **No — keep working** / freeform (for instructions or feedback)
     - The user may run their linter while this question is pending, then click when ready
+    - This step is **mandatory** even for single-file changes and even when the task seems obviously complete
 
 > **Staging discipline**: Before committing, check `git status` for untracked files (`??`) unrelated to the current change (loose docs, plans, skill files, etc.). If any exist, stage only the relevant paths — do **not** use `git add -A` blindly.
 
@@ -77,15 +78,18 @@ Only **Blocking** and **Critical** issues require fixes before completion. **Sug
 
 ## Interactive Questions
 
-**Always use `vscode_askQuestions` tool for ANY interactive question during work**, including:
+> **BLOCKING REQUIREMENT**: NEVER ask a question as plain text. ALWAYS use the `vscode_askQuestions` tool. This applies to every question without exception — including clarifications, design decisions, and the mandatory end-of-task pause.
+
+Use `vscode_askQuestions` for ALL of the following:
 
 - Design decisions that affect implementation
 - Clarification of requirements
 - Configuration preferences
 - Testing approach
-- The mandatory "Ready to commit?" pause
+- **The mandatory "Ready to commit?" pause after every task** (no exceptions)
+- Asking what to work on next when the current task is done
 
-**Never ask questions as plain text** - always use the tool for structured, actionable responses.
+Asking in plain text instead of using the tool is a violation of these instructions.
 
 ## Testing Policy
 
