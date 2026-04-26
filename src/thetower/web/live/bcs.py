@@ -28,7 +28,6 @@ t2_start = perf_counter()
 if not TOWERBCS_AVAILABLE:
     st.markdown("# Battle Conditions")
     st.error("⚠️ Battle Conditions module not available")
-    st.markdown("The `thetower-bcs` package is not installed. To use battle conditions prediction, install it with: `pip install -e /path/to/thetower-bcs`")
     st.stop()
 
 tourney_id, tourney_date, days_until, _ = TournamentPredictor.get_tournament_info()
