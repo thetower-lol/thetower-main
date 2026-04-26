@@ -261,44 +261,44 @@ def compute_comparison(player_id=None, canvas=st):
     is_mobile = st.session_state.get("mobile_view", False)
 
     if is_mobile:
-        canvas.plotly_chart(wave_fig, width='stretch')
+        canvas.plotly_chart(wave_fig, width="stretch")
 
         if st.session_state.options.links_toggle:
             to_be_displayed = summary.style.format(make_player_url, subset=["Search term"]).to_html(escape=False)
             canvas.write(to_be_displayed, unsafe_allow_html=True)
         else:
-            canvas.dataframe(summary, width='stretch', hide_index=True)
+            canvas.dataframe(summary, width="stretch", hide_index=True)
 
-        canvas.plotly_chart(placement_fig, width='stretch')
+        canvas.plotly_chart(placement_fig, width="stretch")
 
         if st.session_state.options.links_toggle:
             to_be_displayed = last_results.format(make_player_url, subset=["id"]).to_html(escape=False)
             canvas.write(to_be_displayed, unsafe_allow_html=True)
         else:
-            canvas.dataframe(last_results, width='stretch', hide_index=True)
+            canvas.dataframe(last_results, width="stretch", hide_index=True)
     else:
         # Present each chart and table in its own tab
         tab1, tab2, tab3, tab4 = canvas.tabs(["Waves over time", "Placement over Time", "Summary", "Last 5"])
 
         with tab1:
-            canvas.plotly_chart(wave_fig, width='stretch')
+            canvas.plotly_chart(wave_fig, width="stretch")
 
         with tab2:
-            canvas.plotly_chart(placement_fig, width='stretch')
+            canvas.plotly_chart(placement_fig, width="stretch")
 
         with tab3:
             if st.session_state.options.links_toggle:
                 to_be_displayed = summary.style.format(make_player_url, subset=["Search term"]).to_html(escape=False)
                 canvas.write(to_be_displayed, unsafe_allow_html=True)
             else:
-                canvas.dataframe(summary, width='stretch', hide_index=True)
+                canvas.dataframe(summary, width="stretch", hide_index=True)
 
         with tab4:
             if st.session_state.options.links_toggle:
                 to_be_displayed = last_results.format(make_player_url, subset=["id"]).to_html(escape=False)
                 canvas.write(to_be_displayed, unsafe_allow_html=True)
             else:
-                canvas.dataframe(last_results, width='stretch', hide_index=True)
+                canvas.dataframe(last_results, width="stretch", hide_index=True)
 
     if not player_id:
         with canvas.expander("Debug data..."):
@@ -386,9 +386,10 @@ def enrich_plot(fig, max_, min_, pd_datas):
 def get_patch_df(df, player_df, patch):
     if isinstance(patch, Patch):
         patch_df = player_df[player_df.patch == patch]
-    elif patch == Graph.last_16.value:
+    elif patch in (Graph.last_8.value, Graph.last_16.value, Graph.last_32.value):
+        last_n = int(patch.split("_")[1])
         hidden_query = {} if hidden_features else dict(public=True)
-        qs = set(TourneyResult.objects.filter(league=champ, **hidden_query).order_by("-date").values_list("date", flat=True)[:16])
+        qs = set(TourneyResult.objects.filter(league=champ, **hidden_query).order_by("-date").values_list("date", flat=True)[:last_n])
         patch_df = player_df[player_df.date.isin(qs)]
     else:
         patch_df = player_df
@@ -428,4 +429,3 @@ def filter_lower_leagues(rows):
 
 
 compute_comparison()
-

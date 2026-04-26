@@ -114,7 +114,9 @@ strata_to_color_018 = dict(zip(stratas_boundaries_018, colors_018))
 
 class Graph(Enum):
     all = "all"
+    last_8 = "last_8"
     last_16 = "last_16"
+    last_32 = "last_32"
 
 
 class Options(BaseModel):

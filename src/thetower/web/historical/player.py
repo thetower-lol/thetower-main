@@ -166,9 +166,13 @@ def compute_player_lookup():
     # Apply patch filtering similar to handle_colors_dependant_on_patch
     if isinstance(raw_patch, Patch):
         raw_filtered_df = raw_filtered_df[raw_filtered_df.patch == raw_patch]
+    elif raw_patch == Graph.last_8.value:
+        raw_filtered_df = raw_filtered_df[raw_filtered_df.date.isin(sorted(player_df.date.unique())[-8:])]
     elif raw_patch == Graph.last_16.value:
         # Get the last 16 tournament dates from this player's own data
         raw_filtered_df = raw_filtered_df[raw_filtered_df.date.isin(sorted(player_df.date.unique())[-16:])]
+    elif raw_patch == Graph.last_32.value:
+        raw_filtered_df = raw_filtered_df[raw_filtered_df.date.isin(sorted(player_df.date.unique())[-32:])]
 
     if raw_filter_bcs:
         sbcs = set(raw_filter_bcs)
@@ -210,8 +214,12 @@ def compute_player_lookup():
 
     if isinstance(league_patch, Patch):
         league_filtered_df = league_filtered_df[league_filtered_df.patch == league_patch]
+    elif league_patch == Graph.last_8.value:
+        league_filtered_df = league_filtered_df[league_filtered_df.date.isin(sorted(player_df.date.unique())[-8:])]
     elif league_patch == Graph.last_16.value:
         league_filtered_df = league_filtered_df[league_filtered_df.date.isin(sorted(player_df.date.unique())[-16:])]
+    elif league_patch == Graph.last_32.value:
+        league_filtered_df = league_filtered_df[league_filtered_df.date.isin(sorted(player_df.date.unique())[-32:])]
 
     if league_filter_bcs:
         sbcs = set(league_filter_bcs)
