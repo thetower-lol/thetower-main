@@ -16,7 +16,7 @@ from thetower.web.live.data_ops import (
     require_tournament_data,
 )
 from thetower.web.live.ui_components import render_data_status, setup_common_ui
-from thetower.web.util import add_player_id, fmt_dt
+from thetower.web.util import add_player_id, fmt_dt, get_user_tz
 
 
 @require_tournament_data
@@ -372,6 +372,9 @@ def live_placement_analysis():
     # Player's position comes from the already-corrected results entry for their bracket.
     player_bracket = df[df["display_name"] == selected_player]["bracket"].iloc[0]
     player_creation_time = bracket_creation_times[player_bracket]
+    # Convert player's creation time to user's local timezone to match the plot x-axis
+    _pct = player_creation_time if player_creation_time.tzinfo is not None else player_creation_time.replace(tzinfo=datetime.timezone.utc)
+    player_creation_time_local = _pct.astimezone(get_user_tz()).replace(tzinfo=None)
     player_result = next((r for r in results if r["Bracket"] == player_bracket), None)
     if player_result:
         player_position = int(player_result["Would Place"].split("/")[0])
@@ -446,7 +449,7 @@ def live_placement_analysis():
 
     # Add player's actual position marker
     fig.add_scatter(
-        x=[player_creation_time],
+        x=[player_creation_time_local],
         y=[player_position],
         mode="markers",
         marker=dict(symbol="x", size=15, color="purple"),
