@@ -458,7 +458,14 @@ def live_placement_analysis():
     )
 
     # Update plot layout
-    fig.update_layout(yaxis_title="Position", height=400, margin=dict(l=20, r=20, t=40, b=20), legend=dict(orientation="h" if is_mobile else "v"))
+    time_fmt = "%H:%M" if getattr(st.session_state, "time_24h", True) else "%I:%M %p"
+    fig.update_layout(
+        yaxis_title="Position",
+        height=400,
+        margin=dict(l=20, r=20, t=40, b=20),
+        legend=dict(orientation="h" if is_mobile else "v"),
+        xaxis_tickformat=time_fmt,
+    )
     fig.update_yaxes(autorange="reversed")
 
     st.plotly_chart(fig, width="stretch")

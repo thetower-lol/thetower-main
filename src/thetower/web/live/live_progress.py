@@ -45,6 +45,8 @@ def live_progress():
     tdf = tdf.copy()
     tdf["datetime"] = _dt.dt.tz_convert(user_tz).dt.tz_localize(None)
 
+    time_fmt = "%H:%M" if getattr(st.session_state, "time_24h", True) else "%I:%M %p"
+
     # Create top 25 progress plot
     fig = px.line(tdf, x="datetime", y="wave", color="display_name", title="Top 25 Players: live score", markers=True, line_shape="linear")
 
@@ -57,6 +59,7 @@ def live_progress():
         height=500,
         margin=dict(l=20, r=20, t=40, b=20),
         legend=dict(orientation="h" if is_mobile else "v"),
+        xaxis_tickformat=time_fmt,
     )
     st.plotly_chart(fig, width="stretch")
 
@@ -87,6 +90,7 @@ def live_progress():
         hovermode="closest",
         height=400,
         margin=dict(l=20, r=20, t=40, b=20),
+        xaxis_tickformat=time_fmt,
     )
     st.plotly_chart(fig, width="stretch")
 
