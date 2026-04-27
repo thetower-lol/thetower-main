@@ -1,14 +1,128 @@
+import os
 from pathlib import Path
 
 import pandas as pd
+import requests
 import streamlit as st
 from django.db.models import Max
+from django.utils import timezone
 
 from thetower.backend.sus.models import ModerationRecord
 from thetower.backend.tourney_results.data import get_player_id_lookup
-from thetower.backend.tourney_results.formatting import make_player_url
 from thetower.backend.tourney_results.models import TourneyRow
 from thetower.web.util import fmt_dt
+
+ZENDESK_VERDICT_FIELD_ID = 41952257656987
+
+
+@st.dialog("Zendesk Result", width="large")
+def show_zendesk_result(success: bool, title: str, message: str) -> None:
+    if success:
+        st.success(title)
+    else:
+        st.error(title)
+    st.markdown(message)
+    if st.button("✅ Close & Refresh", width="stretch", type="primary"):
+        st.cache_data.clear()
+        st.rerun()
+
+
+def _do_create_ticket(record_pk: int, tower_id: str, created_by: str, reason: str) -> tuple[bool, str, str]:
+    """Create a Zendesk ticket for a sus record and save the ID back to the record."""
+    from thetower.backend.zendesk_utils import ZendeskError, create_sus_report_ticket
+
+    try:
+        result = create_sus_report_ticket(
+            player_id=tower_id,
+            reporter=created_by,
+            reason="Suspicious",
+            details=reason,
+        )
+        ticket_id = result["ticket"]["id"]
+        record = ModerationRecord.objects.get(pk=record_pk)
+        record.zendesk_ticket_id = ticket_id
+        record.needs_zendesk_ticket = False
+        record.save(update_fields=["zendesk_ticket_id", "needs_zendesk_ticket"])
+        return True, f"Ticket #{ticket_id} created", f"Zendesk ticket **#{ticket_id}** created for player `{tower_id}`."
+    except ZendeskError as e:
+        return False, "Failed to create ticket", str(e)
+    except Exception as e:
+        return False, "Error", str(e)
+
+
+def _do_check_status(record_pk: int, tower_id: str, ticket_id: int) -> tuple[bool, str, str]:
+    """Poll Zendesk for ticket verdict and act on it."""
+    base_url = os.getenv("ZENDESK_BASE_URL", "https://techtreegames.zendesk.com")
+    auth_token = os.getenv("ZENDESK_AUTH_TOKEN")
+    if not auth_token:
+        return False, "Missing configuration", "ZENDESK\\_AUTH\\_TOKEN environment variable is not set."
+
+    try:
+        r = requests.get(
+            f"{base_url}/api/v2/tickets/{ticket_id}.json",
+            headers={"Authorization": f"Basic {auth_token}", "Content-Type": "application/json"},
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        return False, "Network error", str(e)
+
+    if not r.ok:
+        return False, f"Zendesk API error ({r.status_code})", r.text
+
+    ticket = r.json()["ticket"]
+    status = ticket["status"]
+    verdict = next((cf["value"] for cf in ticket.get("custom_fields", []) if cf["id"] == ZENDESK_VERDICT_FIELD_ID), None)
+
+    lines = [
+        f"**Ticket #{ticket_id}** — Status: `{status}`",
+        f"**Verdict field:** `{verdict or 'not set'}`",
+        "",
+    ]
+
+    if status not in ("solved", "closed"):
+        lines.append("ℹ️ Ticket is still open — no action taken.")
+        return True, f"Ticket #{ticket_id}: {status}", "\n\n".join(lines)
+
+    if verdict is None:
+        lines.append("ℹ️ No verdict set on ticket — no action taken.")
+        return True, f"Ticket #{ticket_id}: no verdict", "\n\n".join(lines)
+
+    try:
+        record = ModerationRecord.objects.get(pk=record_pk)
+    except ModerationRecord.DoesNotExist:
+        lines.append("⚠️ Sus record no longer exists — nothing to act on.")
+        return True, "Record already gone", "\n\n".join(lines)
+
+    if verdict == "sus":
+        # Resolve sus record with audit note (mirrors create_for_api ban path)
+        resolution_info = f"Automatically resolved due to ban escalation (Zendesk ticket #{ticket_id} verdict: sus)"
+        if record.reason:
+            record.reason = f"{record.reason}\n\n{resolution_info}"
+        else:
+            record.reason = resolution_info
+        record.save(update_fields=["reason"])
+        record.resolve()
+
+        new_ban = ModerationRecord.objects.create(
+            tower_id=tower_id,
+            moderation_type=ModerationRecord.ModerationType.BAN,
+            source=ModerationRecord.ModerationSource.AUTOMATED,
+            game_instance=record.game_instance,
+            reason=f"Banned via Zendesk ticket #{ticket_id} (verdict: sus)",
+            needs_zendesk_ticket=False,
+            started_at=timezone.now(),
+        )
+        new_ban._queue_recalculation()
+        lines.append(f"🔨 Player `{tower_id}` has been **banned** and sus record resolved.")
+        return True, f"Player {tower_id} banned", "\n\n".join(lines)
+
+    if verdict == "not_sus":
+        record.resolve()
+        lines.append(f"✅ Sus record for `{tower_id}` resolved — player cleared.")
+        return True, f"Player {tower_id} cleared", "\n\n".join(lines)
+
+    lines.append(f"⚠️ Unrecognised verdict `{verdict}` — no action taken.")
+    return True, f"Unknown verdict: {verdict}", "\n\n".join(lines)
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -36,6 +150,7 @@ def get_sus_moderation_raw_data():
 
         sus_data.append(
             {
+                "record_pk": record.pk,
                 "tower_id": record.tower_id,
                 "player_name": player_name,
                 "created_at": record.created_at,
@@ -75,6 +190,7 @@ def get_sus_moderation_raw_data():
 
         combined_data.append(
             {
+                "record_pk": sus_record["record_pk"],
                 "tower_id": tower_id,
                 "player_name": real_name,
                 "last_tournament_date": last_tournament,
@@ -99,6 +215,12 @@ def render_sus_moderation_page():
         table_styling = f"<style>{infile.read()}</style>"
     st.write(table_styling, unsafe_allow_html=True)
 
+    # Override centered layout — make this page use full width
+    st.markdown(
+        "<style>.block-container { max-width: 100% !important; padding-left: 2rem !important; padding-right: 2rem !important; }</style>",
+        unsafe_allow_html=True,
+    )
+
     st.markdown("# Active Sus Moderation Records")
     st.markdown("All players currently marked as suspicious with their last tournament participation")
 
@@ -120,6 +242,8 @@ def render_sus_moderation_page():
     total_sus = len(df)
     never_participated = len(df[df["last_tournament_date"].isna()])
     participated = total_sus - never_participated
+    with_zendesk = len(df[df["zendesk_ticket_id"].notna()])
+    without_zendesk = total_sus - with_zendesk
 
     if participated > 0:
         avg_days_since = df[df["days_since_last_tournament"].notna()]["days_since_last_tournament"].mean()
@@ -141,6 +265,12 @@ def render_sus_moderation_page():
         else:
             st.metric("Avg Days Since Last", "N/A")
 
+    col5, col6 = st.columns(2)
+    with col5:
+        st.metric("With Zendesk Ticket", with_zendesk)
+    with col6:
+        st.metric("Without Zendesk Ticket", without_zendesk)
+
     # Filters
     days_filter = st.selectbox(
         "Filter by days since last tournament:",
@@ -161,66 +291,57 @@ def render_sus_moderation_page():
     if days_filter != "All":
         st.caption(f"Showing {len(df)} of {total_sus} records")
 
-    # Format the display DataFrame
-    display_df = df.copy()
-
-    # Make player_id clickable
-    display_df["clickable_player_id"] = [make_player_url(player_id, id=player_id) for player_id in display_df["tower_id"]]
-
-    # Format dates for display
-    display_df["formatted_last_tournament"] = display_df["last_tournament_date"].apply(lambda x: x.strftime("%Y-%m-%d") if pd.notnull(x) else "Never")
-
-    display_df["formatted_sus_created"] = display_df["sus_created_at"].apply(lambda x: fmt_dt(x, fmt="%Y-%m-%d %H:%M") if pd.notnull(x) else "")
-
-    display_df["days_since_display"] = display_df["days_since_last_tournament"].apply(lambda x: f"{x} days" if pd.notnull(x) else "Never")
-
-    display_df["zendesk_ticket_display"] = display_df["zendesk_ticket_id"].apply(lambda x: str(int(x)) if pd.notnull(x) else "")
-
-    # Select columns for display
-    display_cols = [
-        "clickable_player_id",
-        "player_name",
-        "zendesk_ticket_display",
-        "formatted_last_tournament",
-        "days_since_display",
-        "formatted_sus_created",
-        "sus_created_by",
-    ]
-
-    # Display the sortable datatable
+    # ── Columns-based table with per-row action buttons ──────────────────────
     st.subheader("📊 Active Sus Moderation Records")
 
-    # Prepare data for st.dataframe (without HTML links for sorting)
-    sortable_df = display_df.copy()
-    sortable_df = sortable_df[display_cols].rename(
-        columns={
-            "clickable_player_id": "Tower ID",
-            "player_name": "Player Name",
-            "zendesk_ticket_display": "Zendesk Ticket",
-            "formatted_last_tournament": "Last Tournament",
-            "days_since_display": "Days Since",
-            "formatted_sus_created": "Sus Created",
-            "sus_created_by": "Created By",
-        }
-    )
+    # Column proportions:  #   Tower ID  Player       Last Tourn  Days   Created       By      Ticket  Action
+    COL_WIDTHS = [0.35, 1.5, 2.0, 1.4, 0.9, 1.8, 1.4, 0.9, 1.4]
 
-    # Replace clickable links with just the Tower ID for sorting
-    sortable_df["Tower ID"] = display_df["tower_id"]
+    # Header row
+    h0, h1, h2, h3, h4, h5, h6, h7, h8 = st.columns(COL_WIDTHS)
+    h0.markdown("**#**")
+    h1.markdown("**Tower ID**")
+    h2.markdown("**Player**")
+    h3.markdown("**Last Tourn.**")
+    h4.markdown("**Days**")
+    h5.markdown("**Sus Created**")
+    h6.markdown("**Created By**")
+    h7.markdown("**Ticket #**")
+    h8.markdown("**Action**")
+    st.divider()
 
-    st.dataframe(
-        sortable_df,
-        width="stretch",
-        height=600,
-        column_config={
-            "Tower ID": st.column_config.TextColumn("Tower ID", help="Click to copy Tower ID", max_chars=16),
-            "Player Name": st.column_config.TextColumn("Player Name", help="Player's display name"),
-            "Zendesk Ticket": st.column_config.TextColumn("Zendesk Ticket", help="Zendesk ticket number, if created"),
-            "Last Tournament": st.column_config.TextColumn("Last Tournament", help="Date of last tournament participation"),
-            "Days Since": st.column_config.TextColumn("Days Since", help="Days since last tournament"),
-            "Sus Created": st.column_config.TextColumn("Sus Created", help="When the sus record was created"),
-            "Created By": st.column_config.TextColumn("Created By", help="Who created the sus record"),
-        },
-    )
+    for row_num, (_, row) in enumerate(df.iterrows(), start=1):
+        tower_id = row["tower_id"]
+        record_pk = int(row["record_pk"])
+        ticket_id = row["zendesk_ticket_id"]
+        has_ticket = pd.notnull(ticket_id)
+
+        last_tourn = row["last_tournament_date"].strftime("%Y-%m-%d") if pd.notnull(row["last_tournament_date"]) else "Never"
+        days_since = f"{int(row['days_since_last_tournament'])}d" if pd.notnull(row["days_since_last_tournament"]) else "—"
+        sus_created = fmt_dt(row["sus_created_at"], fmt="%Y-%m-%d %H:%M %Z") if pd.notnull(row["sus_created_at"]) else ""
+        ticket_display = str(int(ticket_id)) if has_ticket else "—"
+
+        c0, c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(COL_WIDTHS)
+        c0.markdown(str(row_num))
+        c1.markdown(f"`{tower_id}`")
+        c2.markdown(row["player_name"])
+        c3.markdown(last_tourn)
+        c4.markdown(days_since)
+        c5.markdown(sus_created)
+        c6.markdown(row["sus_created_by"])
+        c7.markdown(ticket_display)
+
+        with c8:
+            if has_ticket:
+                if st.button("🔍 Check", key=f"check_{record_pk}", help=f"Poll Zendesk ticket #{int(ticket_id)} for verdict"):
+                    with st.spinner("Checking Zendesk..."):
+                        ok, title, msg = _do_check_status(record_pk, tower_id, int(ticket_id))
+                    show_zendesk_result(ok, title, msg)
+            else:
+                if st.button("🎫 Create", key=f"create_{record_pk}", help="Create a Zendesk ticket for this sus record"):
+                    with st.spinner("Creating ticket..."):
+                        ok, title, msg = _do_create_ticket(record_pk, tower_id, row["sus_created_by"], row["sus_reason"])
+                    show_zendesk_result(ok, title, msg)
 
 
 render_sus_moderation_page()
