@@ -42,6 +42,7 @@ def get_sus_moderation_raw_data():
                 "created_by": record.created_by_display,
                 "reason": record.reason or "No reason provided",
                 "started_at": record.started_at,
+                "zendesk_ticket_id": record.zendesk_ticket_id,
             }
         )
 
@@ -82,6 +83,7 @@ def get_sus_moderation_raw_data():
                 "sus_created_by": sus_record["created_by"],
                 "sus_reason": sus_record["reason"],
                 "sus_started_at": sus_record["started_at"],
+                "zendesk_ticket_id": sus_record["zendesk_ticket_id"],
             }
         )
 
@@ -139,6 +141,26 @@ def render_sus_moderation_page():
         else:
             st.metric("Avg Days Since Last", "N/A")
 
+    # Filters
+    days_filter = st.selectbox(
+        "Filter by days since last tournament:",
+        ["All", "Never participated", "Within 7 days", "Within 30 days", "Within 90 days", "Over 90 days ago"],
+    )
+
+    if days_filter == "Never participated":
+        df = df[df["last_tournament_date"].isna()]
+    elif days_filter == "Within 7 days":
+        df = df[df["days_since_last_tournament"] <= 7]
+    elif days_filter == "Within 30 days":
+        df = df[df["days_since_last_tournament"] <= 30]
+    elif days_filter == "Within 90 days":
+        df = df[df["days_since_last_tournament"] <= 90]
+    elif days_filter == "Over 90 days ago":
+        df = df[df["days_since_last_tournament"] > 90]
+
+    if days_filter != "All":
+        st.caption(f"Showing {len(df)} of {total_sus} records")
+
     # Format the display DataFrame
     display_df = df.copy()
 
@@ -152,10 +174,13 @@ def render_sus_moderation_page():
 
     display_df["days_since_display"] = display_df["days_since_last_tournament"].apply(lambda x: f"{x} days" if pd.notnull(x) else "Never")
 
+    display_df["zendesk_ticket_display"] = display_df["zendesk_ticket_id"].apply(lambda x: str(int(x)) if pd.notnull(x) else "")
+
     # Select columns for display
     display_cols = [
         "clickable_player_id",
         "player_name",
+        "zendesk_ticket_display",
         "formatted_last_tournament",
         "days_since_display",
         "formatted_sus_created",
@@ -171,11 +196,11 @@ def render_sus_moderation_page():
         columns={
             "clickable_player_id": "Tower ID",
             "player_name": "Player Name",
+            "zendesk_ticket_display": "Zendesk Ticket",
             "formatted_last_tournament": "Last Tournament",
             "days_since_display": "Days Since",
             "formatted_sus_created": "Sus Created",
             "sus_created_by": "Created By",
-            "sus_reason": "Reason",
         }
     )
 
@@ -189,68 +214,13 @@ def render_sus_moderation_page():
         column_config={
             "Tower ID": st.column_config.TextColumn("Tower ID", help="Click to copy Tower ID", max_chars=16),
             "Player Name": st.column_config.TextColumn("Player Name", help="Player's display name"),
+            "Zendesk Ticket": st.column_config.TextColumn("Zendesk Ticket", help="Zendesk ticket number, if created"),
             "Last Tournament": st.column_config.TextColumn("Last Tournament", help="Date of last tournament participation"),
             "Days Since": st.column_config.TextColumn("Days Since", help="Days since last tournament"),
             "Sus Created": st.column_config.TextColumn("Sus Created", help="When the sus record was created"),
             "Created By": st.column_config.TextColumn("Created By", help="Who created the sus record"),
-            "Reason": st.column_config.TextColumn("Reason", help="Reason for sus moderation"),
         },
-    )  # Additional filters and analysis
-    with st.expander("🔍 Filter and Analysis Options"):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.subheader("Filter by Days Since Last Tournament")
-            days_filter = st.selectbox(
-                "Show players with last tournament:",
-                ["All", "Never participated", "Within 7 days", "Within 30 days", "Within 90 days", "Over 90 days ago"],
-            )
-
-            if days_filter != "All":
-                filtered_df = df.copy()
-                if days_filter == "Never participated":
-                    filtered_df = filtered_df[filtered_df["last_tournament_date"].isna()]
-                elif days_filter == "Within 7 days":
-                    filtered_df = filtered_df[filtered_df["days_since_last_tournament"] <= 7]
-                elif days_filter == "Within 30 days":
-                    filtered_df = filtered_df[filtered_df["days_since_last_tournament"] <= 30]
-                elif days_filter == "Within 90 days":
-                    filtered_df = filtered_df[filtered_df["days_since_last_tournament"] <= 90]
-                elif days_filter == "Over 90 days ago":
-                    filtered_df = filtered_df[filtered_df["days_since_last_tournament"] > 90]
-
-                st.write(f"**Filtered Results: {len(filtered_df)} records**")
-
-                if not filtered_df.empty:
-                    # Show filtered results with sortable datatable
-                    filtered_display = filtered_df.copy()
-                    filtered_display["formatted_last_tournament"] = filtered_display["last_tournament_date"].apply(
-                        lambda x: x.strftime("%Y-%m-%d") if pd.notnull(x) else "Never"
-                    )
-                    filtered_display["days_since_display"] = filtered_display["days_since_last_tournament"].apply(
-                        lambda x: f"{x} days" if pd.notnull(x) else "Never"
-                    )
-
-                    filtered_final = filtered_display[["tower_id", "player_name", "formatted_last_tournament", "days_since_display"]].rename(
-                        columns={
-                            "tower_id": "Tower ID",
-                            "player_name": "Player Name",
-                            "formatted_last_tournament": "Last Tournament",
-                            "days_since_display": "Days Since",
-                        }
-                    )
-
-                    st.dataframe(
-                        filtered_final,
-                        width="stretch",
-                        height=400,
-                        column_config={
-                            "Tower ID": st.column_config.TextColumn("Tower ID", max_chars=16),
-                            "Player Name": st.column_config.TextColumn("Player Name"),
-                            "Last Tournament": st.column_config.TextColumn("Last Tournament"),
-                            "Days Since": st.column_config.TextColumn("Days Since"),
-                        },
-                    )
+    )
 
 
 render_sus_moderation_page()
