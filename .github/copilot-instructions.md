@@ -8,9 +8,10 @@
 > **NEVER directly edit any repo's `.github/copilot-instructions.md`** — it is auto-generated and will be overwritten.
 
 To change coding instructions:
+
 1. Edit the source files at the org root (`thetower.lol/`):
-   - Shared standards → `.github/copilot-instructions.md` (below the `BEGIN_SHARED_INSTRUCTIONS` marker)
-   - Repo-specific content → `.github/instructions/<repo>.instructions.md`
+    - Shared standards → `.github/copilot-instructions.md` (below the `BEGIN_SHARED_INSTRUCTIONS` marker)
+    - Repo-specific content → `.github/instructions/<repo>.instructions.md`
 2. Run `.\sync_instructions.ps1` from the org root to regenerate all per-repo files
 3. Stage and commit the generated per-repo files alongside any source changes
 
