@@ -93,10 +93,20 @@ def execute(league):
         logging.info(f"Using cached file {file_path}")
         return
 
-    try:
-        df = make_request(league)
-    except Exception as e:
-        logging.error(f"Error in make_request: {e}")
+    for attempt in range(1, 4):
+        try:
+            df = make_request(league)
+        except Exception as e:
+            logging.error(f"Error in make_request (attempt {attempt}): {e}")
+            return
+
+        if not df.empty:
+            break
+
+        logging.warning(f"Empty response for {league} (attempt {attempt}/3), retrying in 30s...")
+        time.sleep(30)
+    else:
+        logging.error(f"All 3 attempts returned empty data for {league}, not saving file.")
         return
 
     df.to_csv(file_path, index=False, compression="gzip")
