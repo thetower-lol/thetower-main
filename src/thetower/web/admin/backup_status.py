@@ -79,6 +79,164 @@ def _fetch_prefix_stats(prefix: str) -> dict:
         return {"count": 0, "total_size": 0, "objects": [], "error": str(exc)}
 
 
+def _check_backup_coverage() -> list[dict]:
+    """Return a list of backup sources with their current status and any blocking reason."""
+    from pathlib import Path
+
+    from thetower.backend.env_config import get_bot_config_data, get_django_data
+
+    sources = []
+
+    # --- Django DB (tower.sqlite3) ---
+    try:
+        django_data = get_django_data()
+        db_path = django_data / "tower.sqlite3"
+        if db_path.exists():
+            size = db_path.stat().st_size
+            sources.append(
+                {
+                    "name": "Django DB (tower.sqlite3)",
+                    "icon": "🗄️",
+                    "status": "ok",
+                    "detail": f"Found at `{db_path}` ({_fmt_bytes(size)})",
+                    "r2_prefix": "db/daily",
+                    "filename_prefix": "django",
+                }
+            )
+        else:
+            sources.append(
+                {
+                    "name": "Django DB (tower.sqlite3)",
+                    "icon": "🗄️",
+                    "status": "error",
+                    "detail": f"File not found at `{db_path}` — backup service will skip this",
+                    "r2_prefix": "db/daily",
+                    "filename_prefix": "django",
+                }
+            )
+    except RuntimeError as exc:
+        sources.append(
+            {
+                "name": "Django DB (tower.sqlite3)",
+                "icon": "🗄️",
+                "status": "warning",
+                "detail": f"DJANGO_DATA not set — {exc}",
+                "r2_prefix": "db/daily",
+                "filename_prefix": "django",
+            }
+        )
+
+    # --- Bot config DB (bot-config.sqlite3) ---
+    bot_config_dir = get_bot_config_data()
+    if bot_config_dir is None:
+        sources.append(
+            {
+                "name": "Bot Config DB (bot-config.sqlite3)",
+                "icon": "🤖",
+                "status": "warning",
+                "detail": "DISCORD_BOT_CONFIG env var is not set — backup service will skip this database",
+                "r2_prefix": "db/daily",
+                "filename_prefix": "bot-config",
+            }
+        )
+    else:
+        bot_db_path = bot_config_dir / "bot-config.sqlite3"
+        if bot_db_path.exists():
+            size = bot_db_path.stat().st_size
+            sources.append(
+                {
+                    "name": "Bot Config DB (bot-config.sqlite3)",
+                    "icon": "🤖",
+                    "status": "ok",
+                    "detail": f"Found at `{bot_db_path}` ({_fmt_bytes(size)})",
+                    "r2_prefix": "db/daily",
+                    "filename_prefix": "bot-config",
+                }
+            )
+        else:
+            sources.append(
+                {
+                    "name": "Bot Config DB (bot-config.sqlite3)",
+                    "icon": "🤖",
+                    "status": "error",
+                    "detail": f"DISCORD_BOT_CONFIG is set to `{bot_config_dir}` but `bot-config.sqlite3` was not found there — backup service will skip",
+                    "r2_prefix": "db/daily",
+                    "filename_prefix": "bot-config",
+                }
+            )
+
+    # --- CSV / tar archives ---
+    csv_data_val = os.getenv("CSV_DATA")
+    if not csv_data_val:
+        sources.append(
+            {
+                "name": "Tournament CSV tars",
+                "icon": "📦",
+                "status": "warning",
+                "detail": "CSV_DATA env var is not set — tar backup will fail on startup",
+                "r2_prefix": "tar",
+                "filename_prefix": None,
+            }
+        )
+    else:
+        csv_path = Path(csv_data_val)
+        if csv_path.exists():
+            sources.append(
+                {
+                    "name": "Tournament CSV tars",
+                    "icon": "📦",
+                    "status": "ok",
+                    "detail": f"CSV_DATA points to `{csv_path}`",
+                    "r2_prefix": "tar",
+                    "filename_prefix": None,
+                }
+            )
+        else:
+            sources.append(
+                {
+                    "name": "Tournament CSV tars",
+                    "icon": "📦",
+                    "status": "error",
+                    "detail": f"CSV_DATA is set to `{csv_data_val}` but the directory does not exist",
+                    "r2_prefix": "tar",
+                    "filename_prefix": None,
+                }
+            )
+
+    return sources
+
+
+def _render_backup_coverage(all_r2_stats: dict[str, dict]) -> None:
+    """Render the Backup Coverage section."""
+    sources = _check_backup_coverage()
+
+    status_icon = {"ok": "✅", "warning": "⚠️", "error": "❌"}
+
+    for src in sources:
+        icon = status_icon[src["status"]]
+        st.markdown(f"**{icon} {src['icon']} {src['name']}**")
+        st.caption(src["detail"])
+
+        # If R2 credentials available, show last backup time from the fetched stats
+        prefix = src["r2_prefix"]
+        fp = src.get("filename_prefix")
+        if prefix in all_r2_stats and not all_r2_stats[prefix].get("error"):
+            objects = all_r2_stats[prefix]["objects"]
+            # Filter to objects matching this source's filename prefix
+            if fp:
+                matching = [o for o in objects if o["Key"].split("/")[-1].startswith(fp + "_")]
+            else:
+                matching = objects
+            if matching:
+                last_obj = matching[0]  # already sorted newest-first
+                st.caption(f"↳ Last R2 backup: {fmt_dt(last_obj['LastModified'], fmt='%Y-%m-%d %H:%M UTC')} ({_time_ago(last_obj['LastModified'])})")
+            elif src["status"] == "ok":
+                st.caption("↳ No backups found yet in R2 for this source")
+
+        if src is not sources[-1]:
+            st.markdown("")
+
+
 def backup_status_page() -> None:
     st.title("☁️ Backup Status")
 
@@ -94,11 +252,12 @@ def backup_status_page() -> None:
         st.warning(
             "R2 credentials not configured — bucket stats unavailable. Set R2_ACCOUNT_ID, R2_BUCKET_NAME, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY."
         )
+        all_stats: dict[str, dict] = {}
     else:
         # Summary metric row
         st.markdown("---")
         cols = st.columns(len(_PREFIXES))
-        all_stats: dict[str, dict] = {}
+        all_stats = {}
 
         for i, (prefix, meta) in enumerate(_PREFIXES.items()):
             stats = _fetch_prefix_stats(prefix)
@@ -132,17 +291,19 @@ def backup_status_page() -> None:
                     st.info("No backups found in this prefix.")
                     continue
 
+                is_tar = prefix.startswith("tar")
                 rows = []
                 for obj in stats["objects"][:25]:
                     last_mod: datetime = obj["LastModified"]
-                    rows.append(
-                        {
-                            "Filename": obj["Key"].split("/")[-1],
-                            "Size": _fmt_bytes(obj["Size"]),
-                            "Uploaded": fmt_dt(last_mod, fmt="%Y-%m-%d %H:%M"),
-                            "Age": _time_ago(last_mod),
-                        }
-                    )
+                    parts = obj["Key"].split("/")
+                    row: dict = {}
+                    if is_tar:
+                        row["League"] = parts[-2] if len(parts) >= 2 else ""
+                    row["Filename"] = parts[-1]
+                    row["Size"] = _fmt_bytes(obj["Size"])
+                    row["Uploaded"] = fmt_dt(last_mod, fmt="%Y-%m-%d %H:%M")
+                    row["Age"] = _time_ago(last_mod)
+                    rows.append(row)
 
                 st.dataframe(rows, use_container_width=True, hide_index=True)
 
@@ -150,6 +311,11 @@ def backup_status_page() -> None:
                     st.caption(f"Showing 25 of {stats['count']} objects · Total: {_fmt_bytes(stats['total_size'])}")
                 else:
                     st.caption(f"Total: {_fmt_bytes(stats['total_size'])}")
+
+    # Backup coverage section — shows each source with status and last-backup time
+    st.markdown("---")
+    st.subheader("🔍 Backup Coverage")
+    _render_backup_coverage(all_stats)
 
     # Activity log section — always shown, no R2 credentials needed
     st.markdown("---")
