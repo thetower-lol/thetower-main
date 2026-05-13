@@ -91,14 +91,6 @@ else:
 
     selected_paths = [path for h, path in catalog[selected_date] if start_hour <= h <= end_hour]
 
-# --- Text filters ---
-with st.expander("Filters", expanded=True):
-    col1, col2, col3, col4 = st.columns(4)
-    ip_filter = col1.text_input("IP contains")
-    path_filter = col2.text_input("Path contains")
-    qs_filter = col3.text_input("Query string contains")
-    ctx_filter = col4.text_input("Context contains")
-
 # --- Load files for selected date + hour range ---
 # selected_paths already set above
 rows = parse_files(selected_paths)
@@ -107,8 +99,20 @@ rows = parse_files(selected_paths)
 if _cutoff is not None:
     rows = [r for r in rows if datetime.strptime(r["dt"], "%Y-%m-%d %H:%M:%S UTC").replace(tzinfo=timezone.utc) >= _cutoff]
 
-# --- Apply text filters ---
+# --- Filters ---
+with st.expander("Filters", expanded=True):
+    site_options = sorted({r["site"] for r in rows if r.get("site")})
+    site_filter = st.multiselect("Site", site_options, default=site_options)
+    col1, col2, col3, col4 = st.columns(4)
+    ip_filter = col1.text_input("IP contains")
+    path_filter = col2.text_input("Path contains")
+    qs_filter = col3.text_input("Query string contains")
+    ctx_filter = col4.text_input("Context contains")
+
+# --- Apply filters ---
 filtered = rows
+if site_filter and len(site_filter) < len(site_options):
+    filtered = [r for r in filtered if r.get("site") in site_filter]
 if ip_filter:
     filtered = [r for r in filtered if ip_filter.lower() in r["ip"].lower()]
 if path_filter:
