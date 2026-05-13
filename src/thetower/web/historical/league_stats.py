@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from django.db.models import Q
 
-from thetower.backend.tourney_results.constants import leagues
+from thetower.backend.tourney_results.constants import champ, legend, leagues
 from thetower.backend.tourney_results.data import get_patches
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 
@@ -52,7 +52,7 @@ def compute_league_stats() -> None:
 
     filter_col1, filter_col2 = st.columns(2)
 
-    default_patches = all_patches[:5] if len(all_patches) >= 5 else all_patches
+    default_patches = [p for p in all_patches if p.version_minor >= 24]
     selected_patches = filter_col1.multiselect(
         "Patch versions",
         options=all_patches,
@@ -64,8 +64,14 @@ def compute_league_stats() -> None:
     selected_leagues = filter_col2.multiselect(
         "Leagues",
         options=leagues,
-        default=list(leagues),
+        default=[legend, champ],
         help="Select one or more leagues to display.",
+    )
+
+    group_by_major = st.toggle(
+        "Group results by major patch",
+        value=False,
+        help="Collapse sub-patches (e.g. 0.27.0, 0.27.1, 0.27.3) into a single major-version group (0.27).",
     )
 
     if not selected_patches:
@@ -90,10 +96,8 @@ def compute_league_stats() -> None:
         st.info("No tournament data found for the selected filters.")
         return
 
-    result_ids = [r["id"] for r in results_qs]
-
     rows = TourneyRow.objects.filter(
-        result__in=result_ids,
+        result__in=TourneyResult.objects.filter(patch_q, league__in=selected_leagues),
         position__gt=0,
     ).values("result_id", "wave")
 
@@ -142,8 +146,16 @@ def compute_league_stats() -> None:
                 )
             )
 
-    # Patch boundary vertical lines
+    # Patch boundary vertical lines — deduplicate when grouping by major patch
+    seen_major: set[int] = set()
     for patch in sorted_patches:
+        if group_by_major:
+            if patch.version_minor in seen_major:
+                continue
+            seen_major.add(patch.version_minor)
+            boundary_label = f"0.{patch.version_minor}"
+        else:
+            boundary_label = str(patch)
         trend_fig.add_shape(
             type="line",
             x0=patch.start_date,
@@ -157,7 +169,7 @@ def compute_league_stats() -> None:
             x=patch.start_date,
             y=1,
             yref="paper",
-            text=str(patch),
+            text=boundary_label,
             showarrow=False,
             font=dict(size=10, color="rgba(200,200,200,0.8)"),
             xanchor="left",
@@ -186,14 +198,24 @@ def compute_league_stats() -> None:
             continue
         rdate = result["date"]
         patch_label = next(
-            (str(p) for p in sorted_patches if p.start_date <= rdate <= p.end_date),
+            (f"0.{p.version_minor}" if group_by_major else str(p) for p in sorted_patches if p.start_date <= rdate <= p.end_date),
             "Unknown",
         )
         waves_by_patch_league[(patch_label, result["league"])].extend(waves)
 
+    # Build ordered list of unique display labels (deduplicated when grouping by major patch)
+    if group_by_major:
+        _seen_minor: set[int] = set()
+        display_patch_labels: list[str] = []
+        for _p in sorted_patches:
+            if _p.version_minor not in _seen_minor:
+                _seen_minor.add(_p.version_minor)
+                display_patch_labels.append(f"0.{_p.version_minor}")
+    else:
+        display_patch_labels = [str(p) for p in sorted_patches]
+
     patch_stat_rows = []
-    for patch in sorted_patches:
-        plabel = str(patch)
+    for plabel in display_patch_labels:
         for league in selected_leagues:
             waves = waves_by_patch_league.get((plabel, league), [])
             mx, avg, med = _compute_stats(waves)
@@ -215,7 +237,7 @@ def compute_league_stats() -> None:
     for league_idx, league in enumerate(selected_leagues):
         league_color = _LEAGUE_COLORS[league_idx % len(_LEAGUE_COLORS)]
         sub = patch_df[patch_df["League"] == league]
-        patch_labels = [str(p) for p in sorted_patches]
+        patch_labels = display_patch_labels
         median_vals = [sub[sub["Patch"] == pl]["Median Wave"].values[0] if pl in sub["Patch"].values else None for pl in patch_labels]
         avg_vals = [sub[sub["Patch"] == pl]["Avg Wave"].values[0] if pl in sub["Patch"].values else None for pl in patch_labels]
         max_vals = [sub[sub["Patch"] == pl]["Max Wave"].values[0] if pl in sub["Patch"].values else None for pl in patch_labels]
