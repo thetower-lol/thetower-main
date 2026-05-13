@@ -97,7 +97,13 @@ archive_pages = [
 admin_system_health_pages = []
 admin_moderation_pages = []
 
+admin_analytics_pages: list[st.Page] = []
+
 if hidden_features:
+    admin_analytics_pages = [
+        st.Page("historical/league_stats.py", title="League Statistics", icon="📊", url_path="leaguestats"),
+    ]
+
     admin_system_health_pages = [
         st.Page("admin/service_status.py", title="Service Status", icon="🔧", url_path="services"),
         st.Page("admin/codebase_status.py", title="Codebase Status", icon="📦", url_path="codebase"),
@@ -128,6 +134,8 @@ page_dict["Archive"] = archive_pages
 
 # Add admin pages only for hidden features
 if hidden_features:
+    if admin_analytics_pages:
+        page_dict["Admin - Analytics"] = admin_analytics_pages
     if admin_system_health_pages:
         page_dict["Admin - System Health"] = admin_system_health_pages
     if admin_moderation_pages:
@@ -269,8 +277,7 @@ if st.session_state.get("time_24h_changed"):
     )
     st.session_state.time_24h_changed = False
 
-st.html(
-    """
+st.html("""
 <style>
     .stMainBlockContainer {
         max-width:60rem;
@@ -280,8 +287,7 @@ st.html(
         display: none;
     }
 </style>
-"""
-)
+""")
 
 _path, _render_id = log_request()
 _render_start = time.perf_counter()
