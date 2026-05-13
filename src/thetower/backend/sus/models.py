@@ -177,10 +177,7 @@ class GameInstance(models.Model):
     )
     name = models.CharField(max_length=50, blank=True, null=True, help_text="Friendly name for this instance (e.g., 'Instance 1', 'Instance 2')")
     primary = models.BooleanField(default=False, help_text="Primary instance - determines Discord roles for all linked accounts")
-    active = models.BooleanField(
-        default=True,
-        help_text="Whether this game instance is active (visible to regular users); inactive instances are hidden from users but preserved for mod history",
-    )
+    active = models.BooleanField(default=True, help_text="Whether this game instance is active (visible to regular users); inactive instances are hidden from users but preserved for mod history")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
