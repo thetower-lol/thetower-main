@@ -1,5 +1,6 @@
 import datetime
 import secrets
+from typing import Optional
 
 from django.contrib.auth.models import User
 from django.db import models
@@ -90,6 +91,23 @@ class KnownPlayer(models.Model):
             return primary_instance.player_ids.filter(primary=True).first()
         return None
 
+    def get_display_name(self) -> Optional[str]:
+        """Return the best available display name for this player.
+
+        Walks primary GameInstance → primary Discord LinkedAccount (via role_source_instance)
+        → display_name. Falls back to self.name, then None.
+        """
+        primary_instance = self.get_primary_game_instance()
+        if primary_instance:
+            discord_account = self.linked_accounts.filter(
+                platform=LinkedAccount.Platform.DISCORD,
+                role_source_instance=primary_instance,
+                active=True,
+            ).first()
+            if discord_account and discord_account.display_name:
+                return discord_account.display_name
+        return self.name or None
+
     history = HistoricalRecords()
 
 
@@ -159,6 +177,10 @@ class GameInstance(models.Model):
     )
     name = models.CharField(max_length=50, blank=True, null=True, help_text="Friendly name for this instance (e.g., 'Instance 1', 'Instance 2')")
     primary = models.BooleanField(default=False, help_text="Primary instance - determines Discord roles for all linked accounts")
+    active = models.BooleanField(
+        default=True,
+        help_text="Whether this game instance is active (visible to regular users); inactive instances are hidden from users but preserved for mod history",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
