@@ -48,6 +48,13 @@ web = [
     "tqdm==4.67.3",
 ]
 
+ocr = [
+    "pytesseract==0.3.13",
+    "opencv-python-headless==4.13.0.92",
+    "numpy==2.3.0",
+    "Pillow==11.2.1",
+]
+
 dev = [
     "pytest==9.0.2",
     "pytest-django==4.12.0",
