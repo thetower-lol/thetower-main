@@ -52,7 +52,7 @@ ocr = [
     "pytesseract==0.3.13",
     "opencv-python-headless==4.13.0.92",
     "numpy==2.4.2",
-    "Pillow==11.3.0",
+    "Pillow>=11.3.0",
 ]
 
 dev = [
