@@ -55,11 +55,12 @@ All deploy keys and SSH config live in `/var/lib/tower/.ssh/` (the tower user's 
 | thetower-tourney-reminder | `thetower_tourneyreminder_deploy` | `github-tower-tourney-reminder` |
 | thetower-managed-polls    | `thetower_managed_polls_deploy`   | `github-tower-managed-polls`    |
 | thetower-bot              | `thetower_bot_deploy`             | `github-tower-thetower-bot`     |
+| thetower-web              | `thetower_web_deploy`             | `github-tower-thetower-web`     |
 | thetower (main)           | `thetower_core_deploy`            | _(public repo, not needed)_     |
 
 ### SSH Config (`/var/lib/tower/.ssh/config`)
 
-```
+````
 Host github-tower-thetower-bcs
     HostName github.com
     User git
@@ -87,6 +88,13 @@ Host github-tower-thetower-bot
     IdentityFile ~/.ssh/thetower_bot_deploy
     IdentitiesOnly yes
     StrictHostKeyChecking no
+
+Host github-tower-thetower-web
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/thetower_web_deploy
+    IdentitiesOnly yes
+    StrictHostKeyChecking no
 ```
 
 > **Note**: Root also has copies of these aliases in `/root/.ssh/config` for running
@@ -108,7 +116,7 @@ source /opt/venv/tower/bin/activate
 
 # Install/update a private package
 pip install --force-reinstall --no-deps "git+ssh://git@github-tower-<name>/owner/repo.git"
-```
+````
 
 See [private_cog_deployment.md](private_cog_deployment.md) for full setup instructions.
 
@@ -116,18 +124,19 @@ See [private_cog_deployment.md](private_cog_deployment.md) for full setup instru
 
 Services are defined in `/etc/systemd/system/`. All run as `User=tower Group=tower`.
 
-| Service file                          | Purpose                       |
-| ------------------------------------- | ----------------------------- |
-| `tower-public_site.service`           | Public Streamlit site         |
-| `tower-admin_site.service`            | Admin Streamlit site          |
-| `tower-hidden_site.service`           | Hidden (staff) Streamlit site |
-| `discord_bot.service`                 | Unified Discord bot           |
-| `tower-bot_site.service`              | Bot web UI (bot.thetower.lol) |
-| `import_results.service`              | CSV result importer           |
-| `get_results.service`                 | Results fetcher               |
-| `get_live_results.service`            | Live results fetcher          |
-| `tower-recalc_worker.service`         | Recalculation worker          |
-| `generate_live_bracket_cache.service` | Live bracket cache generator  |
+| Service file                          | Purpose                                 |
+| ------------------------------------- | --------------------------------------- |
+| `tower-public_site.service`           | Public Streamlit site                   |
+| `tower-admin_site.service`            | Admin Streamlit site                    |
+| `tower-hidden_site.service`           | Hidden (staff) Streamlit site           |
+| `discord_bot.service`                 | Unified Discord bot                     |
+| `tower-bot_site.service`              | Bot web UI (bot.thetower.lol)           |
+| `tower-web_site.service`              | Account platform (account.thetower.lol) |
+| `import_results.service`              | CSV result importer                     |
+| `get_results.service`                 | Results fetcher                         |
+| `get_live_results.service`            | Live results fetcher                    |
+| `tower-recalc_worker.service`         | Recalculation worker                    |
+| `generate_live_bracket_cache.service` | Live bracket cache generator            |
 
 Common commands:
 
@@ -163,3 +172,20 @@ systemctl daemon-reload  # after editing a service file
 | `LOG_LEVEL`             | `INFO`                                  |
 
 > **Socket**: The tower-bot_site connects to the bot via `/run/discord-bot/config.sock` (Unix socket, auto-detected on Linux). The socket directory must exist and be writable by the `tower` user before starting either service.
+
+### tower-web_site.service
+
+| Variable                 | Value / Notes                            |
+| ------------------------ | ---------------------------------------- |
+| `DJANGO_SETTINGS_MODULE` | `thetower.backend.towerdb.settings`      |
+| `DJANGO_DATA`            | `/data/django`                           |
+| `WEB_HOST`               | `127.0.0.1`                              |
+| `WEB_PORT`               | `8083`                                   |
+| `WEB_HTTPS_ONLY`         | `true`                                   |
+| `WEB_SECRET_KEY`         | Session cookie encryption key (secret)   |
+| `DISCORD_CLIENT_ID`      | Discord OAuth app client ID              |
+| `DISCORD_CLIENT_SECRET`  | Discord OAuth app client secret (secret) |
+| `REDDIT_CLIENT_ID`       | Reddit OAuth app client ID               |
+| `REDDIT_CLIENT_SECRET`   | Reddit OAuth app client secret (secret)  |
+| `WEB_UPLOAD_DIR`         | `/data/verification_images`              |
+| `LOG_LEVEL`              | `INFO`                                   |

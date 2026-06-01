@@ -322,6 +322,12 @@ def service_status_page():
             "service": "tower-bot_site.service",
             "restart_allowed": True,
         },
+        "tower-web_site": {
+            "name": "Account Platform",
+            "description": "Account/verification platform (account.thetower.lol)",
+            "service": "tower-web_site.service",
+            "restart_allowed": True,
+        },
         "get_results": {
             "name": "Get Results",
             "description": "Service that fetches tournament data (start-only)",
@@ -625,8 +631,7 @@ def service_status_page():
 
     # Instructions
     with st.expander("ℹ️ About Service Status"):
-        st.markdown(
-            """
+        st.markdown("""
         **Service Status:**
         - 🟢 **Running**: Service is active and working normally
         - ⚪ **Stopped**: Service is inactive but ready to start
@@ -658,8 +663,7 @@ def service_status_page():
         **Development Note:**
         - On Windows: Service status and start times are simulated for development purposes
         - On Linux: Actual systemctl service status and timestamps are displayed
-        """
-        )
+        """)
 
 
 if __name__ == "__main__":
