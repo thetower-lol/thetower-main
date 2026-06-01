@@ -732,7 +732,7 @@ def codebase_status_page():
                         st.markdown("**Package Info**")
 
                         # Package type emoji
-                        type_emoji = {"cog": "🔌", "module": "📦", "main": "🏠", "bot": "🤖", "unknown": "❓"}.get(pkg["type"], "❓")
+                        type_emoji = {"cog": "🔌", "module": "📦", "main": "🏠", "bot": "🤖", "web": "🌐", "unknown": "❓"}.get(pkg["type"], "❓")
 
                         # Install type badge
                         install_badge = "📝 Editable" if pkg.get("install_type") == "editable" else "📦 Regular"

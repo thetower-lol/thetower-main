@@ -79,6 +79,9 @@ def get_thetower_packages() -> List[Dict[str, any]]:
                     elif "Private :: thetower.bot" in classifier:
                         package_type = "bot"
                         break
+                    elif "Private :: thetower.web" in classifier:
+                        package_type = "web"
+                        break
                     elif "Private :: thetower.module" in classifier:
                         package_type = "module"
                         break
