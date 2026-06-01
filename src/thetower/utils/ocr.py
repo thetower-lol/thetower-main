@@ -30,6 +30,7 @@ import os
 import platform
 import re
 import shutil
+from collections import Counter
 from dataclasses import dataclass
 from typing import Optional
 
@@ -145,7 +146,11 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
             output_type=pytesseract.Output.DICT,
         )
         label_words = {w.lower() for w in label_data["text"] if w.strip()}
-        has_valid_labels = any("subreddit" in w or "reddit" in w for w in label_words)
+        # "Subreddit" is the primary gate: it reliably OCRs on the Settings
+        # screen and is unique to it.  "Discord" uses a heavy font weight that
+        # Tesseract sometimes mangles, so it is treated as a secondary signal —
+        # either one present is sufficient to confirm the correct screen.
+        has_valid_labels = any("subreddit" in w or "reddit" in w or "discord" in w for w in label_words)
 
         # Version + build: run image_to_string on the same 3× gray for line parsing
         gray2x = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
@@ -171,12 +176,24 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         # ------------------------------------------------------------------
         # Pass 2 – multi-scale variants for ID extraction
         # ------------------------------------------------------------------
-        player_id: Optional[str] = None
+        # Restrict Tesseract output to the hex alphabet plus the "ID:" label
+        # characters.  In Exo 2 (the font used for player IDs in The Tower)
+        # the main error sources are characters outside this set, so the
+        # whitelist eliminates most phantom misreads without any training data.
+        # "I" is included because the "ID:" label prefix requires it.
+        # Note: Tesseract 5 requires -c syntax for config variables.
+        _ID_CONFIG = r"--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789ABCDEFabcdefIi:; "
+        # Collect all valid 16-char hex candidates across every scale variant and
+        # pick the plurality winner.  A single scale can bias toward artifacts
+        # introduced by heavy upsampling, so voting across scales improves accuracy.
+        candidate_votes: Counter = Counter()
         for _label, variant in _get_variants(img):
-            text = pytesseract.image_to_string(variant, config="--oem 3 --psm 6")
-            player_id = _parse_id_from_text(text)
-            if player_id:
-                break
+            text = pytesseract.image_to_string(variant, config=_ID_CONFIG)
+            pid = _parse_id_from_text(text)
+            if pid:
+                candidate_votes[pid] += 1
+
+        player_id: Optional[str] = candidate_votes.most_common(1)[0][0] if candidate_votes else None
 
         return OcrResult(
             has_valid_labels=has_valid_labels,
