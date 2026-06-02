@@ -452,8 +452,13 @@ def process_verification(
             write_status(player_id, stem, {"status": "failed", "reason": "wrong_screen"})
             return {"status": "failed", "reason": "wrong_screen"}
 
+        # Check if OCR successfully extracted a player ID
+        if not ocr.player_id:
+            write_status(player_id, stem, {"status": "failed", "reason": "ocr_no_id"})
+            return {"status": "failed", "reason": "ocr_no_id"}
+
         # Compare OCR result to submitted ID
-        if ocr.player_id and ocr.player_id != player_id:
+        if ocr.player_id != player_id:
             if OCR_NEAR_MATCH_MAX > 0 and len(ocr.player_id) == len(player_id):
                 diff = sum(a != b for a, b in zip(ocr.player_id, player_id))
                 if 0 < diff <= OCR_NEAR_MATCH_MAX:
