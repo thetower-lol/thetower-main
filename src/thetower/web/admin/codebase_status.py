@@ -826,8 +826,7 @@ def codebase_status_page():
 
     # Instructions
     with st.expander("ℹ️ About Codebase Status"):
-        st.markdown(
-            """
+        st.markdown("""
         **Environment Detection:**
         - **Development Mode**: Detects git repository, shows git status and controls
         - **Production Mode**: Pip-installed package, shows version and pip update controls
@@ -892,8 +891,7 @@ def codebase_status_page():
         - Package updates may require service restart to take effect
         - In production, main package updates require restarting all services (bot, web, workers)
         - External cog packages require bot restart or cog reload
-        """
-        )
+        """)
 
 
 if __name__ == "__main__":

@@ -19,10 +19,7 @@ from packaging.version import parse as parse_version
 def _get_editable_local_path(package_name: str) -> Optional[str]:
     """Return the local source path if package_name is installed as editable, else None."""
     try:
-        candidates = [
-            d for d in importlib.metadata.distributions()
-            if d.name.lower().replace("-", "_") == package_name.lower().replace("-", "_")
-        ]
+        candidates = [d for d in importlib.metadata.distributions() if d.name.lower().replace("-", "_") == package_name.lower().replace("-", "_")]
         if not candidates:
             return None
         # Prefer dist-info entries over egg-info
@@ -220,7 +217,9 @@ async def check_package_updates(package_name: str, repo_url: Optional[str] = Non
     return result
 
 
-async def update_package(package_name: str, target_version: Optional[str] = None, repo_url: Optional[str] = None, with_deps: bool = False) -> Dict[str, any]:
+async def update_package(
+    package_name: str, target_version: Optional[str] = None, repo_url: Optional[str] = None, with_deps: bool = False
+) -> Dict[str, any]:
     """
     Update a package to a specific version or latest.
 
@@ -283,9 +282,7 @@ async def update_package(package_name: str, target_version: Optional[str] = None
                 editable_path = _get_editable_local_path("thetower")
                 if editable_path:
                     restore_cmd = [sys.executable, "-m", "pip", "install", "-e", editable_path, "--quiet"]
-                    restore_proc = await asyncio.create_subprocess_exec(
-                        *restore_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                    )
+                    restore_proc = await asyncio.create_subprocess_exec(*restore_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
                     r_stdout, r_stderr = await restore_proc.communicate()
                     restore_note = (r_stdout.decode() + r_stderr.decode()).strip() or "done."
                     result["message"] += f"\n\n=== Restoring editable thetower from {editable_path} ===\n{restore_note}"
@@ -319,7 +316,9 @@ def check_package_updates_sync(package_name: str, repo_url: Optional[str] = None
         return {"current_version": None, "latest_version": None, "update_available": False, "repository_url": None, "error": str(e)}
 
 
-def update_package_sync(package_name: str, target_version: Optional[str] = None, repo_url: Optional[str] = None, with_deps: bool = False) -> Dict[str, any]:
+def update_package_sync(
+    package_name: str, target_version: Optional[str] = None, repo_url: Optional[str] = None, with_deps: bool = False
+) -> Dict[str, any]:
     """
     Synchronous wrapper for update_package.
 
