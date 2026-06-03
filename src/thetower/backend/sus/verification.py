@@ -102,7 +102,9 @@ def write_status(player_id: str, stem: str, data: dict) -> None:
 def read_status(player_id: str, stem: str) -> dict:
     """Read the OCR status JSON file for a submission, or return default if not found."""
     try:
-        return json.loads(get_status_path(player_id, stem).read_text())
+        content = get_status_path(player_id, stem).read_text(encoding="utf-8")
+        # Handle malformed files with multiple JSON objects - only parse the first one
+        return json.loads(content.split("\n{")[0] if "\n{" in content else content)
     except Exception:
         return {"status": "pending"}
 
@@ -111,26 +113,36 @@ def append_ocr_event(player_id: str, stem: str, event: dict) -> None:
     """Append an event dict to the events list in the JSON file (creates the file if missing)."""
     path = get_status_path(player_id, stem)
     try:
-        data = json.loads(path.read_text())
+        content = path.read_text(encoding="utf-8")
+        # Handle malformed files with multiple JSON objects - only parse the first one
+        data = json.loads(content.split("\n{")[0] if "\n{" in content else content)
     except Exception:
         data = {"status": "pending"}
     events = list(data.get("events") or [])
     events.append(event)
     data["events"] = events
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data))
+    # Explicitly write with mode 'w' to ensure truncation
+    with path.open("w", encoding="utf-8") as f:
+        f.write(json.dumps(data, indent=2))
+        f.flush()
 
 
 def merge_status(player_id: str, stem: str, updates: dict) -> None:
     """Merge top-level fields into the JSON without touching the events list."""
     path = get_status_path(player_id, stem)
     try:
-        data = json.loads(path.read_text())
+        content = path.read_text(encoding="utf-8")
+        # Handle malformed files with multiple JSON objects - only parse the first one
+        data = json.loads(content.split("\n{")[0] if "\n{" in content else content)
     except Exception:
         data = {"status": "pending", "events": []}
     data.update(updates)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data))
+    # Explicitly write with mode 'w' to ensure truncation
+    with path.open("w", encoding="utf-8") as f:
+        f.write(json.dumps(data, indent=2))
+        f.flush()
 
 
 def move_verification_files(from_player_id: str, to_player_id: str, stem: str) -> None:
@@ -294,10 +306,10 @@ def resolve_review_entry(player_id: str, stem: str, verdict: str = "user_resolve
 
 
 def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 86400) -> int:
-    """Auto-escalate submissions stuck in 'new_instance_pending' status for >threshold seconds to mod review.
+    """Auto-escalate submissions stuck in pending statuses for >threshold seconds to mod review.
 
     Scans submission log for entries older than threshold, checks their status files,
-    and creates review queue entries for any stuck in 'new_instance_pending'.
+    and creates review queue entries for any stuck in 'pending' or 'new_instance_pending'.
 
     Args:
         stale_threshold_seconds: Age threshold in seconds (default: 86400 = 24 hours)
@@ -326,9 +338,12 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 86400
             account_id = row["account_id"]
             submitter_name = row["submitter_name"]
 
-            # Check if status is still new_instance_pending
-            status = read_status(player_id, stem)
-            if status.get("status") != "new_instance_pending":
+            # Check if status is stuck in a pending state
+            status_data = read_status(player_id, stem)
+            current_status = status_data.get("status")
+
+            # Only escalate if stuck in pending or new_instance_pending
+            if current_status not in ("pending", "new_instance_pending"):
                 continue
 
             # Check if already in review queue (avoid duplicates)
@@ -339,21 +354,32 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 86400
             if existing:
                 continue
 
+            # Set review reason based on which pending state it was stuck in
+            if current_status == "new_instance_pending":
+                review_reason = "new_instance_pending_stale"
+                escalation_reason = "stale_new_instance_pending"
+            else:  # "pending"
+                review_reason = "pending_stale"
+                escalation_reason = "stale_pending_ocr"
+
             # Escalate: create review queue entry
-            review_reason = "new_instance_pending_stale"
             conn.execute(
                 "INSERT INTO verification_reviews (player_id, stem, review_reason, platform, account_id, created_at, typed_id, ocr_id, submitter_name)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (player_id, stem, review_reason, platform, account_id, int(time.time()), player_id, "", submitter_name),
+                (player_id, stem, review_reason, platform, account_id, int(time.time()), player_id, status_data.get("ocr_id", ""), submitter_name),
             )
 
             # Update status to indicate escalation
             merge_status(player_id, stem, {"status": "needs_decision", "needs_review": True, "review_reason": review_reason, "auto_escalated": True})
-            append_ocr_event(player_id, stem, {"type": "auto_escalated", "ts": int(time.time()), "reason": "stale_new_instance_pending"})
+            append_ocr_event(player_id, stem, {"type": "auto_escalated", "ts": int(time.time()), "reason": escalation_reason})
 
             escalated_count += 1
             logger.info(
-                "Auto-escalated stale submission to mod review: player_id=%s stem=%s age=%d", player_id, stem, int(time.time()) - row["created_at"]
+                "Auto-escalated stale submission to mod review: player_id=%s stem=%s original_status=%s age=%d",
+                player_id,
+                stem,
+                current_status,
+                int(time.time()) - row["created_at"],
             )
 
     return escalated_count
