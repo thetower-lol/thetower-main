@@ -293,6 +293,72 @@ def resolve_review_entry(player_id: str, stem: str, verdict: str = "user_resolve
         )
 
 
+def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 86400) -> int:
+    """Auto-escalate submissions stuck in 'new_instance_pending' status for >threshold seconds to mod review.
+
+    Scans submission log for entries older than threshold, checks their status files,
+    and creates review queue entries for any stuck in 'new_instance_pending'.
+
+    Args:
+        stale_threshold_seconds: Age threshold in seconds (default: 86400 = 24 hours)
+
+    Returns:
+        Number of submissions escalated
+    """
+    if not REVIEW_DB_PATH.exists():
+        return 0
+
+    cutoff_ts = int(time.time()) - stale_threshold_seconds
+    escalated_count = 0
+
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        # Find old submissions that might be stuck
+        rows = conn.execute(
+            "SELECT id, platform, account_id, player_id, stem, submitter_name, created_at FROM submission_log WHERE created_at < ?",
+            (cutoff_ts,),
+        ).fetchall()
+
+        for row in rows:
+            player_id = row["player_id"]
+            stem = row["stem"]
+            platform = row["platform"]
+            account_id = row["account_id"]
+            submitter_name = row["submitter_name"]
+
+            # Check if status is still new_instance_pending
+            status = read_status(player_id, stem)
+            if status.get("status") != "new_instance_pending":
+                continue
+
+            # Check if already in review queue (avoid duplicates)
+            existing = conn.execute(
+                "SELECT id FROM verification_reviews WHERE player_id = ? AND stem = ? AND resolved = 0",
+                (player_id, stem),
+            ).fetchone()
+            if existing:
+                continue
+
+            # Escalate: create review queue entry
+            review_reason = "new_instance_pending_stale"
+            conn.execute(
+                "INSERT INTO verification_reviews (player_id, stem, review_reason, platform, account_id, created_at, typed_id, ocr_id, submitter_name)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (player_id, stem, review_reason, platform, account_id, int(time.time()), player_id, "", submitter_name),
+            )
+
+            # Update status to indicate escalation
+            merge_status(player_id, stem, {"status": "needs_decision", "needs_review": True, "review_reason": review_reason, "auto_escalated": True})
+            append_ocr_event(player_id, stem, {"type": "auto_escalated", "ts": int(time.time()), "reason": "stale_new_instance_pending"})
+
+            escalated_count += 1
+            logger.info(
+                "Auto-escalated stale submission to mod review: player_id=%s stem=%s age=%d", player_id, stem, int(time.time()) - row["created_at"]
+            )
+
+    return escalated_count
+
+
 def queue_notification(platform: str, account_id: str, player_id: str, stem: str, verdict: str, message: str) -> None:
     """Insert a pending mod notification for the submitting user."""
     ensure_review_db()
