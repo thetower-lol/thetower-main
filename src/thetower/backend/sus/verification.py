@@ -220,6 +220,7 @@ def ensure_review_db() -> None:
             ("submitter_name", "TEXT NOT NULL DEFAULT ''"),
             ("ocr_player_id", "TEXT NOT NULL DEFAULT ''"),
             ("resolved_player_id", "TEXT NOT NULL DEFAULT ''"),
+            ("submission_source", "TEXT NOT NULL DEFAULT 'unknown'"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE submission_log ADD COLUMN {col} {definition}")
@@ -307,13 +308,25 @@ def queue_notification(platform: str, account_id: str, player_id: str, stem: str
 # ---------------------------------------------------------------------------
 
 
-def record_submission_log(player_id: str, stem: str, platform: str, account_id: str, submitter_name: str = "") -> None:
-    """Record a submission in the permanent log. Idempotent (UNIQUE on player_id+stem)."""
+def record_submission_log(
+    player_id: str, stem: str, platform: str, account_id: str, submitter_name: str = "", submission_source: str = "web"
+) -> None:
+    """Record a submission in the permanent log. Idempotent (UNIQUE on player_id+stem).
+
+    Args:
+        player_id: Tower player ID
+        stem: Submission timestamp/identifier
+        platform: User's platform (discord, reddit, etc.)
+        account_id: User's account ID on that platform
+        submitter_name: Display name of submitter
+        submission_source: Where submission came from - "web" or "discord" (default: "web")
+    """
     ensure_review_db()
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO submission_log (platform, account_id, player_id, stem, created_at, submitter_name)" " VALUES (?, ?, ?, ?, ?, ?)",
-            (platform, account_id, player_id, stem, int(time.time()), submitter_name),
+            "INSERT OR IGNORE INTO submission_log (platform, account_id, player_id, stem, created_at, submitter_name, submission_source)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (platform, account_id, player_id, stem, int(time.time()), submitter_name, submission_source),
         )
 
 
@@ -378,6 +391,7 @@ def process_verification(
     platform: str,
     account_id: str,
     display_name: str,
+    submission_source: str = "web",
 ) -> dict[str, Any]:
     """Run OCR on a verification image and create the player record if it passes.
 
@@ -390,6 +404,7 @@ def process_verification(
         platform: "discord", "reddit", etc.
         account_id: Platform-specific account ID
         display_name: User's display name for player creation
+        submission_source: Where submission came from - "web" or "discord" (default: "web")
 
     Returns:
         dict with status information:
@@ -401,7 +416,7 @@ def process_verification(
     from thetower.backend.sus.services import create_or_update_player
 
     # Permanently record this submission so history survives Django cleanup
-    record_submission_log(player_id, stem, platform, account_id, display_name)
+    record_submission_log(player_id, stem, platform, account_id, display_name, submission_source)
 
     try:
         # If OCR is not available, skip to player creation
