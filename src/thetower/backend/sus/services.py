@@ -27,6 +27,8 @@ def create_or_update_player(
     author_name: str,
     player_id: str,
     update_role_source: bool = True,
+    action_type: str | None = None,
+    old_player_id: str | None = None,
 ) -> dict[str, Any]:
     """Create or update a player record for a verified social account + Tower ID pair.
 
@@ -42,6 +44,12 @@ def create_or_update_player(
         The Tower game ID submitted by the user (will be uppercased).
     update_role_source:
         If True, update the LinkedAccount's role_source_instance to the newly created/updated instance.
+    action_type:
+        For two-stage mod review (Scenario B): "replace", "merge", or "add_alt".
+        If None (default), behaves like legacy/Scenario A (auto-creates new primary instance).
+    old_player_id:
+        For two-stage mod review (Scenario B): The previously verified Tower ID being replaced/updated.
+        Required when action_type is not None.
 
     Returns
     -------
@@ -95,24 +103,90 @@ def create_or_update_player(
     linked_account = LinkedAccount.objects.filter(platform=platform, account_id=account_id, active=True).select_related("player").first()
 
     if linked_account:
-        # Existing player verifying with a new Tower ID — create a fresh primary game instance.
+        # Existing player verifying with a new Tower ID — handle based on action_type.
         player = linked_account.player
         created = False
-        player.game_instances.update(primary=False)
-        existing_names = player.game_instances.values_list("name", flat=True)
-        max_num = max(
-            (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)$", name)] if m),
-            default=0,
-        )
-        primary_instance = GameInstance.objects.create(
-            player=player,
-            name=f"Instance {max_num + 1}",
-            primary=True,
-        )
-        PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
-        if update_role_source:
-            linked_account.role_source_instance = primary_instance
-            linked_account.save()
+
+        if action_type == "replace":
+            # Replace: Delete old Tower ID(s), create new one as primary
+            if old_player_id:
+                old_pids = PlayerId.objects.filter(id__iexact=old_player_id)
+                deleted_count = old_pids.delete()[0]
+                logger.info("Replaced old Tower ID %s (deleted %d PlayerId record(s))", old_player_id, deleted_count)
+
+            # Mark all instances as non-primary, then create new primary
+            player.game_instances.update(primary=False)
+            existing_names = player.game_instances.values_list("name", flat=True)
+            max_num = max(
+                (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)$", name)] if m),
+                default=0,
+            )
+            primary_instance = GameInstance.objects.create(
+                player=player,
+                name=f"Instance {max_num + 1}",
+                primary=True,
+            )
+            PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
+            if update_role_source:
+                linked_account.role_source_instance = primary_instance
+                linked_account.save()
+
+        elif action_type == "merge":
+            # Merge: Keep both old and new, set new as primary
+            # Mark all instances as non-primary, then create new primary
+            player.game_instances.update(primary=False)
+            existing_names = player.game_instances.values_list("name", flat=True)
+            max_num = max(
+                (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)$", name)] if m),
+                default=0,
+            )
+            primary_instance = GameInstance.objects.create(
+                player=player,
+                name=f"Instance {max_num + 1}",
+                primary=True,
+            )
+            PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
+            if update_role_source:
+                linked_account.role_source_instance = primary_instance
+                linked_account.save()
+
+        elif action_type == "add_alt":
+            # Add Alt: Keep existing primary unchanged, add new ID as alternate (non-primary)
+            existing_primary = player.game_instances.filter(primary=True).first()
+            if not existing_primary:
+                # No primary instance — fall back to creating one
+                logger.warning("add_alt: No primary instance found for player %d, creating one", player.pk)
+                existing_primary = player.game_instances.first()
+                if existing_primary:
+                    existing_primary.primary = True
+                    existing_primary.save()
+
+            if existing_primary:
+                # Add new PlayerId to the existing primary instance as non-primary
+                PlayerId.objects.create(id=player_id, game_instance=existing_primary, primary=False)
+                primary_instance = existing_primary
+            else:
+                # Shouldn't happen, but handle gracefully: create new instance
+                primary_instance = GameInstance.objects.create(player=player, name="Instance 1", primary=True)
+                PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
+
+        else:
+            # Default/legacy behavior (Scenario A or NULL action_type): Create new primary instance
+            player.game_instances.update(primary=False)
+            existing_names = player.game_instances.values_list("name", flat=True)
+            max_num = max(
+                (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)$", name)] if m),
+                default=0,
+            )
+            primary_instance = GameInstance.objects.create(
+                player=player,
+                name=f"Instance {max_num + 1}",
+                primary=True,
+            )
+            PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
+            if update_role_source:
+                linked_account.role_source_instance = primary_instance
+                linked_account.save()
     else:
         # Brand-new player.
         player = KnownPlayer.objects.create(name=author_name)

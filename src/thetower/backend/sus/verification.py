@@ -1,10 +1,8 @@
 """Shared verification infrastructure for image storage, OCR processing, and review queue.
 
 This module contains all the shared verification logic used by both thetower-bot and thetower-web:
-- Image storage and sharding
-- OCR status file management (.ocr.json files)
-- Review queue database operations
-- Submission logging
+- Image storage (time-sharded, path from stem alone)
+- submissions table DB operations (single source of truth)
 - Main verification workflow
 
 Both bot and web use these as backend services, implementing only presentation-layer logic.
@@ -13,6 +11,8 @@ Both bot and web use these as backend services, implementing only presentation-l
 import json
 import logging
 import os
+import re
+import secrets
 import sqlite3
 import time
 from pathlib import Path
@@ -42,406 +42,698 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Image Storage Utilities
+# Stem generation and validation
 # ---------------------------------------------------------------------------
 
-
-def get_image_storage_path(player_id: str, stem: str, extension: str = ".png") -> Path:
-    """Return the standard sharded storage path for a verification image.
-
-    Args:
-        player_id: Tower player ID (used for sharding)
-        stem: Timestamp or unique identifier
-        extension: File extension (should include leading dot)
-
-    Returns:
-        Path object: {UPLOAD_DIR}/{id[:2]}/{id}/{stem}{extension}
-    """
-    shard_dir = UPLOAD_DIR / player_id[:2] / player_id
-    return shard_dir / f"{stem}{extension}"
+_STEM_RE = re.compile(r"^\d+_[0-9a-f]{8}$")
 
 
-def save_verification_image(player_id: str, stem: str, image_bytes: bytes, extension: str = ".png") -> Path:
-    """Save a verification image to the standard sharded location.
+def generate_stem() -> str:
+    return f"{int(time.time())}_{secrets.token_hex(4)}"
 
-    Args:
-        player_id: Tower player ID
-        stem: Timestamp or unique identifier
-        image_bytes: Image file content
-        extension: File extension (should include leading dot)
 
-    Returns:
-        Path where the image was saved
-    """
-    image_path = get_image_storage_path(player_id, stem, extension)
-    image_path.parent.mkdir(parents=True, exist_ok=True)
-    image_path.write_bytes(image_bytes)
-    return image_path
+def is_valid_stem(stem: str) -> bool:
+    return bool(_STEM_RE.match(stem))
 
 
 # ---------------------------------------------------------------------------
-# OCR Status File Management
+# Image storage utilities
 # ---------------------------------------------------------------------------
 
 
-def get_status_path(player_id: str, stem: str) -> Path:
-    """Return the path to the OCR status JSON file for a submission."""
-    return UPLOAD_DIR / player_id[:2] / player_id / f"{stem}.ocr.json"
+def get_image_shard(stem: str) -> str:
+    """Return the shard directory name for a stem (first 4 digits of timestamp)."""
+    return stem[:4]
 
 
-def write_status(player_id: str, stem: str, data: dict) -> None:
-    """Write the initial status JSON, always recording an ocr_initial event."""
-    ts = int(time.time())
-    event = {"type": "ocr_initial", "ts": ts, **{k: v for k, v in data.items() if k != "events"}}
-    full_data = {**data, "events": [event]}
-    path = get_status_path(player_id, stem)
+def get_image_storage_path(stem: str, extension: str = ".png") -> Path:
+    return UPLOAD_DIR / "submissions" / get_image_shard(stem) / f"{stem}{extension}"
+
+
+def save_verification_image(stem: str, image_bytes: bytes, extension: str = ".png") -> Path:
+    path = get_image_storage_path(stem, extension)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(full_data))
+    path.write_bytes(image_bytes)
+    return path
 
 
-def read_status(player_id: str, stem: str) -> dict:
-    """Read the OCR status JSON file for a submission, or return default if not found."""
-    try:
-        content = get_status_path(player_id, stem).read_text(encoding="utf-8")
-        # Handle malformed files with multiple JSON objects - only parse the first one
-        return json.loads(content.split("\n{")[0] if "\n{" in content else content)
-    except Exception:
-        return {"status": "pending"}
-
-
-def append_ocr_event(player_id: str, stem: str, event: dict) -> None:
-    """Append an event dict to the events list in the JSON file (creates the file if missing)."""
-    path = get_status_path(player_id, stem)
-    try:
-        content = path.read_text(encoding="utf-8")
-        # Handle malformed files with multiple JSON objects - only parse the first one
-        data = json.loads(content.split("\n{")[0] if "\n{" in content else content)
-    except Exception:
-        data = {"status": "pending"}
-    events = list(data.get("events") or [])
-    events.append(event)
-    data["events"] = events
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Explicitly write with mode 'w' to ensure truncation
-    with path.open("w", encoding="utf-8") as f:
-        f.write(json.dumps(data, indent=2))
-        f.flush()
-
-
-def merge_status(player_id: str, stem: str, updates: dict) -> None:
-    """Merge top-level fields into the JSON without touching the events list."""
-    path = get_status_path(player_id, stem)
-    try:
-        content = path.read_text(encoding="utf-8")
-        # Handle malformed files with multiple JSON objects - only parse the first one
-        data = json.loads(content.split("\n{")[0] if "\n{" in content else content)
-    except Exception:
-        data = {"status": "pending", "events": []}
-    data.update(updates)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Explicitly write with mode 'w' to ensure truncation
-    with path.open("w", encoding="utf-8") as f:
-        f.write(json.dumps(data, indent=2))
-        f.flush()
-
-
-def move_verification_files(from_player_id: str, to_player_id: str, stem: str) -> None:
-    """Move both the image and .ocr.json from one player_id directory to another."""
-    if from_player_id == to_player_id:
-        return
-    dst_dir = UPLOAD_DIR / to_player_id[:2] / to_player_id
-    dst_dir.mkdir(parents=True, exist_ok=True)
+def find_verification_image(stem: str) -> Path | None:
+    """Locate image file for a stem across all allowed extensions."""
     for ext in ALLOWED_EXTENSIONS:
-        src = UPLOAD_DIR / from_player_id[:2] / from_player_id / f"{stem}{ext}"
-        if src.exists():
-            src.rename(dst_dir / f"{stem}{ext}")
-            break
-    json_src = get_status_path(from_player_id, stem)
-    if json_src.exists():
-        json_src.rename(dst_dir / f"{stem}.ocr.json")
+        path = get_image_storage_path(stem, ext)
+        if path.exists():
+            return path
+    return None
 
 
 # ---------------------------------------------------------------------------
-# Review Queue Database Operations
+# Database — single submissions table
 # ---------------------------------------------------------------------------
 
 
-def ensure_review_db() -> None:
-    """Create/migrate DB tables (idempotent)."""
+def ensure_db() -> None:
+    """Create submissions table (idempotent). Drops old tables on first run. Migrates schema as needed."""
     REVIEW_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS verification_reviews (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                player_id       TEXT    NOT NULL,
-                stem            TEXT    NOT NULL,
-                review_reason   TEXT    NOT NULL,
-                platform        TEXT    NOT NULL,
-                account_id      TEXT    NOT NULL,
-                created_at      INTEGER NOT NULL,
-                resolved        INTEGER NOT NULL DEFAULT 0,
-                resolved_by     TEXT,
-                notes           TEXT,
-                typed_id        TEXT    NOT NULL DEFAULT '',
-                ocr_id          TEXT    NOT NULL DEFAULT '',
-                verdict         TEXT,
-                submitter_name  TEXT    NOT NULL DEFAULT ''
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_vr_unresolved ON verification_reviews (resolved, created_at)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_vr_player ON verification_reviews (player_id)")
-        # Migrate existing DBs: add columns if they don't exist yet
-        for col, definition in [
-            ("typed_id", "TEXT NOT NULL DEFAULT ''"),
-            ("ocr_id", "TEXT NOT NULL DEFAULT ''"),
-            ("verdict", "TEXT"),
-            ("submitter_name", "TEXT NOT NULL DEFAULT ''"),
-        ]:
-            try:
-                conn.execute(f"ALTER TABLE verification_reviews ADD COLUMN {col} {definition}")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+        # Check if submissions table already exists
+        table_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='submissions'").fetchone() is not None
+
+        if table_exists:
+            logger.debug("Submissions table already exists, checking for schema updates")
+        else:
+            logger.info("Creating submissions table (first run)")
+
+        # Drop legacy tables (clean cutover, no migration)
+        for old_table in ("submission_log", "verification_reviews", "mod_notifications"):
+            dropped = conn.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{old_table}'").fetchone() is not None
+            if dropped:
+                conn.execute(f"DROP TABLE {old_table}")
+                logger.info("Dropped legacy table: %s", old_table)
 
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS mod_notifications (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                platform    TEXT    NOT NULL,
-                account_id  TEXT    NOT NULL,
-                player_id   TEXT    NOT NULL,
-                stem        TEXT    NOT NULL,
-                verdict     TEXT    NOT NULL,
-                message     TEXT    NOT NULL,
-                created_at  INTEGER NOT NULL
+            CREATE TABLE IF NOT EXISTS submissions (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                stem                TEXT    NOT NULL UNIQUE,
+
+                platform            TEXT    NOT NULL,
+                account_id          TEXT    NOT NULL,
+                platform_ids        TEXT    NOT NULL DEFAULT '{}',
+                submitter_name      TEXT    NOT NULL DEFAULT '',
+                submission_source   TEXT    NOT NULL DEFAULT 'web',
+
+                submitted_player_id TEXT    NOT NULL,
+                ocr_player_id       TEXT    NOT NULL DEFAULT '',
+                final_player_id     TEXT    NOT NULL DEFAULT '',
+
+                status              TEXT    NOT NULL DEFAULT 'pending',
+
+                id_change_reason    TEXT,
+                old_player_id       TEXT,
+
+                review_reason       TEXT,
+                mod_verdict         TEXT,
+                mod_resolved_by     TEXT,
+                mod_notes           TEXT,
+
+                discord_message_id  TEXT,
+
+                events              TEXT    NOT NULL DEFAULT '[]',
+
+                created_at          INTEGER NOT NULL,
+                updated_at          INTEGER NOT NULL
             )
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_mn_account ON mod_notifications (platform, account_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_account_status ON submissions (platform, account_id, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_status_created ON submissions (status, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_player ON submissions (submitted_player_id)")
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS submission_log (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                platform   TEXT    NOT NULL,
-                account_id TEXT    NOT NULL,
-                player_id  TEXT    NOT NULL,
-                stem       TEXT    NOT NULL,
-                created_at INTEGER NOT NULL,
-                UNIQUE (player_id, stem)
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_sl_account ON submission_log (platform, account_id)")
-        for col, definition in [
-            ("submitter_name", "TEXT NOT NULL DEFAULT ''"),
-            ("ocr_player_id", "TEXT NOT NULL DEFAULT ''"),
-            ("resolved_player_id", "TEXT NOT NULL DEFAULT ''"),
-            ("submission_source", "TEXT NOT NULL DEFAULT 'unknown'"),
-        ]:
-            try:
-                conn.execute(f"ALTER TABLE submission_log ADD COLUMN {col} {definition}")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+        # Schema migrations: Add new columns if they don't exist
+        cursor = conn.execute("PRAGMA table_info(submissions)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        migrations = [
+            ("verified_player_id", "ALTER TABLE submissions ADD COLUMN verified_player_id TEXT"),
+            ("mod_review_stage", "ALTER TABLE submissions ADD COLUMN mod_review_stage INTEGER"),
+            ("discord_log_message_id", "ALTER TABLE submissions ADD COLUMN discord_log_message_id TEXT"),
+            ("discord_notification_message_id", "ALTER TABLE submissions ADD COLUMN discord_notification_message_id TEXT"),
+            ("final_outcome", "ALTER TABLE submissions ADD COLUMN final_outcome TEXT"),
+        ]
+
+        for col_name, alter_sql in migrations:
+            if col_name not in existing_columns:
+                logger.info("Adding column %s to submissions table", col_name)
+                conn.execute(alter_sql)
 
 
-def record_review(
-    player_id: str, stem: str, review_reason: str, platform: str, account_id: str, typed_id: str = "", ocr_id: str = "", submitter_name: str = ""
+# Keep old name as alias so existing callers don't break during migration
+ensure_review_db = ensure_db
+
+
+# ---------------------------------------------------------------------------
+# Submission CRUD
+# ---------------------------------------------------------------------------
+
+
+def create_submission(
+    stem: str,
+    platform: str,
+    account_id: str,
+    submitter_name: str,
+    submission_source: str,
+    submitted_player_id: str,
+    additional_platform_ids: dict | None = None,
+    old_player_id: str | None = None,
+    id_change_reason: str | None = None,
 ) -> None:
-    """Append a row to the review queue. Safe to call from a thread pool worker."""
-    ensure_review_db()
+    """Insert a new submission row. Builds platform_ids JSON automatically.
+
+    Args:
+        old_player_id: If this player_id was already verified for this user before submission,
+                       pass the same value here. Used to prevent deleting verified IDs on rejection.
+        id_change_reason: For Scenario B (users with existing instances), the intent they selected
+                          from IdChangeReason enum. NULL for Scenario A (new users).
+    """
+    ensure_db()
+    ids: dict = {} if platform == "web" else {platform: account_id}
+    ids.update(additional_platform_ids or {})
+    now = int(time.time())
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
         conn.execute(
-            "INSERT INTO verification_reviews (player_id, stem, review_reason, platform, account_id, created_at, typed_id, ocr_id, submitter_name)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (player_id, stem, review_reason, platform, account_id, int(time.time()), typed_id, ocr_id, submitter_name),
+            """INSERT OR IGNORE INTO submissions
+               (stem, platform, account_id, platform_ids, submitter_name, submission_source,
+                submitted_player_id, old_player_id, id_change_reason, status, events, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '[]', ?, ?)""",
+            (
+                stem,
+                platform,
+                account_id,
+                json.dumps(ids),
+                submitter_name,
+                submission_source,
+                submitted_player_id,
+                old_player_id,
+                id_change_reason,
+                now,
+                now,
+            ),
         )
 
 
-def get_review_queue_counts() -> dict[str, Any]:
-    """Return unresolved review queue counts."""
+def get_submission(stem: str) -> dict | None:
+    """Return a single submission row as a dict, or None."""
     if not REVIEW_DB_PATH.exists():
-        return {"total": 0, "by_reason": {}}
+        return None
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT review_reason, COUNT(*) AS n FROM verification_reviews WHERE resolved = 0 GROUP BY review_reason").fetchall()
-    by_reason = {row["review_reason"]: row["n"] for row in rows}
-    return {"total": sum(by_reason.values()), "by_reason": by_reason}
+        row = conn.execute("SELECT * FROM submissions WHERE stem = ?", (stem,)).fetchone()
+    return dict(row) if row else None
 
 
-def get_pending_near_match_submissions(platform: str, account_id: str) -> list[dict[str, Any]]:
-    """Return unresolved near-match submissions for a user (cross-platform).
+def get_submission_by_id(sub_id: int) -> dict | None:
+    """Return a submission row by integer primary key."""
+    if not REVIEW_DB_PATH.exists():
+        return None
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM submissions WHERE id = ?", (sub_id,)).fetchone()
+    return dict(row) if row else None
 
-    Allows web users to see and resolve near-match OCR results from Discord bot.
-    Returns list of dicts with: player_id, stem, typed_id, ocr_id, review_reason, created_at.
+
+def update_submission(stem: str, **fields) -> None:
+    """Update named columns on a submission row and set updated_at."""
+    if not fields:
+        return
+    if not REVIEW_DB_PATH.exists():
+        return
+    now = int(time.time())
+    set_clauses = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [now, stem]
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.execute(
+            f"UPDATE submissions SET {set_clauses}, updated_at = ? WHERE stem = ?",
+            values,
+        )
+
+
+def set_awaiting_mod_with_intent(stem: str, error_type: str, intent_reason: str, final_player_id: str | None = None) -> None:
+    """After user selects intent, update submission to awaiting_mod with combined review_reason.
+
+    Args:
+        stem: The submission stem
+        error_type: Either "ocr_error" or "id_mismatch"
+        intent_reason: The IdChangeReason value (e.g., "GAME_CHANGED_ID", "FIXING_TYPO", etc.)
+        final_player_id: The ID the user wants to use (optional, will use typed_id from submission if not provided)
     """
+    # Combine error_type and intent into review_reason (e.g., "ocr_error_game_changed_id")
+    review_reason = f"{error_type}_{intent_reason.lower()}"
+    fields = {"status": "awaiting_mod", "review_reason": review_reason}
+    if final_player_id:
+        fields["final_player_id"] = final_player_id
+    update_submission(stem, **fields)
+    add_event(stem, {"type": "intent_selected", "ts": int(time.time()), "intent": intent_reason})
+
+
+def add_event(stem: str, event: dict) -> None:
+    """Append an event dict to the events JSON array atomically."""
+    if not REVIEW_DB_PATH.exists():
+        return
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        row = conn.execute("SELECT events FROM submissions WHERE stem = ?", (stem,)).fetchone()
+        if not row:
+            return
+        try:
+            events = json.loads(row[0])
+        except Exception:
+            events = []
+        events.append(event)
+        conn.execute(
+            "UPDATE submissions SET events = ?, updated_at = ? WHERE stem = ?",
+            (json.dumps(events), int(time.time()), stem),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Query helpers
+# ---------------------------------------------------------------------------
+
+_TERMINAL_STATUSES = ("passed", "failed", "abandoned")
+
+
+def get_pending_submission(platform: str, account_id: str) -> dict | None:
+    """Return the most recent non-terminal submission for a platform/account pair.
+
+    Queries platform_ids JSON exclusively — works for any platform.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return None
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """SELECT * FROM submissions
+               WHERE status NOT IN ('passed', 'failed', 'abandoned')
+               AND json_extract(platform_ids, '$.' || ?) = ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (platform, account_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_pending_submission_for_player_id(submitted_player_id: str) -> dict | None:
+    """Return any non-terminal submission for a given Tower ID (no platform filter)."""
+    if not REVIEW_DB_PATH.exists():
+        return None
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """SELECT * FROM submissions
+               WHERE submitted_player_id = ?
+               AND status NOT IN ('passed', 'failed', 'abandoned')
+               LIMIT 1""",
+            (submitted_player_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_pending_near_matches(platform: str, account_id: str) -> list[dict]:
+    """Return unresolved near-match submissions for a platform/account pair."""
     if not REVIEW_DB_PATH.exists():
         return []
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            """SELECT player_id, stem, typed_id, ocr_id, review_reason, created_at
-               FROM verification_reviews
-               WHERE platform = ? AND account_id = ? AND resolved = 0
-                 AND review_reason = 'near_match'
+            """SELECT * FROM submissions
+               WHERE status = 'near_match'
+               AND json_extract(platform_ids, '$.' || ?) = ?
                ORDER BY created_at ASC""",
             (platform, account_id),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [dict(r) for r in rows]
 
 
-def resolve_review_entry(player_id: str, stem: str, verdict: str = "user_resolved", notes: str = "") -> None:
-    """Mark a review queue entry as resolved (called when user confirms/corrects on web).
+def get_mod_queue(
+    limit: int = 100, reason_filter: str | None = None, stem_filter: str | None = None, tower_id_filter: str | None = None
+) -> list[dict]:
+    """Return awaiting_mod and awaiting_mod_action submissions, oldest first."""
+    if not REVIEW_DB_PATH.exists():
+        return []
+    clauses = ["(status = 'awaiting_mod' OR status = 'awaiting_mod_action')"]
+    params: list = []
+    if reason_filter:
+        clauses.append("review_reason = ?")
+        params.append(reason_filter)
+    if stem_filter:
+        clauses.append("stem = ?")
+        params.append(stem_filter)
+    if tower_id_filter:
+        tid = tower_id_filter.upper()
+        clauses.append("(UPPER(submitted_player_id) = ? OR UPPER(ocr_player_id) = ?)")
+        params.extend([tid, tid])
+    where = " AND ".join(clauses)
+    params.append(limit)
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"SELECT * FROM submissions WHERE {where} ORDER BY created_at ASC LIMIT ?",
+            params,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_mod_queue_counts() -> dict[str, Any]:
+    """Return mod queue counts by reason."""
+    if not REVIEW_DB_PATH.exists():
+        return {"total": 0, "by_reason": {}}
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT review_reason, COUNT(*) AS n FROM submissions WHERE status = 'awaiting_mod' GROUP BY review_reason").fetchall()
+    by_reason = {row["review_reason"]: row["n"] for row in rows}
+    return {"total": sum(by_reason.values()), "by_reason": by_reason}
+
+
+def get_mod_queue_for_player(player_pk: int) -> list[dict]:
+    """Return awaiting_mod and awaiting_mod_action submissions for all accounts linked to a player."""
+    from thetower.backend.sus.models import LinkedAccount
+
+    pairs: list[tuple[str, str]] = list(LinkedAccount.objects.filter(player_id=player_pk).values_list("platform", "account_id"))
+    if not pairs or not REVIEW_DB_PATH.exists():
+        return []
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        results = []
+        for platform, account_id in pairs:
+            rows = conn.execute(
+                """SELECT * FROM submissions
+                   WHERE (status = 'awaiting_mod' OR status = 'awaiting_mod_action')
+                   AND json_extract(platform_ids, '$.' || ?) = ?
+                   ORDER BY created_at ASC""",
+                (platform, account_id),
+            ).fetchall()
+            results.extend(dict(r) for r in rows)
+    return results
+
+
+def get_submissions_page(
+    page: int = 1,
+    limit: int = 25,
+    player_id_filter: str | None = None,
+    account_id_filter: str | None = None,
+    name_filter: str | None = None,
+    status_filter: str | None = None,
+) -> tuple[list[dict], int]:
+    """Return a paginated slice of submissions (newest-first) and total count."""
+    if not REVIEW_DB_PATH.exists():
+        return [], 0
+    where_clauses: list[str] = []
+    params: list = []
+    if player_id_filter:
+        where_clauses.append("UPPER(submitted_player_id) LIKE UPPER(?)")
+        params.append(f"%{player_id_filter}%")
+    if account_id_filter:
+        where_clauses.append("account_id LIKE ?")
+        params.append(f"%{account_id_filter}%")
+    if name_filter:
+        where_clauses.append("UPPER(submitter_name) LIKE UPPER(?)")
+        params.append(f"%{name_filter}%")
+    if status_filter:
+        where_clauses.append("status = ?")
+        params.append(status_filter)
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    offset = (page - 1) * limit
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        total = conn.execute(f"SELECT COUNT(*) FROM submissions {where_sql}", params).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT * FROM submissions {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+    return [dict(r) for r in rows], total
+
+
+# ---------------------------------------------------------------------------
+# Mod resolution
+# ---------------------------------------------------------------------------
+
+
+def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, final_player_id: str | None = None) -> None:
+    """Resolve a mod review: update status, store verdict, and create player if needed.
+
+    For new_instance_* submissions awaiting mod approval, this will call create_or_update_player()
+    to actually create the Django GameInstance/PlayerId records.
+    """
+    from thetower.backend.sus.services import create_or_update_player
+
+    # Get the submission row to check review_reason and other details
+    row = get_submission(stem)
+    if not row:
+        logger.warning("mod_resolve_submission called on non-existent stem %s", stem)
+        return
+
+    if verdict == "approved":
+        new_status = "passed"
+    elif verdict == "fix_id":
+        new_status = "passed"
+    else:  # rejected_fake
+        new_status = "failed"
+
+    fields: dict = {
+        "mod_verdict": verdict,
+        "mod_resolved_by": resolved_by,
+        "status": new_status,
+    }
+    if final_player_id:
+        fields["final_player_id"] = final_player_id
+
+    update_submission(stem, **fields)
+    add_event(
+        stem,
+        {
+            "type": "mod_action",
+            "ts": int(time.time()),
+            "verdict": verdict,
+            "mod": resolved_by,
+            **({"final_id": final_player_id} if final_player_id else {}),
+        },
+    )
+
+    # For approved/fix_id verdicts on new_instance_* reviews, create the player now
+    if verdict in ("approved", "fix_id") and row.get("review_reason", "").startswith("new_instance_"):
+        player_id_to_create = final_player_id or row.get("final_player_id") or row.get("submitted_player_id")
+        if player_id_to_create:
+            platform = row.get("platform")
+            account_id = row.get("account_id")
+            submitter_name = row.get("submitter_name", "")
+            if platform and account_id:
+                try:
+                    result = create_or_update_player(platform, account_id, submitter_name, player_id_to_create, update_role_source=False)
+                    if "error" in result:
+                        logger.error("Failed to create player after mod approval for stem %s: %s", stem, result.get("error"))
+                        # Revert status to failed
+                        update_submission(stem, status="failed")
+                        add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
+                    else:
+                        logger.info("Player created after mod approval: %s %s tower_id=%s stem=%s", platform, account_id, player_id_to_create, stem)
+                except Exception:
+                    logger.exception("Exception creating player after mod approval for stem %s", stem)
+                    update_submission(stem, status="failed")
+                    add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "player_creation_failed"})
+
+
+def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_player_id: str | None = None) -> None:
+    """Resolve Stage 1 of two-stage mod review (Scenario B): Verify OCR result.
 
     Args:
-        player_id: The player ID (typed or OCR-corrected)
-        stem: The submission timestamp
-        verdict: Resolution type (e.g., "user_resolved", "user_confirmed", "user_corrected")
-        notes: Optional notes about the resolution
+        stem: Submission identifier
+        verdict: "approved" (OCR correct), "fix_id" (mod entered correct ID), or "rejected_fake" (invalid screenshot)
+        resolved_by: Mod identifier (platform:account_id)
+        verified_player_id: The ID verified from screenshot (required for approved/fix_id)
     """
-    if not REVIEW_DB_PATH.exists():
+    row = get_submission(stem)
+    if not row:
+        logger.warning("mod_resolve_stage1 called on non-existent stem %s", stem)
         return
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
-        conn.execute(
-            """UPDATE verification_reviews
-               SET resolved = 1, verdict = ?, notes = ?
-               WHERE player_id = ? AND stem = ? AND resolved = 0""",
-            (verdict, notes, player_id, stem),
+
+    if verdict == "rejected_fake":
+        # Stage 1 rejection: Screenshot is fake/invalid, stop here
+        update_submission(
+            stem,
+            status="failed",
+            mod_verdict=verdict,
+            mod_resolved_by=resolved_by,
+            final_outcome="rejected_fake",
         )
+        add_event(stem, {"type": "mod_stage1_reject", "ts": int(time.time()), "mod": resolved_by})
+        logger.info("Stage 1 rejected as fake: stem=%s mod=%s", stem, resolved_by)
+        return
+
+    if not verified_player_id:
+        logger.error("mod_resolve_stage1 called without verified_player_id for verdict %s stem %s", verdict, stem)
+        return
+
+    # Store verified_player_id and transition to Stage 2
+    update_submission(
+        stem,
+        status="awaiting_mod_action",
+        mod_review_stage=2,
+        verified_player_id=verified_player_id,
+    )
+    add_event(
+        stem,
+        {
+            "type": "mod_stage1_complete",
+            "ts": int(time.time()),
+            "mod": resolved_by,
+            "verdict": verdict,
+            "verified_id": verified_player_id,
+        },
+    )
+    logger.info("Stage 1 complete: stem=%s verified_id=%s mod=%s → Stage 2", stem, verified_player_id, resolved_by)
+
+
+def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> None:
+    """Resolve Stage 2 of two-stage mod review (Scenario B): Apply action type to verified ID.
+
+    Args:
+        stem: Submission identifier
+        action_type: "replace", "merge", "add_alt", or "reject"
+        resolved_by: Mod identifier (platform:account_id)
+    """
+    from thetower.backend.sus.services import create_or_update_player
+
+    row = get_submission(stem)
+    if not row:
+        logger.warning("mod_resolve_stage2 called on non-existent stem %s", stem)
+        return
+
+    verified_player_id = row.get("verified_player_id")
+    if not verified_player_id and action_type != "reject":
+        logger.error("mod_resolve_stage2: No verified_player_id for stem %s action %s", stem, action_type)
+        return
+
+    if action_type == "reject":
+        # Stage 2 rejection: Don't apply changes, mark as failed
+        update_submission(
+            stem,
+            status="failed",
+            mod_verdict="rejected_no_action",
+            mod_resolved_by=resolved_by,
+            final_outcome="rejected_no_action",
+        )
+        add_event(stem, {"type": "mod_stage2_reject", "ts": int(time.time()), "mod": resolved_by})
+        logger.info("Stage 2 rejected (no action): stem=%s mod=%s", stem, resolved_by)
+        return
+
+    # Apply the action type
+    platform = row.get("platform")
+    account_id = row.get("account_id")
+    submitter_name = row.get("submitter_name", "")
+    old_player_id = row.get("old_player_id")
+
+    if not platform or not account_id:
+        logger.error("mod_resolve_stage2: Missing platform/account for stem %s", stem)
+        return
+
+    try:
+        result = create_or_update_player(
+            platform,
+            account_id,
+            submitter_name,
+            verified_player_id,
+            update_role_source=False,
+            action_type=action_type,
+            old_player_id=old_player_id,
+        )
+
+        if "error" in result:
+            logger.error("Failed to apply action %s for stem %s: %s", action_type, stem, result.get("error"))
+            update_submission(stem, status="failed")
+            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
+        else:
+            # Map action_type to final_outcome
+            outcome_map = {
+                "replace": "instance_updated_replace",
+                "merge": "instance_updated_merge",
+                "add_alt": "instance_updated_add_alt",
+            }
+            final_outcome = outcome_map.get(action_type, "instance_updated_replace")
+
+            update_submission(
+                stem,
+                status="passed",
+                mod_verdict=action_type,
+                mod_resolved_by=resolved_by,
+                final_outcome=final_outcome,
+            )
+            add_event(
+                stem,
+                {
+                    "type": "mod_stage2_complete",
+                    "ts": int(time.time()),
+                    "mod": resolved_by,
+                    "action": action_type,
+                    "verified_id": verified_player_id,
+                },
+            )
+            logger.info("Stage 2 complete: stem=%s action=%s verified_id=%s mod=%s", stem, action_type, verified_player_id, resolved_by)
+    except Exception:
+        logger.exception("Exception applying action %s for stem %s", action_type, stem)
+        update_submission(stem, status="failed")
+        add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "player_action_failed"})
+
+
+# ---------------------------------------------------------------------------
+# Review queue (legacy name forwarded to mod queue)
+# ---------------------------------------------------------------------------
+
+
+def record_review(
+    player_id: str,
+    stem: str,
+    review_reason: str,
+    platform: str,
+    account_id: str,
+    typed_id: str = "",
+    ocr_id: str = "",
+    submitter_name: str = "",
+) -> None:
+    """Move a submission into awaiting_mod state with the given reason."""
+    update_submission(
+        stem,
+        status="awaiting_mod",
+        review_reason=review_reason,
+        ocr_player_id=ocr_id or "",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stale escalation
+# ---------------------------------------------------------------------------
 
 
 def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 86400) -> int:
-    """Auto-escalate submissions stuck in pending statuses for >threshold seconds to mod review.
+    """Escalate submissions stuck in pending/new_instance_pending for >threshold seconds.
 
-    Scans submission log for entries older than threshold, checks their status files,
-    and creates review queue entries for any stuck in 'pending' or 'new_instance_pending'.
-
-    Args:
-        stale_threshold_seconds: Age threshold in seconds (default: 86400 = 24 hours)
-
-    Returns:
-        Number of submissions escalated
+    Returns number escalated.
     """
     if not REVIEW_DB_PATH.exists():
         return 0
-
     cutoff_ts = int(time.time()) - stale_threshold_seconds
-    escalated_count = 0
+    now = int(time.time())
 
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
-        conn.row_factory = sqlite3.Row
-        # Find old submissions that might be stuck
+        # Find rows that need escalation
         rows = conn.execute(
-            "SELECT id, platform, account_id, player_id, stem, submitter_name, created_at FROM submission_log WHERE created_at < ?",
+            """SELECT stem, status FROM submissions
+               WHERE status IN ('pending', 'new_instance_pending')
+               AND created_at < ?""",
             (cutoff_ts,),
         ).fetchall()
 
-        for row in rows:
-            player_id = row["player_id"]
-            stem = row["stem"]
-            platform = row["platform"]
-            account_id = row["account_id"]
-            submitter_name = row["submitter_name"]
+        if not rows:
+            return 0
 
-            # Check if status is stuck in a pending state
-            status_data = read_status(player_id, stem)
-            current_status = status_data.get("status")
-
-            # Only escalate if stuck in pending or new_instance_pending
-            if current_status not in ("pending", "new_instance_pending"):
-                continue
-
-            # Check if already in review queue (avoid duplicates)
-            existing = conn.execute(
-                "SELECT id FROM verification_reviews WHERE player_id = ? AND stem = ? AND resolved = 0",
-                (player_id, stem),
-            ).fetchone()
-            if existing:
-                continue
-
-            # Set review reason based on which pending state it was stuck in
-            if current_status == "new_instance_pending":
-                review_reason = "new_instance_pending_stale"
-                escalation_reason = "stale_new_instance_pending"
-            else:  # "pending"
-                review_reason = "pending_stale"
-                escalation_reason = "stale_pending_ocr"
-
-            # Escalate: create review queue entry
+        count = 0
+        for stem, status in rows:
+            review_reason = "new_instance_pending_stale" if status == "new_instance_pending" else "pending_stale"
             conn.execute(
-                "INSERT INTO verification_reviews (player_id, stem, review_reason, platform, account_id, created_at, typed_id, ocr_id, submitter_name)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (player_id, stem, review_reason, platform, account_id, int(time.time()), player_id, status_data.get("ocr_id", ""), submitter_name),
+                """UPDATE submissions
+                   SET status = 'awaiting_mod', review_reason = ?, updated_at = ?
+                   WHERE stem = ? AND status NOT IN ('awaiting_mod', 'passed', 'failed', 'abandoned')""",
+                (review_reason, now, stem),
             )
+            count += 1
 
-            # Update status to indicate escalation
-            merge_status(player_id, stem, {"status": "needs_decision", "needs_review": True, "review_reason": review_reason, "auto_escalated": True})
-            append_ocr_event(player_id, stem, {"type": "auto_escalated", "ts": int(time.time()), "reason": escalation_reason})
+        # Append auto_escalated events outside the update for atomicity per row
+        for stem, status in rows:
+            try:
+                row = conn.execute("SELECT events FROM submissions WHERE stem = ?", (stem,)).fetchone()
+                if row:
+                    events = json.loads(row[0] or "[]")
+                    events.append({"type": "auto_escalated", "ts": now})
+                    conn.execute("UPDATE submissions SET events = ? WHERE stem = ?", (json.dumps(events), stem))
+            except Exception:
+                pass
 
-            escalated_count += 1
-            logger.info(
-                "Auto-escalated stale submission to mod review: player_id=%s stem=%s original_status=%s age=%d",
-                player_id,
-                stem,
-                current_status,
-                int(time.time()) - row["created_at"],
-            )
-
-    return escalated_count
-
-
-def queue_notification(platform: str, account_id: str, player_id: str, stem: str, verdict: str, message: str) -> None:
-    """Insert a pending mod notification for the submitting user."""
-    ensure_review_db()
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
-        conn.execute(
-            "INSERT INTO mod_notifications (platform, account_id, player_id, stem, verdict, message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (platform, account_id, player_id, stem, verdict, message, int(time.time())),
-        )
-
-
-# ---------------------------------------------------------------------------
-# Submission Log Operations
-# ---------------------------------------------------------------------------
-
-
-def record_submission_log(
-    player_id: str, stem: str, platform: str, account_id: str, submitter_name: str = "", submission_source: str = "web"
-) -> None:
-    """Record a submission in the permanent log. Idempotent (UNIQUE on player_id+stem).
-
-    Args:
-        player_id: Tower player ID
-        stem: Submission timestamp/identifier
-        platform: User's platform (discord, reddit, etc.)
-        account_id: User's account ID on that platform
-        submitter_name: Display name of submitter
-        submission_source: Where submission came from - "web" or "discord" (default: "web")
-    """
-    ensure_review_db()
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO submission_log (platform, account_id, player_id, stem, created_at, submitter_name, submission_source)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (platform, account_id, player_id, stem, int(time.time()), submitter_name, submission_source),
-        )
-
-
-def update_submission_log_ocr_id(player_id: str, stem: str, ocr_player_id: str) -> None:
-    """Record what OCR read for a submission (may differ from submitted_player_id in near-match cases)."""
-    if not REVIEW_DB_PATH.exists():
-        return
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
-        conn.execute(
-            "UPDATE submission_log SET ocr_player_id = ? WHERE UPPER(player_id) = UPPER(?) AND stem = ?",
-            (ocr_player_id, player_id, stem),
-        )
-
-
-def update_submission_log_player_id(old_player_id: str, stem: str, new_player_id: str) -> None:
-    """Update resolved_player_id in submission_log after files are moved to a new player_id dir."""
-    if not REVIEW_DB_PATH.exists():
-        return
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
-        conn.execute(
-            "UPDATE submission_log SET resolved_player_id = ? WHERE UPPER(player_id) = UPPER(?) AND stem = ?",
-            (new_player_id, old_player_id, stem),
-        )
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -450,13 +742,7 @@ def update_submission_log_player_id(old_player_id: str, stem: str, new_player_id
 
 
 def player_has_existing_ids(platform: str, account_id: str, new_player_id: str = "") -> bool:
-    """Return True if this account already owns Tower IDs AND new_player_id is not already one of them.
-
-    Returns False when:
-    - The player has no existing Tower IDs (first-time verification), or
-    - new_player_id is already owned by this player (re-verification is idempotent, not a new instance).
-    Returns True only when the player has IDs and the submitted one is genuinely new to them.
-    """
+    """Return True if this account already owns Tower IDs AND new_player_id is not already one of them."""
     from thetower.backend.sus.models import LinkedAccount, PlayerId
 
     link = LinkedAccount.objects.filter(platform=platform, account_id=account_id, active=True).select_related("player").first()
@@ -465,10 +751,19 @@ def player_has_existing_ids(platform: str, account_id: str, new_player_id: str =
     all_ids = PlayerId.objects.filter(game_instance__player=link.player)
     if not all_ids.exists():
         return False
-    # Re-submitting an ID already on this account is idempotent, not a new instance.
     if new_player_id and all_ids.filter(id__iexact=new_player_id).exists():
         return False
     return True
+
+
+def player_already_has_id(platform: str, account_id: str, player_id: str) -> bool:
+    """Return True if this account already has this specific player_id verified."""
+    from thetower.backend.sus.models import LinkedAccount, PlayerId
+
+    link = LinkedAccount.objects.filter(platform=platform, account_id=account_id, active=True).select_related("player").first()
+    if not link:
+        return False
+    return PlayerId.objects.filter(game_instance__player=link.player, id__iexact=player_id).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -484,51 +779,57 @@ def process_verification(
     account_id: str,
     display_name: str,
     submission_source: str = "web",
+    additional_platform_ids: dict | None = None,
+    id_change_reason: str | None = None,
 ) -> dict[str, Any]:
     """Run OCR on a verification image and create the player record if it passes.
 
-    This is the main shared verification workflow used by both bot and web.
-
     Args:
-        image_path: Path to the saved verification image
-        player_id: Tower ID that the user typed/submitted
-        stem: Timestamp or unique identifier for this submission
-        platform: "discord", "reddit", etc.
-        account_id: Platform-specific account ID
-        display_name: User's display name for player creation
-        submission_source: Where submission came from - "web" or "discord" (default: "web")
+        id_change_reason: For Scenario B (users with existing instances), the intent they selected.
+                          NULL for Scenario A (new users).
 
     Returns:
-        dict with status information:
-        - {"status": "passed"} - Verification successful, player record created
-        - {"status": "failed", "reason": ...} - Verification failed
-        - {"status": "near_match", "ocr_id": ...} - OCR nearly matched, needs user confirmation
-        - {"status": "new_instance_pending"} - User has existing IDs, needs to confirm new instance
+        dict with keys: status, and optionally reason, ocr_id, diff, ocr_skipped, etc.
     """
     from thetower.backend.sus.services import create_or_update_player
 
-    # Permanently record this submission so history survives Django cleanup
-    record_submission_log(player_id, stem, platform, account_id, display_name, submission_source)
+    # Check if user already has this ID verified (for re-verification attempts)
+    old_player_id = player_id if player_already_has_id(platform, account_id, player_id) else None
+
+    # Create the DB row (idempotent via INSERT OR IGNORE on stem UNIQUE)
+    create_submission(
+        stem, platform, account_id, display_name, submission_source, player_id, additional_platform_ids, old_player_id, id_change_reason
+    )
 
     try:
-        # If OCR is not available, skip to player creation
+        # Determine if this is Scenario A (no intent) or Scenario B (has intent)
+        row = get_submission(stem)
+        is_scenario_b = row and row.get("id_change_reason") is not None
+        is_new_game_instance = row and row.get("id_change_reason") == "NEW_GAME_INSTANCE"
+
         if not OCR_ENABLED:
-            if player_has_existing_ids(platform, account_id, player_id):
-                write_status(player_id, stem, {"status": "new_instance_pending"})
+            if is_scenario_b and not is_new_game_instance:
+                # Scenario B (non-NEW_GAME_INSTANCE): Always needs two-stage mod review
+                update_submission(stem, status="awaiting_mod", review_reason="ocr_disabled", mod_review_stage=1)
+                return {"status": "awaiting_mod", "review_reason": "ocr_disabled"}
+            elif player_has_existing_ids(platform, account_id, player_id):
+                # Should not happen (intent should be set), but handle gracefully
+                update_submission(stem, status="new_instance_pending")
                 return {"status": "new_instance_pending"}
 
             result = create_or_update_player(platform, account_id, display_name, player_id)
             if "error" in result:
-                write_status(player_id, stem, {"status": "failed", "reason": result["error"]})
+                update_submission(stem, status="failed")
+                add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
                 return {"status": "failed", "reason": result["error"]}
             else:
-                write_status(player_id, stem, {"status": "passed", "ocr_skipped": True})
+                update_submission(stem, status="passed")
+                add_event(stem, {"type": "passed", "ts": int(time.time()), "ocr_skipped": True})
                 return {"status": "passed", "ocr_skipped": True}
 
-        # Run OCR analysis
         ocr = analyze_verification_screenshot(str(image_path))
         if ocr.player_id:
-            update_submission_log_ocr_id(player_id, stem, ocr.player_id)
+            update_submission(stem, ocr_player_id=ocr.player_id)
 
         logger.info(
             "OCR result for %s: player_id=%s version=%s labels=%s error=%s",
@@ -539,61 +840,80 @@ def process_verification(
             ocr.error,
         )
 
-        # Handle OCR errors
         if ocr.error:
             logger.warning("OCR error for %s: %s", player_id, ocr.error)
-            if player_has_existing_ids(platform, account_id, player_id):
-                write_status(player_id, stem, {"status": "new_instance_pending"})
-                return {"status": "new_instance_pending"}
-
-            result = create_or_update_player(platform, account_id, display_name, player_id)
-            if "error" in result:
-                write_status(player_id, stem, {"status": "failed", "reason": result["error"]})
-                return {"status": "failed", "reason": result["error"]}
+            # OCR failed — must go to mod review
+            if is_scenario_b and not is_new_game_instance:
+                # Scenario B (non-NEW_GAME_INSTANCE): Two-stage mod review
+                reason_suffix = f"_{row['id_change_reason'].lower()}" if row else ""
+                update_submission(stem, status="awaiting_mod", review_reason=f"ocr_error{reason_suffix}", mod_review_stage=1)
+                add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": f"ocr_error{reason_suffix}"})
+                return {"status": "awaiting_mod", "review_reason": f"ocr_error{reason_suffix}", "ocr_error": ocr.error}
             else:
-                write_status(player_id, stem, {"status": "passed", "ocr_error": ocr.error})
-                return {"status": "passed", "ocr_error": ocr.error}
+                # Scenario A or NEW_GAME_INSTANCE: Single-stage mod review
+                update_submission(stem, status="awaiting_mod", review_reason="ocr_error")
+                add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": "ocr_error"})
+                return {"status": "awaiting_mod", "review_reason": "ocr_error", "ocr_error": ocr.error}
 
-        # Check if OCR found valid labels
         if not ocr.has_valid_labels:
-            write_status(player_id, stem, {"status": "failed", "reason": "wrong_screen"})
+            update_submission(stem, status="failed")
+            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "wrong_screen"})
             return {"status": "failed", "reason": "wrong_screen"}
 
-        # Check if OCR successfully extracted a player ID
         if not ocr.player_id:
-            write_status(player_id, stem, {"status": "failed", "reason": "ocr_no_id"})
+            update_submission(stem, status="failed")
+            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "ocr_no_id"})
             return {"status": "failed", "reason": "ocr_no_id"}
 
-        # Compare OCR result to submitted ID
         if ocr.player_id != player_id:
             if OCR_NEAR_MATCH_MAX > 0 and len(ocr.player_id) == len(player_id):
                 diff = sum(a != b for a, b in zip(ocr.player_id, player_id))
                 if 0 < diff <= OCR_NEAR_MATCH_MAX:
-                    # Near-match: pause and ask user to confirm before creating the record.
-                    write_status(player_id, stem, {"status": "near_match", "ocr_id": ocr.player_id, "diff": diff})
-                    # Record to review queue so web interface can show pending submissions
-                    record_review(player_id, stem, "near_match", platform, account_id, player_id, ocr.player_id, display_name)
+                    update_submission(stem, status="near_match", ocr_player_id=ocr.player_id)
+                    add_event(stem, {"type": "near_match", "ts": int(time.time()), "diff": diff, "ocr_id": ocr.player_id})
                     return {"status": "near_match", "ocr_id": ocr.player_id, "diff": diff}
 
-            write_status(player_id, stem, {"status": "failed", "reason": "id_mismatch", "ocr_id": ocr.player_id})
-            return {"status": "failed", "reason": "id_mismatch", "ocr_id": ocr.player_id}
+            # Large difference — must go to mod review
+            if is_scenario_b and not is_new_game_instance:
+                # Scenario B (non-NEW_GAME_INSTANCE): Two-stage mod review
+                reason_suffix = f"_{row['id_change_reason'].lower()}" if row else ""
+                update_submission(
+                    stem, status="awaiting_mod", review_reason=f"id_mismatch{reason_suffix}", ocr_player_id=ocr.player_id, mod_review_stage=1
+                )
+                add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": f"id_mismatch{reason_suffix}", "ocr_id": ocr.player_id})
+                return {"status": "awaiting_mod", "review_reason": f"id_mismatch{reason_suffix}", "typed_id": player_id, "ocr_id": ocr.player_id}
+            else:
+                # Scenario A or NEW_GAME_INSTANCE: Single-stage mod review
+                update_submission(stem, status="awaiting_mod", review_reason="id_mismatch", ocr_player_id=ocr.player_id)
+                add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": "id_mismatch", "ocr_id": ocr.player_id})
+                return {"status": "awaiting_mod", "review_reason": "id_mismatch", "typed_id": player_id, "ocr_id": ocr.player_id}
 
-        # Check if user has existing IDs
-        if player_has_existing_ids(platform, account_id, player_id):
-            write_status(player_id, stem, {"status": "new_instance_pending"})
+        # OCR exact match: player_id == ocr.player_id
+        if is_scenario_b and not is_new_game_instance:
+            # Scenario B (non-NEW_GAME_INSTANCE): Even with exact match, needs two-stage mod review
+            reason_suffix = f"_{row['id_change_reason'].lower()}" if row else ""
+            update_submission(stem, status="awaiting_mod", review_reason=f"exact_match{reason_suffix}", mod_review_stage=1)
+            add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": f"exact_match{reason_suffix}"})
+            return {"status": "awaiting_mod", "review_reason": f"exact_match{reason_suffix}"}
+        elif player_has_existing_ids(platform, account_id, player_id):
+            # NEW_GAME_INSTANCE: Self-service, create immediately
+            update_submission(stem, status="new_instance_pending")
             return {"status": "new_instance_pending"}
 
-        # All checks passed - create player record
+        # Scenario A: Create player immediately
         result = create_or_update_player(platform, account_id, display_name, player_id)
         if "error" in result:
-            write_status(player_id, stem, {"status": "failed", "reason": result["error"]})
+            update_submission(stem, status="failed")
+            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
             return {"status": "failed", "reason": result["error"]}
         else:
             logger.info("Player verified: %s %s tower_id=%s new=%s", platform, account_id, player_id, result.get("created"))
-            write_status(player_id, stem, {"status": "passed"})
+            update_submission(stem, status="passed", final_player_id=player_id)
+            add_event(stem, {"type": "passed", "ts": int(time.time())})
             return {"status": "passed", "player_created": result.get("created", False)}
 
     except Exception as exc:
         logger.exception("Verification processing failed for %s %s tower_id=%s", platform, account_id, player_id)
-        write_status(player_id, stem, {"status": "failed", "reason": "internal_error"})
+        update_submission(stem, status="failed")
+        add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "internal_error"})
         return {"status": "failed", "reason": "internal_error", "error": str(exc)}
