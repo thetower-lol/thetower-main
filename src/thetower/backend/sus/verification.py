@@ -31,6 +31,9 @@ MAX_UPLOAD_BYTES = int(os.getenv("WEB_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 
 REVIEW_DB_PATH = UPLOAD_DIR / "review_queue.db"
 
+# Terminal statuses (submissions that are complete and should not be re-actioned)
+_TERMINAL_STATUSES = ("passed", "failed", "abandoned")
+
 # Try to import OCR utilities
 try:
     from thetower.utils.ocr import analyze_verification_screenshot, is_available as ocr_available
@@ -146,6 +149,19 @@ def ensure_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_account_status ON submissions (platform, account_id, status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_status_created ON submissions (status, created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_player ON submissions (submitted_player_id)")
+
+        # Table for tracking failed Discord message refresh attempts (for retry)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pending_discord_refreshes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                stem        TEXT    NOT NULL,
+                mod_user    TEXT    NOT NULL,
+                error       TEXT    NOT NULL,
+                created_at  INTEGER NOT NULL,
+                retry_count INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_refresh_stem ON pending_discord_refreshes (stem)")
 
         # Schema migrations: Add new columns if they don't exist
         cursor = conn.execute("PRAGMA table_info(submissions)")
@@ -301,10 +317,77 @@ def add_event(stem: str, event: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Query helpers
+# Pending Discord refresh tracking (for retry when bot is unavailable)
 # ---------------------------------------------------------------------------
 
-_TERMINAL_STATUSES = ("passed", "failed", "abandoned")
+
+def save_pending_discord_refresh(stem: str, mod_user: str, error: str) -> None:
+    """Save a failed Discord message refresh attempt for later retry.
+
+    Args:
+        stem: Submission identifier
+        mod_user: Moderator who triggered the action
+        error: Error message from the failed attempt
+    """
+    ensure_db()
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.execute(
+            """INSERT INTO pending_discord_refreshes (stem, mod_user, error, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (stem, mod_user, error, int(time.time())),
+        )
+    logger.info(f"Saved pending Discord refresh for submission {stem} (error: {error})")
+
+
+def get_pending_discord_refreshes(limit: int = 100) -> list[dict]:
+    """Get pending Discord refresh attempts for retry.
+
+    Returns pending refreshes ordered by retry_count ASC (fewest retries first)
+    to prioritize newer/fresher failures.
+
+    Args:
+        limit: Maximum number of pending refreshes to return
+
+    Returns:
+        List of pending refresh dicts with keys: id, stem, mod_user, error, created_at, retry_count
+    """
+    if not REVIEW_DB_PATH.exists():
+        return []
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT * FROM pending_discord_refreshes
+               ORDER BY retry_count ASC, created_at ASC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def delete_pending_discord_refresh(refresh_id: int) -> None:
+    """Delete a pending Discord refresh after successful retry.
+
+    Args:
+        refresh_id: Primary key of the pending refresh record
+    """
+    ensure_db()
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.execute("DELETE FROM pending_discord_refreshes WHERE id = ?", (refresh_id,))
+    logger.debug(f"Deleted pending Discord refresh ID {refresh_id}")
+
+
+def increment_pending_discord_refresh_retry_count(refresh_id: int) -> None:
+    """Increment retry count for a pending Discord refresh.
+
+    Args:
+        refresh_id: Primary key of the pending refresh record
+    """
+    ensure_db()
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.execute("UPDATE pending_discord_refreshes SET retry_count = retry_count + 1 WHERE id = ?", (refresh_id,))
+
+
+# ---------------------------------------------------------------------------
 
 
 def get_pending_submission(platform: str, account_id: str) -> dict | None:
@@ -526,7 +609,7 @@ def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, final_play
                     add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "player_creation_failed"})
 
 
-def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_player_id: str | None = None) -> None:
+def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_player_id: str | None = None) -> dict[str, Any]:
     """Resolve Stage 1 of two-stage mod review (Scenario B): Verify OCR result.
 
     Args:
@@ -534,11 +617,32 @@ def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_playe
         verdict: "approved" (OCR correct), "fix_id" (mod entered correct ID), or "rejected_fake" (invalid screenshot)
         resolved_by: Mod identifier (platform:account_id)
         verified_player_id: The ID verified from screenshot (required for approved/fix_id)
+
+    Returns:
+        Dict with keys:
+        - status: "ok" if action taken, "already_complete" if submission already in terminal state
+        - current_status: If already_complete, the current status of the submission
+        - message: Human-readable message for the mod
     """
     row = get_submission(stem)
     if not row:
         logger.warning("mod_resolve_stage1 called on non-existent stem %s", stem)
-        return
+        return {"status": "error", "message": "Submission not found"}
+
+    # Check if already in terminal state
+    current_status = row.get("status")
+    if current_status in _TERMINAL_STATUSES:
+        logger.info(f"mod_resolve_stage1 called on already-complete submission {stem} (status={current_status}) by {resolved_by} - skipping action")
+        status_messages = {
+            "passed": f"This verification was already approved (status: {current_status})",
+            "failed": f"This verification was already rejected (status: {current_status})",
+            "abandoned": f"This verification was abandoned by the user (status: {current_status})",
+        }
+        return {
+            "status": "already_complete",
+            "current_status": current_status,
+            "message": status_messages.get(current_status, f"Already {current_status}"),
+        }
 
     if verdict == "rejected_fake":
         # Stage 1 rejection: Screenshot is fake/invalid, stop here
@@ -551,11 +655,11 @@ def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_playe
         )
         add_event(stem, {"type": "mod_stage1_reject", "ts": int(time.time()), "mod": resolved_by})
         logger.info("Stage 1 rejected as fake: stem=%s mod=%s", stem, resolved_by)
-        return
+        return {"status": "ok", "message": "Verification rejected"}
 
     if not verified_player_id:
         logger.error("mod_resolve_stage1 called without verified_player_id for verdict %s stem %s", verdict, stem)
-        return
+        return {"status": "error", "message": "Missing verified_player_id"}
 
     # Check if this is a new user verification or existing user ID change
     old_player_id = row.get("old_player_id")
@@ -570,7 +674,7 @@ def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_playe
 
         if not platform or not account_id:
             logger.error("mod_resolve_stage1: Missing platform/account for new user verification stem %s", stem)
-            return
+            return {"status": "error", "message": "Missing platform/account"}
 
         try:
             result = create_or_update_player(
@@ -608,10 +712,12 @@ def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_playe
                     },
                 )
                 logger.info("Stage 1 complete (new user): stem=%s verified_id=%s mod=%s → PASSED", stem, verified_player_id, resolved_by)
+                return {"status": "ok", "message": "New user verified successfully"}
         except Exception as e:
             logger.error("Exception verifying new user for stem %s: %s", stem, e, exc_info=True)
             update_submission(stem, status="failed")
             add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": str(e)})
+            return {"status": "error", "message": f"Exception: {str(e)}"}
     else:
         # EXISTING USER: Store verified_player_id and transition to Stage 2 for action type selection
         update_submission(
@@ -631,27 +737,49 @@ def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_playe
             },
         )
         logger.info("Stage 1 complete (existing user): stem=%s verified_id=%s mod=%s → Stage 2", stem, verified_player_id, resolved_by)
+        return {"status": "ok", "message": "Advanced to Stage 2 for action selection"}
 
 
-def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> None:
+def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> dict[str, Any]:
     """Resolve Stage 2 of two-stage mod review (Scenario B): Apply action type to verified ID.
 
     Args:
         stem: Submission identifier
         action_type: "replace", "merge", "add_alt", or "reject"
         resolved_by: Mod identifier (platform:account_id)
+
+    Returns:
+        Dict with keys:
+        - status: "ok" if action taken, "already_complete" if submission already in terminal state
+        - current_status: If already_complete, the current status of the submission
+        - message: Human-readable message for the mod
     """
     from thetower.backend.sus.services import create_or_update_player
 
     row = get_submission(stem)
     if not row:
         logger.warning("mod_resolve_stage2 called on non-existent stem %s", stem)
-        return
+        return {"status": "error", "message": "Submission not found"}
+
+    # Check if already in terminal state
+    current_status = row.get("status")
+    if current_status in _TERMINAL_STATUSES:
+        logger.info(f"mod_resolve_stage2 called on already-complete submission {stem} (status={current_status}) by {resolved_by} - skipping action")
+        status_messages = {
+            "passed": f"This verification was already approved (status: {current_status})",
+            "failed": f"This verification was already rejected (status: {current_status})",
+            "abandoned": f"This verification was abandoned by the user (status: {current_status})",
+        }
+        return {
+            "status": "already_complete",
+            "current_status": current_status,
+            "message": status_messages.get(current_status, f"Already {current_status}"),
+        }
 
     verified_player_id = row.get("verified_player_id")
     if not verified_player_id and action_type != "reject":
         logger.error("mod_resolve_stage2: No verified_player_id for stem %s action %s", stem, action_type)
-        return
+        return {"status": "error", "message": "Missing verified_player_id"}
 
     if action_type == "reject":
         # Stage 2 rejection: Don't apply changes, mark as failed
@@ -664,7 +792,7 @@ def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> None:
         )
         add_event(stem, {"type": "mod_stage2_reject", "ts": int(time.time()), "mod": resolved_by})
         logger.info("Stage 2 rejected (no action): stem=%s mod=%s", stem, resolved_by)
-        return
+        return {"status": "ok", "message": "Stage 2 rejected - no changes applied"}
 
     # Apply the action type
     platform = row.get("platform")
@@ -674,7 +802,7 @@ def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> None:
 
     if not platform or not account_id:
         logger.error("mod_resolve_stage2: Missing platform/account for stem %s", stem)
-        return
+        return {"status": "error", "message": "Missing platform/account"}
 
     try:
         result = create_or_update_player(
@@ -718,10 +846,12 @@ def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> None:
                 },
             )
             logger.info("Stage 2 complete: stem=%s action=%s verified_id=%s mod=%s", stem, action_type, verified_player_id, resolved_by)
-    except Exception:
+            return {"status": "ok", "message": f"Action {action_type} applied successfully"}
+    except Exception as e:
         logger.exception("Exception applying action %s for stem %s", action_type, stem)
         update_submission(stem, status="failed")
         add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "player_action_failed"})
+        return {"status": "error", "message": f"Exception: {str(e)}"}
 
 
 # ---------------------------------------------------------------------------
