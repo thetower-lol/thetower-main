@@ -359,7 +359,7 @@ def render_package_deps(package_name: str, key_prefix: str, show_sync: bool = Fa
             st.dataframe(df, hide_index=True, height=min(400, 40 + 35 * len(rows)))
 
 
-def get_storage_info(data_dir: Optional[str], csv_data_dir: Optional[str] = None) -> Dict[str, any]:
+def get_storage_info(data_dir: Optional[str], csv_data_dir: Optional[str] = None, verification_dir: Optional[str] = None) -> Dict[str, any]:
     """Return storage metrics for the given data directories."""
     info: Dict[str, any] = {
         "data_dir": data_dir,
@@ -368,6 +368,8 @@ def get_storage_info(data_dir: Optional[str], csv_data_dir: Optional[str] = None
         "data_dir_size": None,
         "csv_data_dir": csv_data_dir,
         "csv_data_dir_size": None,
+        "verification_dir": verification_dir,
+        "verification_images_size": None,
         "free_disk": None,
         "total_disk": None,
         "error": None,
@@ -399,6 +401,10 @@ def get_storage_info(data_dir: Optional[str], csv_data_dir: Optional[str] = None
 
     if csv_data_dir and os.path.exists(csv_data_dir):
         info["csv_data_dir_size"] = _dir_size(csv_data_dir)
+
+    # Calculate verification images directory size
+    if verification_dir and os.path.exists(verification_dir):
+        info["verification_images_size"] = _dir_size(verification_dir)
 
     return info
 
@@ -438,7 +444,8 @@ def codebase_status_page():
 
     data_dir = os.getenv("DJANGO_DATA")
     csv_data_dir = os.getenv("CSV_DATA")
-    storage = get_storage_info(data_dir, csv_data_dir)
+    verification_dir = os.getenv("WEB_UPLOAD_DIR")
+    storage = get_storage_info(data_dir, csv_data_dir, verification_dir)
 
     if not storage["data_dir_exists"]:
         st.warning(f"⚠️ {storage['error']}")
@@ -484,6 +491,22 @@ def codebase_status_page():
                     st.metric("CSV_DATA", "Not found", help=f"Path: {csv_data_dir} (directory missing)")
             else:
                 st.metric("CSV_DATA", "N/A", help="CSV_DATA env var not set")
+
+        # Second row for verification images
+        col5, col6, col7, col8 = st.columns(4)
+
+        with col5:
+            if verification_dir:
+                if storage["verification_images_size"] is not None:
+                    st.metric(
+                        "Verification Images",
+                        format_bytes(storage["verification_images_size"]),
+                        help=f"Path: {verification_dir}",
+                    )
+                else:
+                    st.metric("Verification Images", "Not found", help=f"Path: {verification_dir} (directory missing)")
+            else:
+                st.metric("Verification Images", "N/A", help="WEB_UPLOAD_DIR env var not set")
 
         if storage["error"]:
             st.warning(f"⚠️ Partial storage info: {storage['error']}")
