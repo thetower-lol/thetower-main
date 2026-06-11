@@ -67,7 +67,7 @@ def get_image_shard(stem: str) -> str:
 
 
 def get_image_storage_path(stem: str, extension: str = ".png") -> Path:
-    return UPLOAD_DIR / "submissions" / get_image_shard(stem) / f"{stem}{extension}"
+    return UPLOAD_DIR / get_image_shard(stem) / f"{stem}{extension}"
 
 
 def save_verification_image(stem: str, image_bytes: bytes, extension: str = ".png") -> Path:
