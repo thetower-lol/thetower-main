@@ -557,24 +557,80 @@ def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_playe
         logger.error("mod_resolve_stage1 called without verified_player_id for verdict %s stem %s", verdict, stem)
         return
 
-    # Store verified_player_id and transition to Stage 2
-    update_submission(
-        stem,
-        status="awaiting_mod_action",
-        mod_review_stage=2,
-        verified_player_id=verified_player_id,
-    )
-    add_event(
-        stem,
-        {
-            "type": "mod_stage1_complete",
-            "ts": int(time.time()),
-            "mod": resolved_by,
-            "verdict": verdict,
-            "verified_id": verified_player_id,
-        },
-    )
-    logger.info("Stage 1 complete: stem=%s verified_id=%s mod=%s → Stage 2", stem, verified_player_id, resolved_by)
+    # Check if this is a new user verification or existing user ID change
+    old_player_id = row.get("old_player_id")
+
+    if not old_player_id:
+        # NEW USER: Directly verify them with the verified ID (no Stage 2 needed)
+        from thetower.backend.sus.services import create_or_update_player
+
+        platform = row.get("platform")
+        account_id = row.get("account_id")
+        submitter_name = row.get("submitter_name", "")
+
+        if not platform or not account_id:
+            logger.error("mod_resolve_stage1: Missing platform/account for new user verification stem %s", stem)
+            return
+
+        try:
+            result = create_or_update_player(
+                platform,
+                account_id,
+                submitter_name,
+                verified_player_id,
+                update_role_source=False,
+                action_type=None,  # New user, no action type
+                old_player_id=None,
+            )
+
+            if "error" in result:
+                logger.error("Failed to verify new user for stem %s: %s", stem, result.get("error"))
+                update_submission(stem, status="failed")
+                add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
+            else:
+                update_submission(
+                    stem,
+                    status="passed",
+                    final_player_id=verified_player_id,
+                    verified_player_id=verified_player_id,
+                    mod_verdict=verdict,
+                    mod_resolved_by=resolved_by,
+                    final_outcome="mod_approved_new_user",
+                )
+                add_event(
+                    stem,
+                    {
+                        "type": "mod_stage1_complete_new_user",
+                        "ts": int(time.time()),
+                        "mod": resolved_by,
+                        "verdict": verdict,
+                        "verified_id": verified_player_id,
+                    },
+                )
+                logger.info("Stage 1 complete (new user): stem=%s verified_id=%s mod=%s → PASSED", stem, verified_player_id, resolved_by)
+        except Exception as e:
+            logger.error("Exception verifying new user for stem %s: %s", stem, e, exc_info=True)
+            update_submission(stem, status="failed")
+            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": str(e)})
+    else:
+        # EXISTING USER: Store verified_player_id and transition to Stage 2 for action type selection
+        update_submission(
+            stem,
+            status="awaiting_mod_action",
+            mod_review_stage=2,
+            verified_player_id=verified_player_id,
+        )
+        add_event(
+            stem,
+            {
+                "type": "mod_stage1_complete",
+                "ts": int(time.time()),
+                "mod": resolved_by,
+                "verdict": verdict,
+                "verified_id": verified_player_id,
+            },
+        )
+        logger.info("Stage 1 complete (existing user): stem=%s verified_id=%s mod=%s → Stage 2", stem, verified_player_id, resolved_by)
 
 
 def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> None:
