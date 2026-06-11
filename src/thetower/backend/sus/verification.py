@@ -824,7 +824,7 @@ def process_verification(
                 add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
                 return {"status": "failed", "reason": result["error"]}
             else:
-                update_submission(stem, status="passed")
+                update_submission(stem, status="passed", final_player_id=player_id, verified_player_id=player_id)
                 add_event(stem, {"type": "passed", "ts": int(time.time()), "ocr_skipped": True})
                 return {"status": "passed", "ocr_skipped": True}
 
@@ -909,7 +909,7 @@ def process_verification(
             return {"status": "failed", "reason": result["error"]}
         else:
             logger.info("Player verified: %s %s tower_id=%s new=%s", platform, account_id, player_id, result.get("created"))
-            update_submission(stem, status="passed", final_player_id=player_id)
+            update_submission(stem, status="passed", final_player_id=player_id, verified_player_id=player_id)
             add_event(stem, {"type": "passed", "ts": int(time.time())})
             return {"status": "passed", "player_created": result.get("created", False)}
 
