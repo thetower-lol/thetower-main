@@ -6,6 +6,7 @@ class IdChangeReason(Enum):
     FIXING_TYPO = "fixing_typo"
     STARTING_FRESH = "starting_fresh"
     NEW_GAME_INSTANCE = "new_game_instance"
+    REFRESH_VERIFICATION = "refresh_verification"
 
 
 REASON_LABELS = {
@@ -13,6 +14,7 @@ REASON_LABELS = {
     IdChangeReason.FIXING_TYPO: "I'm fixing a typo",
     IdChangeReason.STARTING_FRESH: "I'm starting fresh",
     IdChangeReason.NEW_GAME_INSTANCE: "I'm adding a new game instance",
+    IdChangeReason.REFRESH_VERIFICATION: "Refreshing verification screenshot",
 }
 
 REASON_DESCRIPTIONS = {
@@ -20,9 +22,10 @@ REASON_DESCRIPTIONS = {
     IdChangeReason.GAME_CHANGED_ID: "The game assigned me a new ID, but I have results on my old ID too",
     IdChangeReason.FIXING_TYPO: "I entered the wrong ID when verifying. My old ID has no real data",
     IdChangeReason.STARTING_FRESH: "I have a new game account and want to use this ID. Please retire/hide my old ID",
+    IdChangeReason.REFRESH_VERIFICATION: "Updating verification screenshot for existing Tower ID",
 }
 
-# NEW_GAME_INSTANCE is self-service; all others require mod review
+# NEW_GAME_INSTANCE and REFRESH_VERIFICATION are self-service; others require mod review
 REASON_REQUIRES_MOD_REVIEW = {
     IdChangeReason.GAME_CHANGED_ID,
     IdChangeReason.FIXING_TYPO,

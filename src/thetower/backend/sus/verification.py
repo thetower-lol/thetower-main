@@ -805,11 +805,12 @@ def process_verification(
         # Determine if this is Scenario A (no intent) or Scenario B (has intent)
         row = get_submission(stem)
         is_scenario_b = row and row.get("id_change_reason") is not None
-        is_new_game_instance = row and row.get("id_change_reason") == "NEW_GAME_INSTANCE"
+        # Self-service intents: NEW_GAME_INSTANCE and REFRESH_VERIFICATION
+        is_self_service_intent = row and row.get("id_change_reason") in ("new_game_instance", "refresh_verification")
 
         if not OCR_ENABLED:
-            if is_scenario_b and not is_new_game_instance:
-                # Scenario B (non-NEW_GAME_INSTANCE): Always needs two-stage mod review
+            if is_scenario_b and not is_self_service_intent:
+                # Scenario B (requires mod review): Always needs two-stage mod review
                 update_submission(stem, status="awaiting_mod", review_reason="ocr_disabled", mod_review_stage=1)
                 return {"status": "awaiting_mod", "review_reason": "ocr_disabled"}
             elif player_has_existing_ids(platform, account_id, player_id):
@@ -843,7 +844,7 @@ def process_verification(
         if ocr.error:
             logger.warning("OCR error for %s: %s", player_id, ocr.error)
             # OCR failed — must go to mod review
-            if is_scenario_b and not is_new_game_instance:
+            if is_scenario_b and not is_self_service_intent:
                 # Scenario B (non-NEW_GAME_INSTANCE): Two-stage mod review
                 reason_suffix = f"_{row['id_change_reason'].lower()}" if row else ""
                 update_submission(stem, status="awaiting_mod", review_reason=f"ocr_error{reason_suffix}", mod_review_stage=1)
@@ -874,8 +875,8 @@ def process_verification(
                     return {"status": "near_match", "ocr_id": ocr.player_id, "diff": diff}
 
             # Large difference — must go to mod review
-            if is_scenario_b and not is_new_game_instance:
-                # Scenario B (non-NEW_GAME_INSTANCE): Two-stage mod review
+            if is_scenario_b and not is_self_service_intent:
+                # Scenario B (requires mod review): Two-stage mod review
                 reason_suffix = f"_{row['id_change_reason'].lower()}" if row else ""
                 update_submission(
                     stem, status="awaiting_mod", review_reason=f"id_mismatch{reason_suffix}", ocr_player_id=ocr.player_id, mod_review_stage=1
@@ -889,14 +890,14 @@ def process_verification(
                 return {"status": "awaiting_mod", "review_reason": "id_mismatch", "typed_id": player_id, "ocr_id": ocr.player_id}
 
         # OCR exact match: player_id == ocr.player_id
-        if is_scenario_b and not is_new_game_instance:
-            # Scenario B (non-NEW_GAME_INSTANCE): Even with exact match, needs two-stage mod review
+        if is_scenario_b and not is_self_service_intent:
+            # Scenario B (requires mod review): Even with exact match, needs two-stage mod review
             reason_suffix = f"_{row['id_change_reason'].lower()}" if row else ""
             update_submission(stem, status="awaiting_mod", review_reason=f"exact_match{reason_suffix}", mod_review_stage=1)
             add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": f"exact_match{reason_suffix}"})
             return {"status": "awaiting_mod", "review_reason": f"exact_match{reason_suffix}"}
         elif player_has_existing_ids(platform, account_id, player_id):
-            # NEW_GAME_INSTANCE: Self-service, create immediately
+            # Self-service intents (NEW_GAME_INSTANCE, REFRESH_VERIFICATION): Create immediately
             update_submission(stem, status="new_instance_pending")
             return {"status": "new_instance_pending"}
 
