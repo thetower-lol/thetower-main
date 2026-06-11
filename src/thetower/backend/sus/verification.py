@@ -875,6 +875,7 @@ def process_verification(
                     return {"status": "near_match", "ocr_id": ocr.player_id, "diff": diff}
 
             # Large difference — must go to mod review
+            # Always use two-stage review for id_mismatch to ensure OCR verification
             if is_scenario_b and not is_self_service_intent:
                 # Scenario B (requires mod review): Two-stage mod review
                 reason_suffix = f"_{row['id_change_reason'].lower()}" if row else ""
@@ -884,8 +885,9 @@ def process_verification(
                 add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": f"id_mismatch{reason_suffix}", "ocr_id": ocr.player_id})
                 return {"status": "awaiting_mod", "review_reason": f"id_mismatch{reason_suffix}", "typed_id": player_id, "ocr_id": ocr.player_id}
             else:
-                # Scenario A or NEW_GAME_INSTANCE: Single-stage mod review
-                update_submission(stem, status="awaiting_mod", review_reason="id_mismatch", ocr_player_id=ocr.player_id)
+                # Scenario A or NEW_GAME_INSTANCE: Also use Stage 1 for consistent OCR verification
+                # Stage 1 allows mods to approve OCR result, fix it, or reject
+                update_submission(stem, status="awaiting_mod", review_reason="id_mismatch", ocr_player_id=ocr.player_id, mod_review_stage=1)
                 add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": "id_mismatch", "ocr_id": ocr.player_id})
                 return {"status": "awaiting_mod", "review_reason": "id_mismatch", "typed_id": player_id, "ocr_id": ocr.player_id}
 
