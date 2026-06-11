@@ -157,6 +157,8 @@ def ensure_db() -> None:
             ("discord_log_message_id", "ALTER TABLE submissions ADD COLUMN discord_log_message_id TEXT"),
             ("discord_notification_message_id", "ALTER TABLE submissions ADD COLUMN discord_notification_message_id TEXT"),
             ("final_outcome", "ALTER TABLE submissions ADD COLUMN final_outcome TEXT"),
+            ("version", "ALTER TABLE submissions ADD COLUMN version TEXT"),
+            ("build", "ALTER TABLE submissions ADD COLUMN build TEXT"),
         ]
 
         for col_name, alter_sql in migrations:
@@ -184,6 +186,8 @@ def create_submission(
     additional_platform_ids: dict | None = None,
     old_player_id: str | None = None,
     id_change_reason: str | None = None,
+    version: str | None = None,
+    build: str | None = None,
 ) -> None:
     """Insert a new submission row. Builds platform_ids JSON automatically.
 
@@ -192,6 +196,8 @@ def create_submission(
                        pass the same value here. Used to prevent deleting verified IDs on rejection.
         id_change_reason: For Scenario B (users with existing instances), the intent they selected
                           from IdChangeReason enum. NULL for Scenario A (new users).
+        version: Game version extracted from screenshot (e.g., "28.2.1").
+        build: Game build extracted from screenshot (shown only to bot owner).
     """
     ensure_db()
     ids: dict = {} if platform == "web" else {platform: account_id}
@@ -201,8 +207,8 @@ def create_submission(
         conn.execute(
             """INSERT OR IGNORE INTO submissions
                (stem, platform, account_id, platform_ids, submitter_name, submission_source,
-                submitted_player_id, old_player_id, id_change_reason, status, events, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '[]', ?, ?)""",
+                submitted_player_id, old_player_id, id_change_reason, version, build, status, events, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '[]', ?, ?)""",
             (
                 stem,
                 platform,
@@ -213,6 +219,8 @@ def create_submission(
                 submitted_player_id,
                 old_player_id,
                 id_change_reason,
+                version,
+                build,
                 now,
                 now,
             ),
@@ -830,7 +838,12 @@ def process_verification(
 
         ocr = analyze_verification_screenshot(str(image_path))
         if ocr.player_id:
-            update_submission(stem, ocr_player_id=ocr.player_id)
+            update_fields = {"ocr_player_id": ocr.player_id}
+            if ocr.version:
+                update_fields["version"] = ocr.version
+            if ocr.build:
+                update_fields["build"] = ocr.build
+            update_submission(stem, **update_fields)
 
         logger.info(
             "OCR result for %s: player_id=%s version=%s labels=%s error=%s",
