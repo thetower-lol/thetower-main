@@ -34,6 +34,8 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Optional
 
+from thetower.backend.sus.services import is_valid_tower_id
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -247,14 +249,18 @@ def _fix_hex(s: str) -> str:
 
 
 def _parse_id_from_text(text: str) -> Optional[str]:
-    """Search OCR output for the ID line and return a validated 16-char hex string."""
+    """Search OCR output for the ID line and return a validated hex string.
+
+    Uses centralized is_valid_tower_id() validation (13-16 hex characters).
+    """
     for line in text.splitlines():
         if not _ID_LINE_RE.search(line):
             continue
         candidate = re.sub(r"^.*?\bID[\s:;]+", "", line, flags=re.IGNORECASE).strip()
         candidate = candidate.split()[0] if candidate.split() else candidate
         fixed = _fix_hex(candidate)
-        if re.fullmatch(r"[A-F0-9]{16}", fixed):
+        # Use centralized validation that matches web verification and services
+        if is_valid_tower_id(fixed):
             return fixed
     return None
 
