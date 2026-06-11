@@ -430,11 +430,41 @@ def codebase_status_page():
         st.markdown(f"**Working Directory:** `{cwd}`")
 
     # Refresh controls
-    col1, col2 = st.columns([1, 1])
+    col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
         if st.button("🔄 Refresh Status"):
             st.rerun()
     with col2:
+        if st.button("🔄 Update All", key="update_all_packages", help="Update all packages that have updates available"):
+            with st.spinner("Checking for updates..."):
+                # Get list of packages with updates available
+                thetower_packages = get_thetower_packages()
+                packages_to_update = []
+                for pkg in thetower_packages:
+                    if pkg["name"] == "thetower":
+                        continue
+                    if pkg["repository_url"]:
+                        update_info = check_package_updates_sync(pkg["name"], pkg["repository_url"])
+                        if update_info.get("update_available"):
+                            packages_to_update.append((pkg["name"], pkg["repository_url"]))
+
+                if not packages_to_update:
+                    st.info("All packages are already up to date!")
+                else:
+                    with st.spinner(f"Updating {len(packages_to_update)} package(s)..."):
+                        results = []
+                        for pkg_name, repo_url in packages_to_update:
+                            result = update_package_sync(pkg_name, repo_url=repo_url)
+                            results.append(f"{'✅' if result['success'] else '❌'} {pkg_name}: {result['message']}")
+
+                        success = all(r.startswith("✅") for r in results)
+                        title = (
+                            "✅ All packages updated successfully\n🔄 Please restart services for changes to take effect"
+                            if success
+                            else "⚠️ Some packages failed to update"
+                        )
+                        show_operation_result(success=success, title=title, message="\n\n".join(results))
+    with col3:
         st.markdown(f"*Last updated: {fmt_dt(datetime.now(timezone.utc), fmt='%H:%M:%S %Z')}*")
 
     st.markdown("---")
