@@ -32,7 +32,8 @@ MAX_UPLOAD_BYTES = int(os.getenv("WEB_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 REVIEW_DB_PATH = UPLOAD_DIR / "review_queue.db"
 
 # Terminal statuses (submissions that are complete and should not be re-actioned)
-_TERMINAL_STATUSES = ("passed", "failed", "abandoned")
+# Note: "approved" is legacy — "passed" is the current terminal success status
+_TERMINAL_STATUSES = ("passed", "approved", "rejected", "abandoned", "failed")
 
 # Try to import OCR utilities
 try:
@@ -42,6 +43,400 @@ try:
 except ImportError:
     OCR_ENABLED = False
     analyze_verification_screenshot = None
+
+
+# ---------------------------------------------------------------------------
+# Pure Functions for OCR and Status Determination
+# ---------------------------------------------------------------------------
+
+
+def run_ocr(image_path: Path, player_id: str) -> dict[str, Any]:
+    """Run OCR on verification image with error categorization (pure function - no DB access).
+
+    Returns dict with OCR result fields:
+        - player_id: str | None - Extracted player ID (validated format)
+        - version: str | None - Game version
+        - build: str | None - Game build
+        - has_valid_labels: bool - True if correct screen detected
+        - error: str | None - Error message if OCR failed
+        - error_category: str | None - Error category for user-facing messages:
+            - "ocr_disabled" - OCR not available
+            - "ocr_technical" - OCR service error, image corrupt, etc.
+            - "invalid_id_format" - OCR extracted text but not valid Tower ID
+    """
+    from thetower.backend.sus.services import is_valid_tower_id
+
+    if not OCR_ENABLED:
+        return {
+            "player_id": None,
+            "version": None,
+            "build": None,
+            "has_valid_labels": False,
+            "error": "ocr_disabled",
+            "error_category": "ocr_disabled",
+        }
+
+    try:
+        ocr = analyze_verification_screenshot(str(image_path))
+
+        # If OCR extracted a player_id, validate it's a valid Tower ID format
+        if ocr.player_id and not is_valid_tower_id(ocr.player_id):
+            logger.warning("OCR extracted invalid Tower ID format: %s", ocr.player_id)
+            return {
+                "player_id": None,  # Treat as failed extraction
+                "version": ocr.version,
+                "build": ocr.build,
+                "has_valid_labels": ocr.has_valid_labels,
+                "error": f"Invalid ID format: {ocr.player_id}",
+                "error_category": "invalid_id_format",
+            }
+
+        # Categorize OCR errors
+        error_category = None
+        if ocr.error:
+            # Analyze error message to categorize
+            error_lower = ocr.error.lower()
+            if "could not load image" in error_lower or "image" in error_lower:
+                error_category = "ocr_technical"
+            elif "tesseract" in error_lower or "ocr" in error_lower:
+                error_category = "ocr_technical"
+            else:
+                error_category = "ocr_technical"  # Default to technical
+
+        return {
+            "player_id": ocr.player_id,
+            "version": ocr.version,
+            "build": ocr.build,
+            "has_valid_labels": ocr.has_valid_labels,
+            "error": ocr.error,
+            "error_category": error_category,
+        }
+    except Exception as e:
+        logger.exception("OCR failed for %s", image_path)
+        return {
+            "player_id": None,
+            "version": None,
+            "build": None,
+            "has_valid_labels": False,
+            "error": str(e),
+            "error_category": "ocr_technical",
+        }
+
+
+def get_user_context(platform: str, account_id: str, submitted_player_id: str, id_change_reason: str | None) -> dict[str, Any]:
+    """Determine user context for status determination (pure function - no DB updates).
+
+    Returns dict with:
+        - is_new_user: bool - True if user has no existing verified IDs
+        - has_existing_ids: bool - True if user has other verified IDs (but not this one)
+        - already_has_this_id: bool - True if user already verified this specific ID
+        - intent: str | None - User's intent (id_change_reason)
+        - is_self_service: bool - True if intent allows self-service (no mod review)
+        - is_scenario_b: bool - True if existing user with intent (Scenario B from design doc)
+    """
+    from thetower.backend.sus.constants import IdChangeReason
+
+    SELF_SERVICE_INTENTS = {IdChangeReason.NEW_GAME_INSTANCE.value, IdChangeReason.REFRESH_VERIFICATION.value}
+
+    # Check if user has any existing IDs
+    already_has_this_id = player_already_has_id(platform, account_id, submitted_player_id)
+    has_existing_ids = player_has_existing_ids(platform, account_id, submitted_player_id)
+
+    # New user: no existing IDs at all
+    is_new_user = not has_existing_ids and not already_has_this_id
+
+    # Self-service: intent allows auto-complete without mod review
+    is_self_service = id_change_reason in SELF_SERVICE_INTENTS
+
+    # Scenario B: existing user with intent set
+    is_scenario_b = id_change_reason is not None
+
+    return {
+        "is_new_user": is_new_user,
+        "has_existing_ids": has_existing_ids,
+        "already_has_this_id": already_has_this_id,
+        "intent": id_change_reason,
+        "is_self_service": is_self_service,
+        "is_scenario_b": is_scenario_b,
+    }
+
+
+def determine_initial_status(ocr_result: dict[str, Any], submitted_player_id: str, user_context: dict[str, Any]) -> dict[str, Any]:
+    """Determine initial status based on OCR result and user context with specific error categories (implements Rules 1-3 from taxonomy).
+
+    Returns dict with:
+        - status: str - Initial status value
+        - ocr_player_id: str | None - OCR-read player ID (for DB storage)
+        - version: str | None - Game version (for DB storage)
+        - build: str | None - Game build (for DB storage)
+        - return_to_caller: dict[str, Any] - Response dict to return to web/Discord
+    """
+    ocr_player_id = ocr_result.get("player_id")
+    ocr_error = ocr_result.get("error")
+    error_category = ocr_result.get("error_category")
+    has_valid_labels = ocr_result.get("has_valid_labels", False)
+
+    # Extract user context
+    is_self_service = user_context["is_self_service"]
+    intent = user_context["intent"]
+
+    # Rule 1: OCR Error → ocr_error status with specific category
+    if ocr_error and error_category not in ("ocr_disabled",):
+        # Determine user-facing reason based on error category
+        if error_category == "invalid_id_format":
+            reason = "invalid_id_format"
+            user_message = "OCR extracted text but it doesn't match a valid Tower ID format"
+        elif error_category == "ocr_technical":
+            reason = "ocr_technical_error"
+            user_message = "OCR service encountered an error processing the image"
+        else:
+            reason = "ocr_error"
+            user_message = "OCR failed to process the image"
+
+        return {
+            "status": "ocr_error",
+            "ocr_player_id": None,
+            "version": ocr_result.get("version"),
+            "build": ocr_result.get("build"),
+            "return_to_caller": {
+                "status": "ocr_error",
+                "reason": reason,
+                "ocr_error": ocr_error,  # Technical details for mods
+                "user_message": user_message,  # User-friendly message
+            },
+        }
+
+    # Rule 1b: OCR disabled → treat as exact match (trust user input)
+    if error_category == "ocr_disabled":
+        if is_self_service or user_context["is_new_user"]:
+            # Self-service or new user: auto-complete (caller will handle)
+            return {
+                "status": "ocr_unavailable",  # Track that OCR was unavailable
+                "ocr_player_id": None,
+                "version": None,
+                "build": None,
+                "return_to_caller": {"status": "auto_complete", "reason": "ocr_unavailable"},
+            }
+        else:
+            # Existing user with mod-review intent: skip OCR review, go to Intent review
+            return {
+                "status": "ocr_unavailable",  # Track that OCR was unavailable
+                "ocr_player_id": None,
+                "version": None,
+                "build": None,
+                "return_to_caller": {"status": "mod_intent_review", "reason": f"ocr_unavailable_{intent}"},
+            }
+
+    # Rule 2: Wrong screen → rejected (user uploaded wrong screen type)
+    if not has_valid_labels:
+        return {
+            "status": "rejected",
+            "ocr_player_id": None,
+            "version": None,
+            "build": None,
+            "return_to_caller": {
+                "status": "rejected",
+                "reason": "wrong_screen",
+                "user_message": "Please upload a screenshot of your Settings screen showing your Player ID",
+            },
+        }
+
+    # Rule 2b: OCR extracted nothing → failed
+    if not ocr_player_id:
+        return {
+            "status": "failed",
+            "ocr_player_id": None,
+            "version": ocr_result.get("version"),
+            "build": ocr_result.get("build"),
+            "return_to_caller": {
+                "status": "failed",
+                "reason": "ocr_no_id",
+                "user_message": "Could not read Player ID from screenshot. Please ensure it's clearly visible.",
+            },
+        }
+
+    # Rule 3: OCR exact match → auto-complete or Intent review
+    if ocr_player_id == submitted_player_id:
+        if is_self_service or user_context["is_new_user"]:
+            # Self-service or new user: auto-complete immediately
+            return {
+                "status": "ocr_processing",  # Not used, caller will auto-complete
+                "ocr_player_id": ocr_player_id,
+                "version": ocr_result.get("version"),
+                "build": ocr_result.get("build"),
+                "return_to_caller": {"status": "auto_complete", "reason": "exact_match"},
+            }
+        else:
+            # Existing user with mod-review intent: skip OCR review, go to Intent review
+            return {
+                "status": "mod_intent_review",  # Intent review: action selection
+                "ocr_player_id": ocr_player_id,
+                "version": ocr_result.get("version"),
+                "build": ocr_result.get("build"),
+                "return_to_caller": {"status": "mod_intent_review", "reason": f"exact_match_{intent}"},
+            }
+
+    # Rule 3b: Near-match → user_ocr_choice (user decides)
+    # Covers both substitutions (same length) and insertions/deletions (length ±1 or ±2)
+    if OCR_NEAR_MATCH_MAX > 0:
+        len_diff = abs(len(ocr_player_id) - len(submitted_player_id))
+        if len_diff == 0:
+            # Same length: count substitutions
+            diff = sum(a != b for a, b in zip(ocr_player_id, submitted_player_id))
+        elif len_diff <= OCR_NEAR_MATCH_MAX:
+            # Different length: use simple edit distance (insert/delete only, no transpositions)
+            # We only need to know if it's ≤ threshold, so a fast approximation is fine.
+            shorter, longer = sorted([ocr_player_id, submitted_player_id], key=len)
+            # Check if shorter is a subsequence-style near-match of longer
+            row = list(range(len(shorter) + 1))
+            for ch in longer:
+                new_row = [row[0] + 1]
+                for j, c in enumerate(shorter):
+                    new_row.append(min(new_row[-1] + 1, row[j + 1] + 1, row[j] + (ch != c)))
+                row = new_row
+            diff = row[-1]
+        else:
+            diff = len(ocr_player_id) + len(submitted_player_id)  # Definitely > threshold
+
+        if 0 < diff <= OCR_NEAR_MATCH_MAX:
+            return {
+                "status": "user_ocr_choice",
+                "ocr_player_id": ocr_player_id,
+                "version": ocr_result.get("version"),
+                "build": ocr_result.get("build"),
+                "return_to_caller": {
+                    "status": "user_ocr_choice",
+                    "ocr_id": ocr_player_id,
+                    "diff": diff,
+                    "typed_id": submitted_player_id,
+                    "user_message": f"Small discrepancy detected ({diff} character{'s' if diff > 1 else ''}). Please verify which ID is correct.",
+                },
+            }
+
+    # Rule 3c: Large OCR mismatch → ocr_large_mismatch (mod OCR review review)
+    return {
+        "status": "ocr_large_mismatch",
+        "ocr_player_id": ocr_player_id,
+        "version": ocr_result.get("version"),
+        "build": ocr_result.get("build"),
+        "return_to_caller": {
+            "status": "ocr_large_mismatch",
+            "reason": f"id_mismatch_{intent}" if intent else "id_mismatch",
+            "typed_id": submitted_player_id,
+            "ocr_id": ocr_player_id,
+            "user_message": f"Large discrepancy: You entered {submitted_player_id}, OCR read {ocr_player_id}. Requires mod review.",
+        },
+    }
+
+
+def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
+    """Attempt to auto-complete submission if eligible (implements Rule 4 from taxonomy).
+
+    Checks if submission is eligible for auto-complete:
+    - New user (no old_player_id) → create player, mark approved
+    - Existing user with REFRESH_VERIFICATION → mark approved (player already exists)
+    - Existing user with NEW_GAME_INSTANCE → create new instance, mark approved
+    - Existing user with mod-review intent → return ineligible (requires Intent review)
+
+    Returns dict with:
+        - eligible: bool - True if auto-completed, False if requires Intent review
+        - status: str - Result status ("approved", "failed", or submission status if ineligible)
+        - message: str - Human-readable message
+    """
+    from thetower.backend.sus.constants import IdChangeReason
+    from thetower.backend.sus.services import create_or_update_player
+
+    row = get_submission(stem)
+    if not row:
+        return {"eligible": False, "status": "error", "message": "Submission not found"}
+
+    # Check terminal state
+    if row.get("final_outcome"):
+        return {"eligible": False, "status": row["status"], "message": f"Already complete: {row['final_outcome']}"}
+
+    # Extract context
+    verified_player_id = row.get("verified_player_id")
+    old_player_id = row.get("old_player_id")
+    intent = row.get("id_change_reason")
+    platform = row.get("platform")
+    account_id = row.get("account_id")
+    submitter_name = row.get("submitter_name", "")
+
+    if not verified_player_id:
+        return {"eligible": False, "status": row["status"], "message": "No verified_player_id set (OCR not verified yet)"}
+
+    # Rule 4a: New user → auto-complete
+    if not old_player_id:
+        logger.info("Auto-completing new user submission: stem=%s verified_id=%s", stem, verified_player_id)
+        try:
+            result = create_or_update_player(
+                platform,
+                account_id,
+                submitter_name,
+                verified_player_id,
+                update_role_source=False,
+                action_type=None,  # New user
+                old_player_id=None,
+            )
+
+            if "error" in result:
+                update_submission(stem, status="failed", final_outcome="failed")
+                add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
+                return {"eligible": True, "status": "failed", "message": f"Failed: {result['error']}"}
+
+            update_submission(stem, status="approved", final_outcome="approved")
+            add_event(stem, {"type": "approved", "ts": int(time.time()), "new_user": True})
+            return {"eligible": True, "status": "approved", "message": "New user verified"}
+
+        except Exception as e:
+            logger.exception("Failed to auto-complete new user submission: stem=%s", stem)
+            update_submission(stem, status="failed", final_outcome="failed")
+            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": str(e)})
+            return {"eligible": True, "status": "failed", "message": f"Exception: {str(e)}"}
+
+    # Rule 4b: REFRESH_VERIFICATION → mark approved (no player changes needed)
+    if intent == IdChangeReason.REFRESH_VERIFICATION.value:
+        logger.info("Auto-completing refresh verification: stem=%s verified_id=%s", stem, verified_player_id)
+        update_submission(stem, status="approved", final_outcome="approved")
+        add_event(stem, {"type": "approved", "ts": int(time.time()), "refresh": True})
+        return {"eligible": True, "status": "approved", "message": "Verification refreshed"}
+
+    # Rule 4c: NEW_GAME_INSTANCE → create new instance
+    if intent == IdChangeReason.NEW_GAME_INSTANCE.value:
+        logger.info("Auto-completing new game instance: stem=%s verified_id=%s", stem, verified_player_id)
+        try:
+            result = create_or_update_player(
+                platform,
+                account_id,
+                submitter_name,
+                verified_player_id,
+                update_role_source=False,
+                action_type=None,  # New instance (default behavior)
+                old_player_id=old_player_id,
+            )
+
+            if "error" in result:
+                update_submission(stem, status="failed", final_outcome="failed")
+                add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
+                return {"eligible": True, "status": "failed", "message": f"Failed: {result['error']}"}
+
+            update_submission(stem, status="approved", final_outcome="approved")
+            add_event(stem, {"type": "approved", "ts": int(time.time()), "new_instance": True})
+            return {"eligible": True, "status": "approved", "message": "New game instance created"}
+
+        except Exception as e:
+            logger.exception("Failed to auto-complete new game instance: stem=%s", stem)
+            update_submission(stem, status="failed", final_outcome="failed")
+            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": str(e)})
+            return {"eligible": True, "status": "failed", "message": f"Exception: {str(e)}"}
+
+    # Rule 4d: Mod-review intent → ineligible, requires Intent review
+    logger.info("Submission requires Intent review (mod intent review): stem=%s intent=%s", stem, intent)
+    return {
+        "eligible": False,
+        "status": row["status"],
+        "message": f"Requires Intent review for intent: {intent}",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -126,9 +521,9 @@ def ensure_db() -> None:
 
                 submitted_player_id TEXT    NOT NULL,
                 ocr_player_id       TEXT    NOT NULL DEFAULT '',
-                final_player_id     TEXT    NOT NULL DEFAULT '',
+                verified_player_id  TEXT,
 
-                status              TEXT    NOT NULL DEFAULT 'pending',
+                status              TEXT    NOT NULL DEFAULT 'ocr_processing',
 
                 id_change_reason    TEXT,
                 old_player_id       TEXT,
@@ -138,9 +533,14 @@ def ensure_db() -> None:
                 mod_resolved_by     TEXT,
                 mod_notes           TEXT,
 
-                discord_message_id  TEXT,
+                discord_log_message_id  TEXT,
+                discord_notification_message_id  TEXT,
 
+                final_outcome       TEXT,
                 events              TEXT    NOT NULL DEFAULT '[]',
+
+                version             TEXT,
+                build               TEXT,
 
                 created_at          INTEGER NOT NULL,
                 updated_at          INTEGER NOT NULL
@@ -149,6 +549,14 @@ def ensure_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_account_status ON submissions (platform, account_id, status)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_status_created ON submissions (status, created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_player ON submissions (submitted_player_id)")
+
+        # Drop legacy columns that are no longer used (idempotent — ignore errors if already removed)
+        for col in ("final_player_id", "manual_player_id", "mod_review_stage", "discord_message_id"):
+            try:
+                conn.execute(f"ALTER TABLE submissions DROP COLUMN {col}")
+                logger.info("Dropped legacy column: %s", col)
+            except Exception:
+                pass  # Column already removed or not present
 
         # Table for tracking failed Discord message refresh attempts (for retry)
         conn.execute("""
@@ -162,25 +570,6 @@ def ensure_db() -> None:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_refresh_stem ON pending_discord_refreshes (stem)")
-
-        # Schema migrations: Add new columns if they don't exist
-        cursor = conn.execute("PRAGMA table_info(submissions)")
-        existing_columns = {row[1] for row in cursor.fetchall()}
-
-        migrations = [
-            ("verified_player_id", "ALTER TABLE submissions ADD COLUMN verified_player_id TEXT"),
-            ("mod_review_stage", "ALTER TABLE submissions ADD COLUMN mod_review_stage INTEGER"),
-            ("discord_log_message_id", "ALTER TABLE submissions ADD COLUMN discord_log_message_id TEXT"),
-            ("discord_notification_message_id", "ALTER TABLE submissions ADD COLUMN discord_notification_message_id TEXT"),
-            ("final_outcome", "ALTER TABLE submissions ADD COLUMN final_outcome TEXT"),
-            ("version", "ALTER TABLE submissions ADD COLUMN version TEXT"),
-            ("build", "ALTER TABLE submissions ADD COLUMN build TEXT"),
-        ]
-
-        for col_name, alter_sql in migrations:
-            if col_name not in existing_columns:
-                logger.info("Adding column %s to submissions table", col_name)
-                conn.execute(alter_sql)
 
 
 # Keep old name as alias so existing callers don't break during migration
@@ -242,6 +631,9 @@ def create_submission(
             ),
         )
 
+    # Trigger initial "pending" embed in the log channel
+    log_submission_update(stem)
+
 
 def get_submission(stem: str) -> dict | None:
     """Return a single submission row as a dict, or None."""
@@ -263,6 +655,42 @@ def get_submission_by_id(sub_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def get_submission_history(platform: str, account_id: str, limit: int = 10) -> list[dict]:
+    """Return recent terminal or active submissions for a user, newest-first.
+
+    Returns submissions that are:
+    - In a terminal state (final_outcome is set: approved/rejected/failed/abandoned)
+    - OR in an active state requiring user or mod action
+
+    Used by both /account and /verify routes to show verification history.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return []
+
+    # Active statuses that should be shown in history (user-pending or mod-pending)
+    active_statuses = (
+        "user_ocr_choice",  # User needs to choose submitted vs OCR ID
+        "near_match_confirmed",
+        "near_match_ocr",
+        "ocr_large_mismatch",
+        "near_match_timeout",
+        "ocr_error",
+        "mod_intent_review",
+    )
+
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join("?" * len(active_statuses))
+        rows = conn.execute(
+            f"""SELECT * FROM submissions
+               WHERE json_extract(platform_ids, '$.' || ?) = ?
+               AND (final_outcome IS NOT NULL OR status IN ({placeholders}))
+               ORDER BY created_at DESC LIMIT ?""",
+            (platform, account_id) + active_statuses + (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def update_submission(stem: str, **fields) -> None:
     """Update named columns on a submission row and set updated_at."""
     if not fields:
@@ -279,22 +707,58 @@ def update_submission(stem: str, **fields) -> None:
         )
 
 
-def set_awaiting_mod_with_intent(stem: str, error_type: str, intent_reason: str, final_player_id: str | None = None) -> None:
-    """After user selects intent, update submission to awaiting_mod with combined review_reason.
+def set_awaiting_mod_with_intent(stem: str, error_type: str, intent_reason: str, player_id: str | None = None) -> None:
+    """After user selects intent following OCR error/mismatch, set intent and apply workflow.
 
     Args:
         stem: The submission stem
         error_type: Either "ocr_error" or "id_mismatch"
         intent_reason: The IdChangeReason value (e.g., "GAME_CHANGED_ID", "FIXING_TYPO", etc.)
-        final_player_id: The ID the user wants to use (optional, will use typed_id from submission if not provided)
+        player_id: The ID the user wants to use (optional, will use submitted_player_id from submission if not provided)
     """
-    # Combine error_type and intent into review_reason (e.g., "ocr_error_game_changed_id")
-    review_reason = f"{error_type}_{intent_reason.lower()}"
-    fields = {"status": "awaiting_mod", "review_reason": review_reason}
-    if final_player_id:
-        fields["final_player_id"] = final_player_id
-    update_submission(stem, **fields)
-    add_event(stem, {"type": "intent_selected", "ts": int(time.time()), "intent": intent_reason})
+    # Get submission to retrieve submitted_player_id if needed
+    if not player_id:
+        row = get_submission(stem)
+        if not row:
+            logger.warning("set_awaiting_mod_with_intent: submission not found for stem=%s", stem)
+            return
+        player_id = row.get("submitted_player_id")
+
+    # Update submission with intent and verified ID (trust user input since OCR failed/mismatched)
+    update_submission(stem, id_change_reason=intent_reason, verified_player_id=player_id)
+    add_event(stem, {"type": "intent_selected", "ts": int(time.time()), "intent": intent_reason, "error_type": error_type})
+
+    # Apply auto-completion logic (will set status to "approved" or "mod_intent_review" based on intent)
+    auto_complete_if_eligible(stem)
+
+
+def abandon_submission(stem: str, abandoned_by: str | None = None) -> bool:
+    """Mark a submission as abandoned (user cancelled).
+
+    Sets status to "abandoned", records an audit event, and calls log_submission_update().
+    Safe to call on already-terminal submissions — returns False without making changes.
+
+    Args:
+        stem: Submission identifier
+        abandoned_by: Platform identifier of who abandoned (e.g., "discord:123456789") or None
+
+    Returns:
+        True if the submission was abandoned, False if it was already in a terminal state or not found.
+    """
+    row = get_submission(stem)
+    if not row:
+        logger.warning("abandon_submission called on non-existent stem %s", stem)
+        return False
+
+    if row.get("status") in _TERMINAL_STATUSES:
+        logger.info("abandon_submission called on already-terminal submission %s (status=%s) — skipping", stem, row.get("status"))
+        return False
+
+    update_submission(stem, status="abandoned", final_outcome="abandoned")
+    add_event(stem, {"type": "abandoned", "ts": int(time.time()), **({"by": abandoned_by} if abandoned_by else {})})
+    log_submission_update(stem, actor=abandoned_by)
+    logger.info("Submission abandoned: stem=%s by=%s", stem, abandoned_by)
+    return True
 
 
 def add_event(stem: str, event: dict) -> None:
@@ -401,7 +865,7 @@ def get_pending_submission(platform: str, account_id: str) -> dict | None:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """SELECT * FROM submissions
-               WHERE status NOT IN ('passed', 'failed', 'abandoned')
+               WHERE status NOT IN ('passed', 'approved', 'rejected', 'failed', 'abandoned')
                AND json_extract(platform_ids, '$.' || ?) = ?
                ORDER BY created_at DESC LIMIT 1""",
             (platform, account_id),
@@ -418,49 +882,48 @@ def get_pending_submission_for_player_id(submitted_player_id: str) -> dict | Non
         row = conn.execute(
             """SELECT * FROM submissions
                WHERE submitted_player_id = ?
-               AND status NOT IN ('passed', 'failed', 'abandoned')
+               AND status NOT IN ('passed', 'approved', 'rejected', 'failed', 'abandoned')
                LIMIT 1""",
             (submitted_player_id,),
         ).fetchone()
     return dict(row) if row else None
 
 
-def get_pending_near_matches(platform: str, account_id: str) -> list[dict]:
-    """Return unresolved near-match submissions for a platform/account pair."""
-    if not REVIEW_DB_PATH.exists():
-        return []
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """SELECT * FROM submissions
-               WHERE status = 'near_match'
-               AND json_extract(platform_ids, '$.' || ?) = ?
-               ORDER BY created_at ASC""",
-            (platform, account_id),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
 def get_mod_queue(
     limit: int = 100, reason_filter: str | None = None, stem_filter: str | None = None, tower_id_filter: str | None = None
 ) -> list[dict]:
-    """Return awaiting_mod and awaiting_mod_action submissions, oldest first."""
+    """Return submissions needing mod review (OCR review and Intent review), oldest first.
+
+    Note: reason_filter is kept for API compatibility but maps to status filtering in new taxonomy.
+    """
     if not REVIEW_DB_PATH.exists():
         return []
-    clauses = ["(status = 'awaiting_mod' OR status = 'awaiting_mod_action')"]
-    params: list = []
+
+    # OCR review + Intent review statuses
+    mod_review_statuses = ("near_match_confirmed", "near_match_ocr", "ocr_large_mismatch", "near_match_timeout", "ocr_error", "mod_intent_review")
+
+    placeholders = ",".join("?" * len(mod_review_statuses))
+    clauses = [f"status IN ({placeholders})"]
+    params: list = list(mod_review_statuses)
+
+    # reason_filter now maps to status filter for backwards compatibility
     if reason_filter:
-        clauses.append("review_reason = ?")
-        params.append(reason_filter)
+        # If reason_filter is passed, treat it as a status filter override
+        clauses = ["status = ?"]
+        params = [reason_filter]
+
     if stem_filter:
         clauses.append("stem = ?")
         params.append(stem_filter)
+
     if tower_id_filter:
         tid = tower_id_filter.upper()
         clauses.append("(UPPER(submitted_player_id) = ? OR UPPER(ocr_player_id) = ?)")
         params.extend([tid, tid])
+
     where = " AND ".join(clauses)
     params.append(limit)
+
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
@@ -471,34 +934,64 @@ def get_mod_queue(
 
 
 def get_mod_queue_counts() -> dict[str, Any]:
-    """Return mod queue counts by reason."""
+    """Return mod queue counts by status (OCR review and Intent review)."""
     if not REVIEW_DB_PATH.exists():
-        return {"total": 0, "by_reason": {}}
+        return {"total": 0, "by_status": {}}
+
+    # OCR review statuses: OCR verification needed
+    # Intent review statuses: Intent/action selection needed
+    mod_review_statuses = ("near_match_confirmed", "near_match_ocr", "ocr_large_mismatch", "near_match_timeout", "ocr_error", "mod_intent_review")
+
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT review_reason, COUNT(*) AS n FROM submissions WHERE status = 'awaiting_mod' GROUP BY review_reason").fetchall()
-    by_reason = {row["review_reason"]: row["n"] for row in rows}
-    return {"total": sum(by_reason.values()), "by_reason": by_reason}
+        placeholders = ",".join("?" * len(mod_review_statuses))
+        query = f"SELECT status, COUNT(*) AS n FROM submissions WHERE status IN ({placeholders}) GROUP BY status"
+        rows = conn.execute(query, mod_review_statuses).fetchall()
+
+    by_status = {row["status"]: row["n"] for row in rows}
+    return {"total": sum(by_status.values()), "by_status": by_status}
+
+
+def get_non_terminal_submissions() -> list[dict]:
+    """Return all submissions that are not in a terminal state.
+
+    Terminal states are: passed, rejected, failed, abandoned.
+    Used for Discord embed sync on bot startup.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return []
+
+    TERMINAL_STATES = ("passed", "rejected", "failed", "abandoned")
+    placeholders = ",".join("?" * len(TERMINAL_STATES))
+
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(f"SELECT * FROM submissions WHERE status NOT IN ({placeholders}) ORDER BY created_at DESC", TERMINAL_STATES).fetchall()
+
+    return [dict(r) for r in rows]
 
 
 def get_mod_queue_for_player(player_pk: int) -> list[dict]:
-    """Return awaiting_mod and awaiting_mod_action submissions for all accounts linked to a player."""
+    """Return submissions needing mod review for all accounts linked to a player."""
     from thetower.backend.sus.models import LinkedAccount
 
     pairs: list[tuple[str, str]] = list(LinkedAccount.objects.filter(player_id=player_pk).values_list("platform", "account_id"))
     if not pairs or not REVIEW_DB_PATH.exists():
         return []
+
+    # OCR review + Intent review statuses
+    mod_review_statuses = ("near_match_confirmed", "near_match_ocr", "ocr_large_mismatch", "near_match_timeout", "ocr_error", "mod_intent_review")
+
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         results = []
+        placeholders = ",".join("?" * len(mod_review_statuses))
         for platform, account_id in pairs:
-            rows = conn.execute(
-                """SELECT * FROM submissions
-                   WHERE (status = 'awaiting_mod' OR status = 'awaiting_mod_action')
-                   AND json_extract(platform_ids, '$.' || ?) = ?
-                   ORDER BY created_at ASC""",
-                (platform, account_id),
-            ).fetchall()
+            query = f"""SELECT * FROM submissions
+                       WHERE status IN ({placeholders})
+                       AND json_extract(platform_ids, '$.' || ?) = ?
+                       ORDER BY created_at ASC"""
+            rows = conn.execute(query, mod_review_statuses + (platform, account_id)).fetchall()
             results.extend(dict(r) for r in rows)
     return results
 
@@ -541,12 +1034,85 @@ def get_submissions_page(
 
 
 # ---------------------------------------------------------------------------
+# Submission Phase Inference
+# ---------------------------------------------------------------------------
+
+
+def get_submission_phase(stem: str) -> str:
+    """Return a canonical phase label for a submission based on its current state.
+
+    Infers the current workflow phase from ``status`` and ``verified_player_id``
+    without needing a ``mod_review_stage`` column.
+
+    Phase labels:
+        - ``"pending"``           — submission created, OCR not yet run
+        - ``"ocr_processing"``    — OCR running (transient)
+        - ``"awaiting_user_ocr"`` — near-match, waiting for user to choose typed vs OCR ID
+        - ``"awaiting_mod_ocr"``  — large mismatch or near-match timeout, mod must review OCR
+        - ``"awaiting_mod_intent"`` — OCR resolved, mod must select action type
+        - ``"approved"``          — complete, approved (auto or mod)
+        - ``"rejected"``          — complete, rejected by mod
+        - ``"failed"``            — complete, failed (OCR failure, player creation error)
+        - ``"abandoned"``         — complete, user cancelled
+        - ``"unknown"``           — unrecognised status (should not occur)
+
+    TODO (2026-06-13): When implementing the web mod review UI, use this function to decide
+    which action buttons to render. Replace any platform-specific state-derivation logic
+    (e.g., discord_sync._determine_target_state()) with calls to this function so both
+    Discord and web always agree on the current phase.
+
+    Args:
+        stem: Submission identifier
+
+    Returns:
+        One of the phase label strings above.
+    """
+    row = get_submission(stem)
+    if not row:
+        return "unknown"
+
+    status = row.get("status", "")
+
+    if status in ("passed", "approved"):
+        return "approved"
+    if status == "rejected":
+        return "rejected"
+    if status == "failed":
+        return "failed"
+    if status == "abandoned":
+        return "abandoned"
+    if status in ("pending", "ocr_processing", "ocr_unavailable"):
+        return status
+    if status == "user_ocr_choice":
+        return "awaiting_user_ocr"
+    if status in ("near_match_confirmed", "near_match_ocr"):
+        # User chose, OCR soft-flagged — treat as awaiting_mod_intent if id_change_reason requires review,
+        # otherwise awaiting_mod_ocr (soft audit flag for new users)
+        return "awaiting_mod_intent" if row.get("id_change_reason") else "awaiting_mod_ocr"
+    if status in ("ocr_large_mismatch", "near_match_timeout", "ocr_error"):
+        return "awaiting_mod_ocr"
+    if status == "mod_intent_review":
+        return "awaiting_mod_intent"
+
+    return "unknown"
+
+
+# ---------------------------------------------------------------------------
 # Mod resolution
 # ---------------------------------------------------------------------------
 
 
-def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, final_player_id: str | None = None) -> None:
+def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, player_id: str | None = None) -> None:
     """Resolve a mod review: update status, store verdict, and create player if needed.
+
+    .. deprecated:: 2026-06-13
+        Use ``mod_resolve_ocr()`` instead. This single-stage function predates the two-stage
+        OCR + Intent review model and does not advance submissions to Intent review after OCR
+        approval. The web mod routes currently call this; they should be updated to call
+        ``mod_resolve_ocr()`` and ``mod_resolve_intent()`` directly.
+
+        TODO (2026-06-13): Update thetower-web routes/mod.py to call mod_resolve_ocr() and
+        mod_resolve_intent(), then remove this function.
 
     For new_instance_* submissions awaiting mod approval, this will call create_or_update_player()
     to actually create the Django GameInstance/PlayerId records.
@@ -571,8 +1137,8 @@ def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, final_play
         "mod_resolved_by": resolved_by,
         "status": new_status,
     }
-    if final_player_id:
-        fields["final_player_id"] = final_player_id
+    if player_id:
+        fields["verified_player_id"] = player_id
 
     update_submission(stem, **fields)
     add_event(
@@ -582,13 +1148,13 @@ def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, final_play
             "ts": int(time.time()),
             "verdict": verdict,
             "mod": resolved_by,
-            **({"final_id": final_player_id} if final_player_id else {}),
+            **({"verified_id": player_id} if player_id else {}),
         },
     )
 
     # For approved/fix_id verdicts on new_instance_* reviews, create the player now
     if verdict in ("approved", "fix_id") and row.get("review_reason", "").startswith("new_instance_"):
-        player_id_to_create = final_player_id or row.get("final_player_id") or row.get("submitted_player_id")
+        player_id_to_create = player_id or row.get("verified_player_id") or row.get("submitted_player_id")
         if player_id_to_create:
             platform = row.get("platform")
             account_id = row.get("account_id")
@@ -609,8 +1175,8 @@ def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, final_play
                     add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "player_creation_failed"})
 
 
-def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_player_id: str | None = None) -> dict[str, Any]:
-    """Resolve Stage 1 of two-stage mod review (Scenario B): Verify OCR result.
+def mod_resolve_ocr(stem: str, verdict: str, resolved_by: str, verified_player_id: str | None = None) -> dict[str, Any]:
+    """Resolve OCR review: Verify OCR result (refactored to use auto_complete_if_eligible).
 
     Args:
         stem: Submission identifier
@@ -626,16 +1192,17 @@ def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_playe
     """
     row = get_submission(stem)
     if not row:
-        logger.warning("mod_resolve_stage1 called on non-existent stem %s", stem)
+        logger.warning("mod_resolve_ocr called on non-existent stem %s", stem)
         return {"status": "error", "message": "Submission not found"}
 
     # Check if already in terminal state
     current_status = row.get("status")
     if current_status in _TERMINAL_STATUSES:
-        logger.info(f"mod_resolve_stage1 called on already-complete submission {stem} (status={current_status}) by {resolved_by} - skipping action")
+        logger.info(f"mod_resolve_ocr called on already-complete submission {stem} (status={current_status}) by {resolved_by} - skipping action")
         status_messages = {
-            "passed": f"This verification was already approved (status: {current_status})",
-            "failed": f"This verification was already rejected (status: {current_status})",
+            "approved": f"This verification was already approved (status: {current_status})",
+            "rejected": f"This verification was already rejected (status: {current_status})",
+            "failed": f"This verification failed (status: {current_status})",
             "abandoned": f"This verification was abandoned by the user (status: {current_status})",
         }
         return {
@@ -645,107 +1212,67 @@ def mod_resolve_stage1(stem: str, verdict: str, resolved_by: str, verified_playe
         }
 
     if verdict == "rejected_fake":
-        # Stage 1 rejection: Screenshot is fake/invalid, stop here
+        # OCR review rejection: Screenshot is fake/invalid, stop here
         update_submission(
             stem,
-            status="failed",
+            status="rejected",
             mod_verdict=verdict,
             mod_resolved_by=resolved_by,
-            final_outcome="rejected_fake",
+            final_outcome="rejected",
         )
-        add_event(stem, {"type": "mod_stage1_reject", "ts": int(time.time()), "mod": resolved_by})
-        logger.info("Stage 1 rejected as fake: stem=%s mod=%s", stem, resolved_by)
+        add_event(stem, {"type": "mod_ocr_reject", "ts": int(time.time()), "mod": resolved_by})
+        logger.info("OCR review rejected as fake: stem=%s mod=%s", stem, resolved_by)
         return {"status": "ok", "message": "Verification rejected"}
 
     if not verified_player_id:
-        logger.error("mod_resolve_stage1 called without verified_player_id for verdict %s stem %s", verdict, stem)
+        logger.error("mod_resolve_ocr called without verified_player_id for verdict %s stem %s", verdict, stem)
         return {"status": "error", "message": "Missing verified_player_id"}
 
-    # Check if this is a new user verification or existing user ID change
-    old_player_id = row.get("old_player_id")
+    # Store verified_player_id (signals OCR review complete)
+    update_submission(stem, verified_player_id=verified_player_id)
 
-    if not old_player_id:
-        # NEW USER: Directly verify them with the verified ID (no Stage 2 needed)
-        from thetower.backend.sus.services import create_or_update_player
+    # Add OCR review complete event
+    add_event(
+        stem,
+        {
+            "type": "mod_ocr_complete",
+            "ts": int(time.time()),
+            "mod": resolved_by,
+            "verdict": verdict,
+            "verified_id": verified_player_id,
+        },
+    )
 
-        platform = row.get("platform")
-        account_id = row.get("account_id")
-        submitter_name = row.get("submitter_name", "")
+    # Attempt auto-complete (implements Rule 4: checks if new user or self-service intent)
+    auto_result = auto_complete_if_eligible(stem)
 
-        if not platform or not account_id:
-            logger.error("mod_resolve_stage1: Missing platform/account for new user verification stem %s", stem)
-            return {"status": "error", "message": "Missing platform/account"}
-
-        try:
-            result = create_or_update_player(
-                platform,
-                account_id,
-                submitter_name,
-                verified_player_id,
-                update_role_source=False,
-                action_type=None,  # New user, no action type
-                old_player_id=None,
-            )
-
-            if "error" in result:
-                logger.error("Failed to verify new user for stem %s: %s", stem, result.get("error"))
-                update_submission(stem, status="failed")
-                add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
-            else:
-                update_submission(
-                    stem,
-                    status="passed",
-                    final_player_id=verified_player_id,
-                    verified_player_id=verified_player_id,
-                    mod_verdict=verdict,
-                    mod_resolved_by=resolved_by,
-                    final_outcome="mod_approved_new_user",
-                )
-                add_event(
-                    stem,
-                    {
-                        "type": "mod_stage1_complete_new_user",
-                        "ts": int(time.time()),
-                        "mod": resolved_by,
-                        "verdict": verdict,
-                        "verified_id": verified_player_id,
-                    },
-                )
-                logger.info("Stage 1 complete (new user): stem=%s verified_id=%s mod=%s → PASSED", stem, verified_player_id, resolved_by)
-                return {"status": "ok", "message": "New user verified successfully"}
-        except Exception as e:
-            logger.error("Exception verifying new user for stem %s: %s", stem, e, exc_info=True)
-            update_submission(stem, status="failed")
-            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": str(e)})
-            return {"status": "error", "message": f"Exception: {str(e)}"}
+    if auto_result["eligible"]:
+        # Successfully auto-completed (new user or self-service intent)
+        logger.info(
+            "OCR review complete with auto-approval: stem=%s verified_id=%s mod=%s status=%s",
+            stem,
+            verified_player_id,
+            resolved_by,
+            auto_result["status"],
+        )
+        return {"status": "ok", "message": f"OCR review complete: {auto_result['message']}"}
     else:
-        # EXISTING USER: Store verified_player_id and transition to Stage 2 for action type selection
-        update_submission(
-            stem,
-            status="awaiting_mod_action",
-            mod_review_stage=2,
-            verified_player_id=verified_player_id,
-        )
-        add_event(
-            stem,
-            {
-                "type": "mod_stage1_complete",
-                "ts": int(time.time()),
-                "mod": resolved_by,
-                "verdict": verdict,
-                "verified_id": verified_player_id,
-            },
-        )
-        logger.info("Stage 1 complete (existing user): stem=%s verified_id=%s mod=%s → Stage 2", stem, verified_player_id, resolved_by)
-        return {"status": "ok", "message": "Advanced to Stage 2 for action selection"}
+        # Requires Intent review (existing user with mod-review intent)
+        # Update status to mod_intent_review
+        update_submission(stem, status="mod_intent_review")
+        logger.info("OCR review complete, advancing to Intent review: stem=%s verified_id=%s mod=%s", stem, verified_player_id, resolved_by)
+        result = {"status": "ok", "message": "OCR review complete, advanced to Intent review for action selection"}
+
+    log_submission_update(stem, actor=resolved_by)
+    return result
 
 
-def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> dict[str, Any]:
-    """Resolve Stage 2 of two-stage mod review (Scenario B): Apply action type to verified ID.
+def mod_resolve_intent(stem: str, action_type: str, resolved_by: str) -> dict[str, Any]:
+    """Resolve intent review: Apply action type to verified ID (updated with new status values).
 
     Args:
         stem: Submission identifier
-        action_type: "replace", "merge", "add_alt", or "reject"
+        action_type: "replace", "merge", "add_alt", "merge_ids", "new_instance_retire_old", or "reject"
         resolved_by: Mod identifier (platform:account_id)
 
     Returns:
@@ -758,16 +1285,17 @@ def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> dict[st
 
     row = get_submission(stem)
     if not row:
-        logger.warning("mod_resolve_stage2 called on non-existent stem %s", stem)
+        logger.warning("mod_resolve_intent called on non-existent stem %s", stem)
         return {"status": "error", "message": "Submission not found"}
 
     # Check if already in terminal state
     current_status = row.get("status")
     if current_status in _TERMINAL_STATUSES:
-        logger.info(f"mod_resolve_stage2 called on already-complete submission {stem} (status={current_status}) by {resolved_by} - skipping action")
+        logger.info(f"mod_resolve_intent called on already-complete submission {stem} (status={current_status}) by {resolved_by} - skipping action")
         status_messages = {
-            "passed": f"This verification was already approved (status: {current_status})",
-            "failed": f"This verification was already rejected (status: {current_status})",
+            "approved": f"This verification was already approved (status: {current_status})",
+            "rejected": f"This verification was already rejected (status: {current_status})",
+            "failed": f"This verification failed (status: {current_status})",
             "abandoned": f"This verification was abandoned by the user (status: {current_status})",
         }
         return {
@@ -778,21 +1306,21 @@ def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> dict[st
 
     verified_player_id = row.get("verified_player_id")
     if not verified_player_id and action_type != "reject":
-        logger.error("mod_resolve_stage2: No verified_player_id for stem %s action %s", stem, action_type)
+        logger.error("mod_resolve_intent: No verified_player_id for stem %s action %s", stem, action_type)
         return {"status": "error", "message": "Missing verified_player_id"}
 
     if action_type == "reject":
-        # Stage 2 rejection: Don't apply changes, mark as failed
+        # Intent review rejection: Don't apply changes, mark as rejected
         update_submission(
             stem,
-            status="failed",
+            status="rejected",
             mod_verdict="rejected_no_action",
             mod_resolved_by=resolved_by,
-            final_outcome="rejected_no_action",
+            final_outcome="rejected",
         )
-        add_event(stem, {"type": "mod_stage2_reject", "ts": int(time.time()), "mod": resolved_by})
-        logger.info("Stage 2 rejected (no action): stem=%s mod=%s", stem, resolved_by)
-        return {"status": "ok", "message": "Stage 2 rejected - no changes applied"}
+        add_event(stem, {"type": "mod_intent_reject", "ts": int(time.time()), "mod": resolved_by})
+        logger.info("Intent review rejected (no action): stem=%s mod=%s", stem, resolved_by)
+        return {"status": "ok", "message": "Intent review rejected - no changes applied"}
 
     # Apply the action type
     platform = row.get("platform")
@@ -801,7 +1329,7 @@ def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> dict[st
     old_player_id = row.get("old_player_id")
 
     if not platform or not account_id:
-        logger.error("mod_resolve_stage2: Missing platform/account for stem %s", stem)
+        logger.error("mod_resolve_intent: Missing platform/account for stem %s", stem)
         return {"status": "error", "message": "Missing platform/account"}
 
     try:
@@ -817,20 +1345,23 @@ def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> dict[st
 
         if "error" in result:
             logger.error("Failed to apply action %s for stem %s: %s", action_type, stem, result.get("error"))
-            update_submission(stem, status="failed")
+            update_submission(stem, status="failed", final_outcome="failed")
             add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
+            return {"status": "error", "message": f"Failed: {result['error']}"}
         else:
             # Map action_type to final_outcome
             outcome_map = {
-                "replace": "instance_updated_replace",
-                "merge": "instance_updated_merge",
-                "add_alt": "instance_updated_add_alt",
+                "replace": "approved",
+                "merge": "approved",
+                "add_alt": "approved",
+                "merge_ids": "approved",
+                "new_instance_retire_old": "approved",
             }
-            final_outcome = outcome_map.get(action_type, "instance_updated_replace")
+            final_outcome = outcome_map.get(action_type, "approved")
 
             update_submission(
                 stem,
-                status="passed",
+                status="approved",
                 mod_verdict=action_type,
                 mod_resolved_by=resolved_by,
                 final_outcome=final_outcome,
@@ -838,44 +1369,23 @@ def mod_resolve_stage2(stem: str, action_type: str, resolved_by: str) -> dict[st
             add_event(
                 stem,
                 {
-                    "type": "mod_stage2_complete",
+                    "type": "mod_intent_complete",
                     "ts": int(time.time()),
                     "mod": resolved_by,
                     "action": action_type,
                     "verified_id": verified_player_id,
                 },
             )
-            logger.info("Stage 2 complete: stem=%s action=%s verified_id=%s mod=%s", stem, action_type, verified_player_id, resolved_by)
-            return {"status": "ok", "message": f"Action {action_type} applied successfully"}
+            logger.info("Intent review complete: stem=%s action=%s verified_id=%s mod=%s", stem, action_type, verified_player_id, resolved_by)
+            result = {"status": "ok", "message": f"Action {action_type} applied successfully"}
+
+        log_submission_update(stem, actor=resolved_by)
+        return result
     except Exception as e:
         logger.exception("Exception applying action %s for stem %s", action_type, stem)
-        update_submission(stem, status="failed")
+        update_submission(stem, status="failed", final_outcome="failed")
         add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "player_action_failed"})
         return {"status": "error", "message": f"Exception: {str(e)}"}
-
-
-# ---------------------------------------------------------------------------
-# Review queue (legacy name forwarded to mod queue)
-# ---------------------------------------------------------------------------
-
-
-def record_review(
-    player_id: str,
-    stem: str,
-    review_reason: str,
-    platform: str,
-    account_id: str,
-    typed_id: str = "",
-    ocr_id: str = "",
-    submitter_name: str = "",
-) -> None:
-    """Move a submission into awaiting_mod state with the given reason."""
-    update_submission(
-        stem,
-        status="awaiting_mod",
-        review_reason=review_reason,
-        ocr_player_id=ocr_id or "",
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -883,8 +1393,11 @@ def record_review(
 # ---------------------------------------------------------------------------
 
 
-def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 86400) -> int:
-    """Escalate submissions stuck in pending/new_instance_pending for >threshold seconds.
+def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 3600) -> int:
+    """Escalate submissions stuck in user_ocr_choice for >threshold seconds (updated with new status values and near-match support).
+
+    Timeout threshold:
+        - user_ocr_choice (near-match): 1 hour default (3600 seconds)
 
     Returns number escalated.
     """
@@ -894,10 +1407,10 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 86400
     now = int(time.time())
 
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
-        # Find rows that need escalation
+        # Find rows that need escalation (near-match user_ocr_choice that timed out)
         rows = conn.execute(
-            """SELECT stem, status FROM submissions
-               WHERE status IN ('pending', 'new_instance_pending')
+            """SELECT stem, status, id_change_reason FROM submissions
+               WHERE status = 'user_ocr_choice'
                AND created_at < ?""",
             (cutoff_ts,),
         ).fetchall()
@@ -906,28 +1419,75 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 86400
             return 0
 
         count = 0
-        for stem, status in rows:
-            review_reason = "new_instance_pending_stale" if status == "new_instance_pending" else "pending_stale"
+        for stem, status, intent in rows:
+            # Escalate to near_match_timeout (mod OCR review review)
             conn.execute(
                 """UPDATE submissions
-                   SET status = 'awaiting_mod', review_reason = ?, updated_at = ?
-                   WHERE stem = ? AND status NOT IN ('awaiting_mod', 'passed', 'failed', 'abandoned')""",
-                (review_reason, now, stem),
+                   SET status = 'near_match_timeout', updated_at = ?
+                   WHERE stem = ? AND status NOT IN ('approved', 'rejected', 'failed', 'abandoned')""",
+                (now, stem),
             )
             count += 1
 
-        # Append auto_escalated events outside the update for atomicity per row
-        for stem, status in rows:
+            # Add auto_escalated event
             try:
                 row = conn.execute("SELECT events FROM submissions WHERE stem = ?", (stem,)).fetchone()
                 if row:
                     events = json.loads(row[0] or "[]")
-                    events.append({"type": "auto_escalated", "ts": now})
+                    events.append({"type": "auto_escalated", "ts": now, "reason": "user_ocr_choice_timeout"})
                     conn.execute("UPDATE submissions SET events = ? WHERE stem = ?", (json.dumps(events), stem))
             except Exception:
                 pass
 
+        logger.info("Auto-escalated %d user_ocr_choice submissions to near_match_timeout", count)
+
     return count
+
+
+# ---------------------------------------------------------------------------
+# Submission Sync — callback registry
+# ---------------------------------------------------------------------------
+
+# Registered sync callbacks: callables that accept (stem, actor) and schedule
+# the Discord log embed update.  Typically one entry (the bot's sync function),
+# but the list supports multiple consumers (e.g. bot + web socket push).
+_sync_callbacks: list = []
+
+
+def register_sync_callback(callback) -> None:
+    """Register a callable to be invoked by log_submission_update().
+
+    The callable should accept (stem: str, actor: str | None) and handle
+    scheduling the async Discord sync on the event loop.  Duplicates are ignored.
+
+    Typically called once during bot startup:
+        verification.register_sync_callback(cog.schedule_discord_sync)
+    """
+    if callback not in _sync_callbacks:
+        _sync_callbacks.append(callback)
+        logger.debug("Registered sync callback: %s", callback)
+
+
+def log_submission_update(stem: str, actor: str | None = None) -> None:
+    """Notify all registered platforms that a submission has changed state.
+
+    Calls every callback registered via register_sync_callback().  Each callback
+    is responsible for scheduling the async Discord embed update on its own event
+    loop.  If no callbacks are registered (e.g. in web-only mode), logs a debug
+    message and returns silently.
+
+    Args:
+        stem: Submission identifier
+        actor: Optional actor who triggered the change (e.g., "discord:123456789")
+    """
+    if not _sync_callbacks:
+        logger.debug("log_submission_update: no callbacks registered (stem=%s actor=%s)", stem, actor)
+        return
+    for cb in _sync_callbacks:
+        try:
+            cb(stem, actor)
+        except Exception:
+            logger.exception("log_submission_update: callback %s raised for stem=%s", cb, stem)
 
 
 # ---------------------------------------------------------------------------
@@ -960,6 +1520,86 @@ def player_already_has_id(platform: str, account_id: str, player_id: str) -> boo
     return PlayerId.objects.filter(game_instance__player=link.player, id__iexact=player_id).exists()
 
 
+def get_primary_player_id(platform: str, account_id: str) -> str | None:
+    """Return the primary Tower ID for this account, or None if no verified IDs exist."""
+    from thetower.backend.sus.models import LinkedAccount
+
+    link = LinkedAccount.objects.filter(platform=platform, account_id=account_id, active=True).select_related("player").first()
+    if not link:
+        return None
+    primary_pid = link.player.get_primary_player_id()
+    return primary_pid.id if primary_pid else None
+
+
+def user_resolve_near_match(stem: str, chosen_player_id: str, user_chose_typed: bool) -> dict[str, Any]:
+    """User resolved near-match by choosing typed ID or OCR ID (implements near-match resolution flow).
+
+    Sets verified_player_id to user's choice and calls auto_complete_if_eligible to determine next status.
+
+    Args:
+        stem: Submission identifier
+        chosen_player_id: The player ID the user selected (either submitted or OCR)
+        user_chose_typed: True if user chose their typed ID, False if chose OCR ID
+
+    Returns:
+        Dict with keys:
+        - status: str - Result status ("approved", "mod_intent_review", "failed", or "error")
+        - message: str - Human-readable message
+        - auto_completed: bool - True if submission was auto-completed
+    """
+    row = get_submission(stem)
+    if not row:
+        logger.warning("user_resolve_near_match called on non-existent stem %s", stem)
+        return {"status": "error", "message": "Submission not found"}
+
+    # Verify submission is in user_ocr_choice status
+    if row.get("status") != "user_ocr_choice":
+        return {"status": "error", "message": f"Submission not in user_ocr_choice status (current: {row.get('status')})"}
+
+    # Set verified_player_id to user's choice
+    # Also update status to indicate user's choice (near_match_confirmed or near_match_ocr)
+    choice_status = "near_match_confirmed" if user_chose_typed else "near_match_ocr"
+    update_submission(stem, verified_player_id=chosen_player_id, status=choice_status)
+    add_event(
+        stem,
+        {
+            "type": "user_near_match_choice",
+            "ts": int(time.time()),
+            "chosen_id": chosen_player_id,
+            "chose_typed": user_chose_typed,
+        },
+    )
+    logger.info(
+        "User resolved near-match: stem=%s chose_typed=%s verified_id=%s",
+        stem,
+        user_chose_typed,
+        chosen_player_id,
+    )
+
+    # Try auto-complete (will succeed for new users and self-service intents)
+    auto_result = auto_complete_if_eligible(stem)
+
+    if auto_result["eligible"]:
+        result = {
+            "status": auto_result["status"],
+            "message": auto_result["message"],
+            "auto_completed": True,
+        }
+    else:
+        # Requires Intent review (existing user with mod-review intent)
+        # Update status to mod_intent_review
+        update_submission(stem, status="mod_intent_review")
+        logger.info("Near-match resolved, advancing to Intent review: stem=%s verified_id=%s", stem, chosen_player_id)
+        result = {
+            "status": "mod_intent_review",
+            "message": "Your choice has been recorded. A moderator will review your intent.",
+            "auto_completed": False,
+        }
+
+    log_submission_update(stem)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Main Verification Workflow
 # ---------------------------------------------------------------------------
@@ -976,146 +1616,97 @@ def process_verification(
     additional_platform_ids: dict | None = None,
     id_change_reason: str | None = None,
 ) -> dict[str, Any]:
-    """Run OCR on a verification image and create the player record if it passes.
+    """Run OCR on a verification image and create/update player if eligible (refactored to use pure functions).
 
     Args:
         id_change_reason: For Scenario B (users with existing instances), the intent they selected.
                           NULL for Scenario A (new users).
 
     Returns:
-        dict with keys: status, and optionally reason, ocr_id, diff, ocr_skipped, etc.
+        dict with keys: status, and optionally reason, ocr_id, diff, etc.
     """
-    from thetower.backend.sus.services import create_or_update_player
-
-    # Check if user already has this ID verified (for re-verification attempts)
-    old_player_id = player_id if player_already_has_id(platform, account_id, player_id) else None
-
-    # Create the DB row (idempotent via INSERT OR IGNORE on stem UNIQUE)
-    create_submission(
-        stem, platform, account_id, display_name, submission_source, player_id, additional_platform_ids, old_player_id, id_change_reason
-    )
-
     try:
-        # Determine if this is Scenario A (no intent) or Scenario B (has intent)
-        row = get_submission(stem)
-        is_scenario_b = row and row.get("id_change_reason") is not None
-        # Self-service intents: NEW_GAME_INSTANCE and REFRESH_VERIFICATION
-        is_self_service_intent = row and row.get("id_change_reason") in ("new_game_instance", "refresh_verification")
+        # Check if user already has this ID verified (for re-verification attempts)
+        old_player_id = player_id if player_already_has_id(platform, account_id, player_id) else None
 
-        if not OCR_ENABLED:
-            if is_scenario_b and not is_self_service_intent:
-                # Scenario B (requires mod review): Always needs two-stage mod review
-                update_submission(stem, status="awaiting_mod", review_reason="ocr_disabled", mod_review_stage=1)
-                return {"status": "awaiting_mod", "review_reason": "ocr_disabled"}
-            elif player_has_existing_ids(platform, account_id, player_id):
-                # Should not happen (intent should be set), but handle gracefully
-                update_submission(stem, status="new_instance_pending")
-                return {"status": "new_instance_pending"}
-
-            result = create_or_update_player(platform, account_id, display_name, player_id)
-            if "error" in result:
-                update_submission(stem, status="failed")
-                add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
-                return {"status": "failed", "reason": result["error"]}
-            else:
-                update_submission(stem, status="passed", final_player_id=player_id, verified_player_id=player_id)
-                add_event(stem, {"type": "passed", "ts": int(time.time()), "ocr_skipped": True})
-                return {"status": "passed", "ocr_skipped": True}
-
-        ocr = analyze_verification_screenshot(str(image_path))
-        if ocr.player_id:
-            update_fields = {"ocr_player_id": ocr.player_id}
-            if ocr.version:
-                update_fields["version"] = ocr.version
-            if ocr.build:
-                update_fields["build"] = ocr.build
-            update_submission(stem, **update_fields)
-
-        logger.info(
-            "OCR result for %s: player_id=%s version=%s labels=%s error=%s",
-            player_id,
-            ocr.player_id,
-            ocr.version,
-            ocr.has_valid_labels,
-            ocr.error,
+        # Create the DB row (idempotent via INSERT OR IGNORE on stem UNIQUE)
+        create_submission(
+            stem, platform, account_id, display_name, submission_source, player_id, additional_platform_ids, old_player_id, id_change_reason
         )
 
-        if ocr.error:
-            logger.warning("OCR error for %s: %s", player_id, ocr.error)
-            # OCR failed — must go to mod review
-            if is_scenario_b and not is_self_service_intent:
-                # Scenario B (non-NEW_GAME_INSTANCE): Two-stage mod review
-                reason_suffix = f"_{row['id_change_reason'].lower()}" if row else ""
-                update_submission(stem, status="awaiting_mod", review_reason=f"ocr_error{reason_suffix}", mod_review_stage=1)
-                add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": f"ocr_error{reason_suffix}"})
-                return {"status": "awaiting_mod", "review_reason": f"ocr_error{reason_suffix}", "ocr_error": ocr.error}
+        # Phase 1: Run OCR (pure function)
+        ocr_result = run_ocr(image_path, player_id)
+
+        # Phase 2: Get user context (pure function)
+        user_context = get_user_context(platform, account_id, player_id, id_change_reason)
+
+        # Phase 3: Determine initial status (pure function, implements Rules 1-3)
+        status_decision = determine_initial_status(ocr_result, player_id, user_context)
+
+        # Phase 4: Update submission with OCR results and status
+        update_fields = {
+            "status": status_decision["status"],
+            "ocr_player_id": status_decision["ocr_player_id"],
+        }
+        if status_decision.get("version"):
+            update_fields["version"] = status_decision["version"]
+        if status_decision.get("build"):
+            update_fields["build"] = status_decision["build"]
+
+        # For exact match or OCR disabled scenarios, set verified_player_id
+        # - auto_complete: so auto_complete_if_eligible() can proceed immediately
+        # - mod_intent_review: OCR verified (or trusted when unavailable), ready for Intent Review
+        if status_decision["return_to_caller"].get("status") in ("auto_complete", "mod_intent_review"):
+            update_fields["verified_player_id"] = status_decision.get("ocr_player_id") or player_id
+
+        # If OCR unavailable but advancing to Intent Review, update status accordingly
+        if status_decision["status"] == "ocr_unavailable" and status_decision["return_to_caller"].get("status") == "mod_intent_review":
+            update_fields["status"] = "mod_intent_review"
+
+        # Set final_outcome for terminal states (rejected, failed)
+        if status_decision["status"] in ("rejected", "failed"):
+            update_fields["final_outcome"] = status_decision["status"]
+
+        update_submission(stem, **update_fields)
+
+        # Log event (use original status to track ocr_unavailable in audit trail)
+        event_type = status_decision["status"]  # This preserves "ocr_unavailable" in event history
+        event_data = {"type": event_type, "ts": int(time.time())}
+        if "reason" in status_decision["return_to_caller"]:
+            event_data["reason"] = status_decision["return_to_caller"]["reason"]
+        if status_decision.get("ocr_player_id"):
+            event_data["ocr_id"] = status_decision["ocr_player_id"]
+        add_event(stem, event_data)
+
+        logger.info(
+            "OCR complete for %s %s: status=%s ocr_id=%s version=%s",
+            platform,
+            account_id,
+            status_decision["status"],
+            status_decision.get("ocr_player_id"),
+            status_decision.get("version"),
+        )
+
+        # Phase 5: Auto-complete if eligible (implements Rule 4)
+        if status_decision["return_to_caller"].get("status") == "auto_complete":
+            auto_result = auto_complete_if_eligible(stem)
+            if auto_result["eligible"]:
+                # Successfully auto-completed
+                return {
+                    "status": auto_result["status"],
+                    "player_created": True,
+                    "auto_complete": True,
+                }
             else:
-                # Scenario A or NEW_GAME_INSTANCE: Single-stage mod review
-                update_submission(stem, status="awaiting_mod", review_reason="ocr_error")
-                add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": "ocr_error"})
-                return {"status": "awaiting_mod", "review_reason": "ocr_error", "ocr_error": ocr.error}
+                # Shouldn't happen (logic error), but handle gracefully
+                logger.error("Auto-complete indicated but ineligible: stem=%s message=%s", stem, auto_result["message"])
+                return {"status": "error", "reason": "auto_complete_failed"}
 
-        if not ocr.has_valid_labels:
-            update_submission(stem, status="failed")
-            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "wrong_screen"})
-            return {"status": "failed", "reason": "wrong_screen"}
-
-        if not ocr.player_id:
-            update_submission(stem, status="failed")
-            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "ocr_no_id"})
-            return {"status": "failed", "reason": "ocr_no_id"}
-
-        if ocr.player_id != player_id:
-            if OCR_NEAR_MATCH_MAX > 0 and len(ocr.player_id) == len(player_id):
-                diff = sum(a != b for a, b in zip(ocr.player_id, player_id))
-                if 0 < diff <= OCR_NEAR_MATCH_MAX:
-                    update_submission(stem, status="near_match", ocr_player_id=ocr.player_id)
-                    add_event(stem, {"type": "near_match", "ts": int(time.time()), "diff": diff, "ocr_id": ocr.player_id})
-                    return {"status": "near_match", "ocr_id": ocr.player_id, "diff": diff}
-
-            # Large difference — must go to mod review
-            # Always use two-stage review for id_mismatch to ensure OCR verification
-            if is_scenario_b and not is_self_service_intent:
-                # Scenario B (requires mod review): Two-stage mod review
-                reason_suffix = f"_{row['id_change_reason'].lower()}" if row else ""
-                update_submission(
-                    stem, status="awaiting_mod", review_reason=f"id_mismatch{reason_suffix}", ocr_player_id=ocr.player_id, mod_review_stage=1
-                )
-                add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": f"id_mismatch{reason_suffix}", "ocr_id": ocr.player_id})
-                return {"status": "awaiting_mod", "review_reason": f"id_mismatch{reason_suffix}", "typed_id": player_id, "ocr_id": ocr.player_id}
-            else:
-                # Scenario A or NEW_GAME_INSTANCE: Also use Stage 1 for consistent OCR verification
-                # Stage 1 allows mods to approve OCR result, fix it, or reject
-                update_submission(stem, status="awaiting_mod", review_reason="id_mismatch", ocr_player_id=ocr.player_id, mod_review_stage=1)
-                add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": "id_mismatch", "ocr_id": ocr.player_id})
-                return {"status": "awaiting_mod", "review_reason": "id_mismatch", "typed_id": player_id, "ocr_id": ocr.player_id}
-
-        # OCR exact match: player_id == ocr.player_id
-        if is_scenario_b and not is_self_service_intent:
-            # Scenario B (requires mod review): Even with exact match, needs two-stage mod review
-            reason_suffix = f"_{row['id_change_reason'].lower()}" if row else ""
-            update_submission(stem, status="awaiting_mod", review_reason=f"exact_match{reason_suffix}", mod_review_stage=1)
-            add_event(stem, {"type": "awaiting_mod", "ts": int(time.time()), "reason": f"exact_match{reason_suffix}"})
-            return {"status": "awaiting_mod", "review_reason": f"exact_match{reason_suffix}"}
-        elif player_has_existing_ids(platform, account_id, player_id):
-            # Self-service intents (NEW_GAME_INSTANCE, REFRESH_VERIFICATION): Create immediately
-            update_submission(stem, status="new_instance_pending")
-            return {"status": "new_instance_pending"}
-
-        # Scenario A: Create player immediately
-        result = create_or_update_player(platform, account_id, display_name, player_id)
-        if "error" in result:
-            update_submission(stem, status="failed")
-            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
-            return {"status": "failed", "reason": result["error"]}
-        else:
-            logger.info("Player verified: %s %s tower_id=%s new=%s", platform, account_id, player_id, result.get("created"))
-            update_submission(stem, status="passed", final_player_id=player_id, verified_player_id=player_id)
-            add_event(stem, {"type": "passed", "ts": int(time.time())})
-            return {"status": "passed", "player_created": result.get("created", False)}
+        # Return status to caller (web/Discord)
+        return status_decision["return_to_caller"]
 
     except Exception as exc:
         logger.exception("Verification processing failed for %s %s tower_id=%s", platform, account_id, player_id)
-        update_submission(stem, status="failed")
+        update_submission(stem, status="failed", final_outcome="failed")
         add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "internal_error"})
         return {"status": "failed", "reason": "internal_error", "error": str(exc)}

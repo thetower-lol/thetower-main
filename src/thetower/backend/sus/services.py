@@ -45,8 +45,15 @@ def create_or_update_player(
     update_role_source:
         If True, update the LinkedAccount's role_source_instance to the newly created/updated instance.
     action_type:
-        For two-stage mod review (Scenario B): "replace", "merge", or "add_alt".
-        If None (default), behaves like legacy/Scenario A (auto-creates new primary instance).
+        For two-stage mod review (Scenario B): action to perform with the verified ID.
+
+        - ``"replace"`` — Delete old Tower ID, create new one as primary (user lost access to old ID)
+        - ``"merge"`` — Create new GameInstance with new ID as primary, keep old instances active (game changed ID, preserving history)
+        - ``"merge_ids"`` — Add new ID to existing primary instance as primary, demote old ID(s) to alternates (consolidate multiple IDs)
+        - ``"add_alt"`` — Add new ID to existing primary instance as non-primary alternate (multiple devices, same progress)
+        - ``"new_instance_retire_old"`` — Create new GameInstance and set old instances to inactive (fresh start, preserve history)
+        - ``None`` (default) — Legacy/Scenario A behavior: create new primary instance
+
     old_player_id:
         For two-stage mod review (Scenario B): The previously verified Tower ID being replaced/updated.
         Required when action_type is not None.
@@ -169,6 +176,51 @@ def create_or_update_player(
                 # Shouldn't happen, but handle gracefully: create new instance
                 primary_instance = GameInstance.objects.create(player=player, name="Instance 1", primary=True)
                 PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
+
+        elif action_type == "merge_ids":
+            # Merge IDs: Add new ID to existing primary instance as primary, demote old ID(s) to non-primary
+            existing_primary = player.game_instances.filter(primary=True).first()
+            if not existing_primary:
+                # No primary instance — fall back to creating one
+                logger.warning("merge_ids: No primary instance found for player %d, creating one", player.pk)
+                existing_primary = player.game_instances.first()
+                if existing_primary:
+                    existing_primary.primary = True
+                    existing_primary.save()
+
+            if existing_primary:
+                # Demote all existing IDs in this instance to non-primary
+                existing_primary.player_ids.update(primary=False)
+                # Add new ID as primary
+                PlayerId.objects.create(id=player_id, game_instance=existing_primary, primary=True)
+                primary_instance = existing_primary
+                logger.info("Merged IDs: new primary ID %s in instance %s, old IDs demoted", player_id, existing_primary.name)
+            else:
+                # Shouldn't happen, but handle gracefully: create new instance
+                primary_instance = GameInstance.objects.create(player=player, name="Instance 1", primary=True)
+                PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
+
+        elif action_type == "new_instance_retire_old":
+            # Create new instance and retire old: Like merge but sets old instances to inactive
+            # Retire all existing instances
+            player.game_instances.update(primary=False, active=False)
+            # Create new primary instance
+            existing_names = player.game_instances.values_list("name", flat=True)
+            max_num = max(
+                (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)$", name)] if m),
+                default=0,
+            )
+            primary_instance = GameInstance.objects.create(
+                player=player,
+                name=f"Instance {max_num + 1}",
+                primary=True,
+                active=True,
+            )
+            PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
+            if update_role_source:
+                linked_account.role_source_instance = primary_instance
+                linked_account.save()
+            logger.info("Created new instance %s and retired old instances for player %d", primary_instance.name, player.pk)
 
         else:
             # Default/legacy behavior (Scenario A or NULL action_type): Create new primary instance

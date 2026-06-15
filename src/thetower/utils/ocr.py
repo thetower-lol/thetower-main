@@ -154,6 +154,17 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         # either one present is sufficient to confirm the correct screen.
         has_valid_labels = any("subreddit" in w or "reddit" in w or "discord" in w for w in label_words)
 
+        # Fallback: tall screenshots (portrait orientation) can dilute the button
+        # region at full-image scale.  Crop to the center button rows (45–75% of
+        # height) where the Settings buttons live and re-scan at 3× to catch "Subreddit".
+        if not has_valid_labels:
+            h, w_img = gray.shape[:2]
+            crop = gray[int(h * 0.45) : int(h * 0.75), int(w_img * 0.05) : int(w_img * 0.95)]
+            crop3x = cv2.resize(crop, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+            crop_data = pytesseract.image_to_data(crop3x, config="--oem 3 --psm 3", output_type=pytesseract.Output.DICT)
+            crop_words = {w.lower() for w in crop_data["text"] if w.strip()}
+            has_valid_labels = any("subreddit" in w or "reddit" in w or "discord" in w for w in crop_words)
+
         # Version + build: run image_to_string on the same 3× gray for line parsing
         gray2x = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
