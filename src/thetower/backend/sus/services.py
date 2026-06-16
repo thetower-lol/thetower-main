@@ -328,3 +328,275 @@ def get_linked_tower_ids(platform: str, account_id: str) -> list[str]:
         .filter(player_ids__id__isnull=False)
         .distinct()
     )
+
+
+# ---------------------------------------------------------------------------
+# Account management service functions
+# Used by both Discord bot UI and web UI — no direct ORM writes in the UI layer.
+# ---------------------------------------------------------------------------
+
+
+def set_primary_game_instance(player_pk: int, instance_id: int) -> dict[str, Any]:
+    """Set a game instance as the player's primary instance.
+
+    Returns dict with 'status' ('ok' or 'error') and optional 'message'.
+    """
+    from thetower.backend.sus.models import GameInstance, KnownPlayer
+
+    try:
+        player = KnownPlayer.objects.get(id=player_pk)
+        instance = GameInstance.objects.filter(id=instance_id, player=player).first()
+        if not instance:
+            return {"status": "error", "message": "Game instance not found for this player"}
+        GameInstance.objects.filter(player=player).update(primary=False)
+        instance.primary = True
+        instance.save(update_fields=["primary"])
+        logger.info("Set primary game instance: player=%d instance=%d", player_pk, instance_id)
+        return {"status": "ok"}
+    except KnownPlayer.DoesNotExist:
+        return {"status": "error", "message": "Player not found"}
+    except Exception as exc:
+        logger.exception("set_primary_game_instance failed: player=%d instance=%d", player_pk, instance_id)
+        return {"status": "error", "message": str(exc)}
+
+
+def toggle_game_instance_active(instance_id: int, active: bool) -> dict[str, Any]:
+    """Activate or deactivate a game instance.
+
+    Returns dict with 'status' ('ok' or 'error') and optional 'message'.
+    """
+    from thetower.backend.sus.models import GameInstance
+
+    try:
+        updated = GameInstance.objects.filter(id=instance_id).update(active=active)
+        if not updated:
+            return {"status": "error", "message": "Game instance not found"}
+        logger.info("Toggled game instance active: instance=%d active=%s", instance_id, active)
+        return {"status": "ok", "active": active}
+    except Exception as exc:
+        logger.exception("toggle_game_instance_active failed: instance=%d", instance_id)
+        return {"status": "error", "message": str(exc)}
+
+
+def rename_game_instance(instance_id: int, new_name: str) -> dict[str, Any]:
+    """Rename a game instance.
+
+    Returns dict with 'status' ('ok' or 'error') and optional 'message'.
+    """
+    from thetower.backend.sus.models import GameInstance
+
+    new_name = new_name.strip()
+    if not new_name:
+        return {"status": "error", "message": "Name cannot be empty"}
+    if len(new_name) > 50:
+        return {"status": "error", "message": "Name too long (max 50 characters)"}
+
+    try:
+        updated = GameInstance.objects.filter(id=instance_id).update(name=new_name)
+        if not updated:
+            return {"status": "error", "message": "Game instance not found"}
+        logger.info("Renamed game instance: instance=%d name=%r", instance_id, new_name)
+        return {"status": "ok", "name": new_name}
+    except Exception as exc:
+        logger.exception("rename_game_instance failed: instance=%d", instance_id)
+        return {"status": "error", "message": str(exc)}
+
+
+def set_role_source(linked_account_id: int, instance_id: int | None) -> dict[str, Any]:
+    """Set which game instance provides tournament roles for a linked Discord account.
+
+    Args:
+        linked_account_id: LinkedAccount primary key
+        instance_id: GameInstance primary key, or None to clear the role source
+
+    Returns dict with 'status' ('ok' or 'error') and optional 'message'.
+    """
+    from thetower.backend.sus.models import GameInstance, LinkedAccount
+
+    try:
+        account = LinkedAccount.objects.get(id=linked_account_id)
+        if instance_id is not None:
+            instance = GameInstance.objects.filter(id=instance_id).first()
+            if not instance:
+                return {"status": "error", "message": "Game instance not found"}
+            account.role_source_instance = instance
+        else:
+            account.role_source_instance = None
+        account.save(update_fields=["role_source_instance"])
+        logger.info("Set role source: linked_account=%d instance=%s", linked_account_id, instance_id)
+        return {"status": "ok"}
+    except LinkedAccount.DoesNotExist:
+        return {"status": "error", "message": "Linked account not found"}
+    except Exception as exc:
+        logger.exception("set_role_source failed: linked_account=%d", linked_account_id)
+        return {"status": "error", "message": str(exc)}
+
+
+def copy_role_source_to_accounts(player_pk: int, source_instance_id: int, target_account_ids: list[int]) -> dict[str, Any]:
+    """Copy a role source assignment from one game instance to multiple linked accounts.
+
+    Args:
+        player_pk: KnownPlayer primary key
+        source_instance_id: GameInstance pk to set as role source
+        target_account_ids: List of LinkedAccount pks to update
+
+    Returns dict with 'status' ('ok' or 'error'), 'updated' count.
+    """
+    from thetower.backend.sus.models import GameInstance, LinkedAccount
+
+    try:
+        instance = GameInstance.objects.filter(id=source_instance_id).first()
+        if not instance:
+            return {"status": "error", "message": "Game instance not found"}
+        updated = LinkedAccount.objects.filter(id__in=target_account_ids, player_id=player_pk).update(role_source_instance=instance)
+        logger.info(
+            "Copied role source: player=%d instance=%d updated_accounts=%d",
+            player_pk,
+            source_instance_id,
+            updated,
+        )
+        return {"status": "ok", "updated": updated}
+    except Exception as exc:
+        logger.exception("copy_role_source_to_accounts failed: player=%d", player_pk)
+        return {"status": "error", "message": str(exc)}
+
+
+def accept_account_link(link_stem: str, target_display_name: str = "") -> dict[str, Any]:
+    """Accept an account link request: create the Django LinkedAccount and resolve the DB record.
+
+    Args:
+        link_stem: The account_links table stem for the pending request
+        target_display_name: Display name for the new LinkedAccount
+
+    Returns dict with 'status' ('ok' or 'error'), plus on success:
+        'player_name', 'linked_account_id', 'primary_player_id'
+    """
+    from thetower.backend.sus.models import KnownPlayer, LinkedAccount, PlayerId
+    from thetower.backend.sus import verification
+
+    try:
+        link_row = verification.get_account_link(link_stem)
+        if not link_row or link_row.get("status") != "pending":
+            return {"status": "error", "message": "Link request no longer valid or not found"}
+
+        player = KnownPlayer.objects.get(id=link_row["player_pk"])
+
+        new_linked_account, _ = LinkedAccount.objects.update_or_create(
+            platform=link_row["target_platform"],
+            account_id=str(link_row["target_account_id"]),
+            defaults={
+                "player": player,
+                "display_name": target_display_name or link_row.get("target_name", ""),
+                "verified": True,
+                "active": True,
+            },
+        )
+
+        verification.resolve_account_link(link_stem, "completed", resolved_by=f"{link_row['target_platform']}:{link_row['target_account_id']}")
+
+        # Determine if role source should be copied from an existing account
+        should_ask_role_source = False
+        source_instance_id = None
+        source_player_id = None
+        if not new_linked_account.role_source_instance_id:
+            other_accounts = (
+                LinkedAccount.objects.filter(player=player, platform=link_row["target_platform"])
+                .exclude(id=new_linked_account.id)
+                .select_related("role_source_instance")
+            )
+            for other in other_accounts:
+                if other.role_source_instance_id:
+                    should_ask_role_source = True
+                    source_instance_id = other.role_source_instance_id
+                    primary_pid = PlayerId.objects.filter(game_instance_id=other.role_source_instance_id, primary=True).first()
+                    source_player_id = primary_pid.id if primary_pid else None
+                    break
+
+        # Primary player ID for event dispatching
+        primary_player_id = None
+        primary_instance = player.game_instances.filter(primary=True).first()
+        if primary_instance:
+            primary_pid = PlayerId.objects.filter(game_instance=primary_instance, primary=True).first()
+            primary_player_id = primary_pid.id if primary_pid else None
+
+        logger.info(
+            "Account link accepted: stem=%s player=%d linked_account=%d",
+            link_stem,
+            player.pk,
+            new_linked_account.pk,
+        )
+        return {
+            "status": "ok",
+            "player_name": player.name,
+            "player_pk": player.pk,
+            "linked_account_id": new_linked_account.id,
+            "should_ask_role_source": should_ask_role_source,
+            "source_instance_id": source_instance_id,
+            "source_player_id": source_player_id,
+            "primary_player_id": primary_player_id,
+            "target_account_id": link_row["target_account_id"],
+        }
+    except KnownPlayer.DoesNotExist:
+        return {"status": "error", "message": "Player not found"}
+    except Exception as exc:
+        logger.exception("accept_account_link failed: stem=%s", link_stem)
+        return {"status": "error", "message": str(exc)}
+
+
+def remove_account_link(linked_account_id: int) -> dict[str, Any]:
+    """Permanently remove a linked Discord account.
+
+    Args:
+        linked_account_id: LinkedAccount primary key to delete
+
+    Returns dict with 'status' ('ok' or 'error'), plus on success:
+        'account_id', 'player_pk'
+    """
+    from thetower.backend.sus.models import LinkedAccount
+
+    try:
+        account = LinkedAccount.objects.select_related("player").get(id=linked_account_id)
+        account_id = account.account_id
+        player_pk = account.player_id
+        account.delete()
+        logger.info(
+            "Removed account link: linked_account=%d account_id=%s player=%d",
+            linked_account_id,
+            account_id,
+            player_pk,
+        )
+        return {"status": "ok", "account_id": account_id, "player_pk": player_pk}
+    except LinkedAccount.DoesNotExist:
+        return {"status": "error", "message": "Linked account not found"}
+    except Exception as exc:
+        logger.exception("remove_account_link failed: linked_account=%d", linked_account_id)
+        return {"status": "error", "message": str(exc)}
+
+
+def toggle_linked_account_active(linked_account_id: int, active: bool) -> dict[str, Any]:
+    """Activate or retire a linked Discord account.
+
+    Args:
+        linked_account_id: LinkedAccount primary key
+        active: True to activate, False to retire
+
+    Returns dict with 'status' ('ok' or 'error') and 'account_id', 'player_pk' on success.
+    """
+    from thetower.backend.sus.models import LinkedAccount
+
+    try:
+        account = LinkedAccount.objects.select_related("player").get(id=linked_account_id)
+        account.active = active
+        account.save(update_fields=["active"])
+        logger.info(
+            "Toggled linked account active: linked_account=%d account_id=%s active=%s",
+            linked_account_id,
+            account.account_id,
+            active,
+        )
+        return {"status": "ok", "account_id": account.account_id, "player_pk": account.player_id}
+    except LinkedAccount.DoesNotExist:
+        return {"status": "error", "message": "Linked account not found"}
+    except Exception as exc:
+        logger.exception("toggle_linked_account_active failed: linked_account=%d", linked_account_id)
+        return {"status": "error", "message": str(exc)}

@@ -394,8 +394,55 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
             add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": str(e)})
             return {"eligible": True, "status": "failed", "message": f"Exception: {str(e)}"}
 
-    # Rule 4b: REFRESH_VERIFICATION → mark approved (no player changes needed)
+    # Rule 4b: REFRESH_VERIFICATION → guard rail check then approve (no player changes needed)
     if intent == IdChangeReason.REFRESH_VERIFICATION.value:
+        # Guard rail: verified_player_id must be one of the player's existing Tower IDs.
+        # If the user submitted a different ID under the refresh intent, reject.
+        try:
+            from thetower.backend.sus.models import LinkedAccount, PlayerId
+
+            link = LinkedAccount.objects.filter(platform=platform, account_id=account_id, active=True).select_related("player").first()
+            if link:
+                existing_ids = set(PlayerId.objects.filter(game_instance__player=link.player).values_list("id", flat=True))
+                if verified_player_id.upper() not in {pid.upper() for pid in existing_ids}:
+                    # ID not in player's existing IDs — reject
+                    update_submission(
+                        stem,
+                        status="rejected",
+                        mod_verdict="rejected_id_mismatch",
+                        final_outcome="rejected",
+                        review_reason="refresh_id_mismatch",
+                    )
+                    add_event(
+                        stem,
+                        {
+                            "type": "auto_rejected",
+                            "ts": int(time.time()),
+                            "reason": "refresh_id_mismatch",
+                            "verified_id": verified_player_id,
+                            "existing_ids": list(existing_ids),
+                        },
+                    )
+                    log_submission_update(stem)
+                    logger.warning(
+                        "Refresh verification guard: verified_id=%s not in existing IDs for %s:%s stem=%s",
+                        verified_player_id,
+                        platform,
+                        account_id,
+                        stem,
+                    )
+                    return {
+                        "eligible": True,
+                        "status": "rejected",
+                        "message": "Refresh rejected: verified ID does not match any existing Tower ID on this account",
+                    }
+        except Exception as e:
+            # If guard rail check fails (e.g. no linked account), fall through to reject
+            logger.exception("Refresh guard rail check failed: stem=%s", stem)
+            update_submission(stem, status="failed", final_outcome="failed")
+            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": f"refresh_guard_check_failed: {e}"})
+            return {"eligible": True, "status": "failed", "message": f"Refresh guard check failed: {e}"}
+
         logger.info("Auto-completing refresh verification: stem=%s verified_id=%s", stem, verified_player_id)
         update_submission(stem, status="approved", final_outcome="approved")
         add_event(stem, {"type": "approved", "ts": int(time.time()), "refresh": True})
@@ -571,6 +618,48 @@ def ensure_db() -> None:
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_refresh_stem ON pending_discord_refreshes (stem)")
 
+        # Account links table — tracks all Discord account merges/links across platforms.
+        # Covers: web merges (instant), Discord request-accept flow, mod actions, and link removals.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS account_links (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                stem                 TEXT    UNIQUE,
+
+                -- Initiating account (who started the link)
+                initiator_platform   TEXT    NOT NULL,
+                initiator_account_id TEXT    NOT NULL,
+                initiator_name       TEXT    NOT NULL DEFAULT '',
+
+                -- Receiving account (being linked)
+                target_platform      TEXT    NOT NULL,
+                target_account_id    TEXT    NOT NULL,
+                target_name          TEXT    NOT NULL DEFAULT '',
+
+                -- Player being linked to (Django KnownPlayer pk)
+                player_pk            INTEGER NOT NULL,
+
+                -- Link type: 'web_merge' | 'discord_request' | 'mod_action'
+                link_type            TEXT    NOT NULL,
+
+                -- Status: 'pending' | 'completed' | 'rejected' | 'cancelled' | 'removed'
+                --   pending   = Discord request sent, awaiting target acceptance
+                --   completed = Link created (instant web merge or Discord accept)
+                --   rejected  = Target declined Discord request
+                --   cancelled = Initiator cancelled before target responded
+                --   removed   = Mod destroyed an existing link
+                status               TEXT    NOT NULL DEFAULT 'pending',
+
+                -- Who performed the final action (mod user for mod_action, else NULL)
+                resolved_by          TEXT,
+
+                created_at           INTEGER NOT NULL,
+                updated_at           INTEGER NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_links_initiator ON account_links (initiator_platform, initiator_account_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_links_target ON account_links (target_platform, target_account_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_links_player ON account_links (player_pk)")
+
 
 # Keep old name as alias so existing callers don't break during migration
 ensure_review_db = ensure_db
@@ -659,7 +748,7 @@ def get_submission_history(platform: str, account_id: str, limit: int = 10) -> l
     """Return recent terminal or active submissions for a user, newest-first.
 
     Returns submissions that are:
-    - In a terminal state (final_outcome is set: approved/rejected/failed/abandoned)
+    - In a terminal state (final_outcome is set: approved/rejected/failed/abandoned/blocked_by_ban/etc.)
     - OR in an active state requiring user or mod action
 
     Used by both /account and /verify routes to show verification history.
@@ -731,9 +820,12 @@ def set_awaiting_mod_with_intent(stem: str, error_type: str, intent_reason: str,
     # Apply auto-completion logic (will set status to "approved" or "mod_intent_review" based on intent)
     auto_complete_if_eligible(stem)
 
+    # Notify Discord (and any other registered platforms) of the state change
+    log_submission_update(stem)
 
-def abandon_submission(stem: str, abandoned_by: str | None = None) -> bool:
-    """Mark a submission as abandoned (user cancelled).
+
+def abandon_submission(stem: str, abandoned_by: str | None = None, final_outcome: str | None = None) -> bool:
+    """Mark a submission as abandoned (user cancelled or system blocked).
 
     Sets status to "abandoned", records an audit event, and calls log_submission_update().
     Safe to call on already-terminal submissions — returns False without making changes.
@@ -741,6 +833,9 @@ def abandon_submission(stem: str, abandoned_by: str | None = None) -> bool:
     Args:
         stem: Submission identifier
         abandoned_by: Platform identifier of who abandoned (e.g., "discord:123456789") or None
+        final_outcome: Semantic reason for abandonment. If None, stored as "abandoned".
+            Pass a specific value like "blocked_by_ban" to record why the submission was abandoned
+            rather than just that it was.
 
     Returns:
         True if the submission was abandoned, False if it was already in a terminal state or not found.
@@ -754,10 +849,16 @@ def abandon_submission(stem: str, abandoned_by: str | None = None) -> bool:
         logger.info("abandon_submission called on already-terminal submission %s (status=%s) — skipping", stem, row.get("status"))
         return False
 
-    update_submission(stem, status="abandoned", final_outcome="abandoned")
-    add_event(stem, {"type": "abandoned", "ts": int(time.time()), **({"by": abandoned_by} if abandoned_by else {})})
+    resolved_outcome = final_outcome or "abandoned"
+    update_submission(stem, status="abandoned", final_outcome=resolved_outcome)
+    event: dict = {"type": "abandoned", "ts": int(time.time())}
+    if abandoned_by:
+        event["by"] = abandoned_by
+    if final_outcome and final_outcome != "abandoned":
+        event["reason"] = final_outcome
+    add_event(stem, event)
     log_submission_update(stem, actor=abandoned_by)
-    logger.info("Submission abandoned: stem=%s by=%s", stem, abandoned_by)
+    logger.info("Submission abandoned: stem=%s by=%s final_outcome=%s", stem, abandoned_by, resolved_outcome)
     return True
 
 
@@ -1034,6 +1135,205 @@ def get_submissions_page(
 
 
 # ---------------------------------------------------------------------------
+# Account Links — backend functions
+# ---------------------------------------------------------------------------
+
+_LINK_TERMINAL_STATUSES = ("completed", "rejected", "cancelled", "removed")
+
+
+def generate_link_stem() -> str:
+    """Generate a unique stem for an account link record."""
+    return f"link_{int(time.time())}_{secrets.token_hex(4)}"
+
+
+def create_account_link(
+    initiator_platform: str,
+    initiator_account_id: str,
+    initiator_name: str,
+    target_platform: str,
+    target_account_id: str,
+    target_name: str,
+    player_pk: int,
+    link_type: str,
+    status: str = "pending",
+) -> str:
+    """Create an account link record and return the stem.
+
+    Args:
+        initiator_platform: Platform of the account initiating the link (e.g. 'discord')
+        initiator_account_id: Account ID of the initiator
+        initiator_name: Display name of the initiator
+        target_platform: Platform of the account being linked (e.g. 'discord')
+        target_account_id: Account ID of the target
+        target_name: Display name of the target
+        player_pk: Django KnownPlayer primary key the target will be linked to
+        link_type: 'web_merge' | 'discord_request' | 'mod_action'
+        status: Initial status. Defaults to 'pending'. Use 'completed' for instant merges
+            (web or mod).
+
+    Returns:
+        The stem (unique key) for the new account link record.
+    """
+    ensure_db()
+    stem = generate_link_stem()
+    now = int(time.time())
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.execute(
+            """INSERT INTO account_links
+               (stem, initiator_platform, initiator_account_id, initiator_name,
+                target_platform, target_account_id, target_name,
+                player_pk, link_type, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                stem,
+                initiator_platform,
+                initiator_account_id,
+                initiator_name,
+                target_platform,
+                target_account_id,
+                target_name,
+                player_pk,
+                link_type,
+                status,
+                now,
+                now,
+            ),
+        )
+    logger.info(
+        "Account link created: stem=%s type=%s status=%s initiator=%s:%s target=%s:%s player=%d",
+        stem,
+        link_type,
+        status,
+        initiator_platform,
+        initiator_account_id,
+        target_platform,
+        target_account_id,
+        player_pk,
+    )
+    return stem
+
+
+def get_account_link(stem: str) -> dict | None:
+    """Return an account link record by stem, or None if not found."""
+    if not REVIEW_DB_PATH.exists():
+        return None
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM account_links WHERE stem = ?", (stem,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_pending_link(target_platform: str, target_account_id: str) -> dict | None:
+    """Return the most recent pending link request targeting a given account, or None."""
+    if not REVIEW_DB_PATH.exists():
+        return None
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """SELECT * FROM account_links
+               WHERE target_platform = ? AND target_account_id = ? AND status = 'pending'
+               ORDER BY created_at DESC LIMIT 1""",
+            (target_platform, target_account_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def resolve_account_link(stem: str, new_status: str, resolved_by: str | None = None) -> bool:
+    """Resolve an account link request.
+
+    Args:
+        stem: The link stem to resolve
+        new_status: Terminal status: 'completed' | 'rejected' | 'cancelled' | 'removed'
+        resolved_by: Platform:account_id of who resolved it (e.g. 'discord:123456789')
+
+    Returns:
+        True if resolved, False if not found or already terminal.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return False
+    now = int(time.time())
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        existing = conn.execute("SELECT status FROM account_links WHERE stem = ?", (stem,)).fetchone()
+        if not existing:
+            logger.warning("resolve_account_link: stem %s not found", stem)
+            return False
+        if existing[0] in _LINK_TERMINAL_STATUSES:
+            logger.info("resolve_account_link: stem %s already in terminal state %s", stem, existing[0])
+            return False
+        conn.execute(
+            "UPDATE account_links SET status = ?, resolved_by = ?, updated_at = ? WHERE stem = ?",
+            (new_status, resolved_by, now, stem),
+        )
+    logger.info("Account link resolved: stem=%s status=%s resolved_by=%s", stem, new_status, resolved_by)
+    return True
+
+
+def cancel_pending_links_by_initiator(initiator_platform: str, initiator_account_id: str) -> int:
+    """Cancel all pending link requests sent by a given account.
+
+    Returns the number of links cancelled.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return 0
+    now = int(time.time())
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        result = conn.execute(
+            """UPDATE account_links SET status = 'cancelled', updated_at = ?
+               WHERE initiator_platform = ? AND initiator_account_id = ? AND status = 'pending'""",
+            (now, initiator_platform, initiator_account_id),
+        )
+    count = result.rowcount
+    if count:
+        logger.info(
+            "Cancelled %d pending link(s) for %s:%s",
+            count,
+            initiator_platform,
+            initiator_account_id,
+        )
+    return count
+
+
+def get_outgoing_pending_links(initiator_platform: str, initiator_account_id: str) -> list[dict]:
+    """Return all pending link requests sent by a given account.
+
+    Returns list of dicts with keys: stem, target_platform, target_account_id, target_name, created_at.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return []
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT stem, target_platform, target_account_id, target_name, created_at
+               FROM account_links
+               WHERE initiator_platform = ? AND initiator_account_id = ? AND status = 'pending'
+               ORDER BY created_at DESC""",
+            (initiator_platform, initiator_account_id),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_pending_links_for_player(player_pk: int) -> list[dict]:
+    """Return all pending link requests for a player (any initiator account belonging to that player_pk).
+
+    Returns list of dicts with: stem, initiator_account_id, target_account_id, target_name, created_at.
+    Used by ManageDiscordAccountsView to show pending link buttons.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return []
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT stem, initiator_platform, initiator_account_id, target_platform,
+                      target_account_id, target_name, created_at
+               FROM account_links
+               WHERE player_pk = ? AND status = 'pending'
+               ORDER BY created_at DESC""",
+            (player_pk,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
 # Submission Phase Inference
 # ---------------------------------------------------------------------------
 
@@ -1053,7 +1353,9 @@ def get_submission_phase(stem: str) -> str:
         - ``"approved"``          — complete, approved (auto or mod)
         - ``"rejected"``          — complete, rejected by mod
         - ``"failed"``            — complete, failed (OCR failure, player creation error)
-        - ``"abandoned"``         — complete, user cancelled
+        - ``"abandoned"``         — complete, user cancelled or system blocked (check ``final_outcome``
+          for the specific reason, e.g. ``"abandoned"`` for user-cancelled or ``"blocked_by_ban"``
+          when an active ban prevented completion)
         - ``"unknown"``           — unrecognised status (should not occur)
 
     TODO (2026-06-13): When implementing the web mod review UI, use this function to decide
@@ -1173,6 +1475,9 @@ def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, player_id:
                     logger.exception("Exception creating player after mod approval for stem %s", stem)
                     update_submission(stem, status="failed")
                     add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "player_creation_failed"})
+
+    # Notify Discord (and any other registered platforms) of the state change
+    log_submission_update(stem, actor=resolved_by)
 
 
 def mod_resolve_ocr(stem: str, verdict: str, resolved_by: str, verified_player_id: str | None = None) -> dict[str, Any]:
@@ -1419,8 +1724,9 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 3600)
             return 0
 
         count = 0
+        escalated_stems = []
         for stem, status, intent in rows:
-            # Escalate to near_match_timeout (mod OCR review review)
+            # Escalate to near_match_timeout (mod OCR review)
             conn.execute(
                 """UPDATE submissions
                    SET status = 'near_match_timeout', updated_at = ?
@@ -1428,6 +1734,7 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 3600)
                 (now, stem),
             )
             count += 1
+            escalated_stems.append(stem)
 
             # Add auto_escalated event
             try:
@@ -1440,6 +1747,10 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 3600)
                 pass
 
         logger.info("Auto-escalated %d user_ocr_choice submissions to near_match_timeout", count)
+
+    # Trigger Discord sync for each escalated submission so the log embed reflects the new status
+    for stem in escalated_stems:
+        log_submission_update(stem)
 
     return count
 
@@ -1626,8 +1937,43 @@ def process_verification(
         dict with keys: status, and optionally reason, ocr_id, diff, etc.
     """
     try:
+        # Guard: one active submission at a time per account.
+        # The UI layer should also enforce this, but the backend enforces it defensively.
+        existing_pending = get_pending_submission(platform, account_id)
+        if existing_pending and existing_pending.get("stem") != stem:
+            logger.warning(
+                "Blocking process_verification: account %s:%s already has active submission %s",
+                platform,
+                account_id,
+                existing_pending.get("stem"),
+            )
+            return {
+                "status": "error",
+                "reason": "active_submission_exists",
+                "existing_stem": existing_pending.get("stem"),
+                "existing_status": existing_pending.get("status"),
+            }
+
         # Check if user already has this ID verified (for re-verification attempts)
         old_player_id = player_id if player_already_has_id(platform, account_id, player_id) else None
+
+        # Enforce intent requirement for existing users.
+        # New users (no existing Tower IDs → old_player_id is None) may proceed without intent.
+        # Existing users MUST declare intent — omitting it is a protocol violation that could
+        # allow bypassing the intent selection step via a compromised client.
+        if old_player_id and not id_change_reason:
+            logger.warning(
+                "Blocking process_verification: existing user missing id_change_reason: %s:%s tower_id=%s stem=%s",
+                platform,
+                account_id,
+                player_id,
+                stem,
+            )
+            return {
+                "status": "error",
+                "reason": "intent_required",
+                "message": "Existing users must declare intent (id_change_reason) before submitting verification.",
+            }
 
         # Create the DB row (idempotent via INSERT OR IGNORE on stem UNIQUE)
         create_submission(
@@ -1678,6 +2024,9 @@ def process_verification(
             event_data["ocr_id"] = status_decision["ocr_player_id"]
         add_event(stem, event_data)
 
+        # Notify Discord (and any other registered platforms) of the status change
+        log_submission_update(stem)
+
         logger.info(
             "OCR complete for %s %s: status=%s ocr_id=%s version=%s",
             platform,
@@ -1709,4 +2058,5 @@ def process_verification(
         logger.exception("Verification processing failed for %s %s tower_id=%s", platform, account_id, player_id)
         update_submission(stem, status="failed", final_outcome="failed")
         add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "internal_error"})
+        log_submission_update(stem)
         return {"status": "failed", "reason": "internal_error", "error": str(exc)}
