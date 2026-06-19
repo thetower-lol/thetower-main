@@ -48,11 +48,11 @@ def create_or_update_player(
         For two-stage mod review (Scenario B): action to perform with the verified ID.
 
         - ``"replace"`` — Delete old Tower ID, create new one as primary (user lost access to old ID)
-        - ``"merge"`` — Create new GameInstance with new ID as primary, keep old instances active (game changed ID, preserving history)
+        - ``"new_instance_keep_old"`` — Create new GameInstance with new ID as primary, keep old instances active (game changed ID, preserving history)
         - ``"merge_ids"`` — Add new ID to existing primary instance as primary, demote old ID(s) to alternates (consolidate multiple IDs)
-        - ``"add_alt"`` — Add new ID to existing primary instance as non-primary alternate (multiple devices, same progress)
+        - ``"add_alt"`` — Add new ID to existing primary instance as non-primary alternate (keep old ID as primary; same logic as merge_ids with promote_new_id=False). No UI button currently — reserved for a future mod tool.
         - ``"new_instance_retire_old"`` — Create new GameInstance and set old instances to inactive (fresh start, preserve history)
-        - ``None`` (default) — Legacy/Scenario A behavior: create new primary instance
+        - ``None`` — Only valid for new users (no LinkedAccount yet). For existing players, always pass an explicit action_type.
 
     old_player_id:
         For two-stage mod review (Scenario B): The previously verified Tower ID being replaced/updated.
@@ -115,13 +115,29 @@ def create_or_update_player(
         created = False
 
         if action_type == "replace":
-            # Replace: Delete old Tower ID(s), create new one as primary
+            # Replace: Add new ID to the existing primary GameInstance, mark it primary, delete old ID.
+            existing_primary = player.game_instances.filter(primary=True).first() or player.game_instances.first()
+            if existing_primary is None:
+                # Fallback: no instance found; create one (shouldn't happen for a verified user)
+                existing_primary = GameInstance.objects.create(player=player, name="Instance 1", primary=True)
+
+            # Delete the old PlayerId record(s)
             if old_player_id:
                 old_pids = PlayerId.objects.filter(id__iexact=old_player_id)
                 deleted_count = old_pids.delete()[0]
                 logger.info("Replaced old Tower ID %s (deleted %d PlayerId record(s))", old_player_id, deleted_count)
 
-            # Mark all instances as non-primary, then create new primary
+            # Demote all remaining IDs on this instance to non-primary, then add new ID as primary
+            existing_primary.player_ids.update(primary=False)
+            PlayerId.objects.create(id=player_id, game_instance=existing_primary, primary=True)
+            primary_instance = existing_primary
+            if update_role_source:
+                linked_account.role_source_instance = primary_instance
+                linked_account.save()
+            logger.info("Replaced ID on existing instance %s: new primary ID %s", existing_primary.name, player_id)
+
+        elif action_type == "new_instance_keep_old":
+            # New instance, keep old: Create new GameInstance with new ID as primary, keep old instances active
             player.game_instances.update(primary=False)
             existing_names = player.game_instances.values_list("name", flat=True)
             max_num = max(
@@ -138,63 +154,30 @@ def create_or_update_player(
                 linked_account.role_source_instance = primary_instance
                 linked_account.save()
 
-        elif action_type == "merge":
-            # Merge: Keep both old and new, set new as primary
-            # Mark all instances as non-primary, then create new primary
-            player.game_instances.update(primary=False)
-            existing_names = player.game_instances.values_list("name", flat=True)
-            max_num = max(
-                (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)$", name)] if m),
-                default=0,
-            )
-            primary_instance = GameInstance.objects.create(
-                player=player,
-                name=f"Instance {max_num + 1}",
-                primary=True,
-            )
-            PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
-            if update_role_source:
-                linked_account.role_source_instance = primary_instance
-                linked_account.save()
-
-        elif action_type == "add_alt":
-            # Add Alt: Keep existing primary unchanged, add new ID as alternate (non-primary)
+        elif action_type in ("merge_ids", "add_alt"):
+            # Shared logic: add new ID to the existing primary game instance.
+            # merge_ids: promote new ID to primary, demote all existing IDs (UI button: Merge IDs).
+            # add_alt:   keep existing primary unchanged, add new ID as non-primary
+            #            (no UI button currently — reserved for a future mod tool that adds an
+            #            old/alternate ID directly to a player's existing game instance).
+            promote_new_id = action_type == "merge_ids"
             existing_primary = player.game_instances.filter(primary=True).first()
             if not existing_primary:
-                # No primary instance — fall back to creating one
-                logger.warning("add_alt: No primary instance found for player %d, creating one", player.pk)
+                logger.warning("%s: No primary instance found for player %d, creating one", action_type, player.pk)
                 existing_primary = player.game_instances.first()
                 if existing_primary:
                     existing_primary.primary = True
                     existing_primary.save()
 
             if existing_primary:
-                # Add new PlayerId to the existing primary instance as non-primary
-                PlayerId.objects.create(id=player_id, game_instance=existing_primary, primary=False)
+                if promote_new_id:
+                    existing_primary.player_ids.update(primary=False)
+                PlayerId.objects.create(id=player_id, game_instance=existing_primary, primary=promote_new_id)
                 primary_instance = existing_primary
-            else:
-                # Shouldn't happen, but handle gracefully: create new instance
-                primary_instance = GameInstance.objects.create(player=player, name="Instance 1", primary=True)
-                PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
-
-        elif action_type == "merge_ids":
-            # Merge IDs: Add new ID to existing primary instance as primary, demote old ID(s) to non-primary
-            existing_primary = player.game_instances.filter(primary=True).first()
-            if not existing_primary:
-                # No primary instance — fall back to creating one
-                logger.warning("merge_ids: No primary instance found for player %d, creating one", player.pk)
-                existing_primary = player.game_instances.first()
-                if existing_primary:
-                    existing_primary.primary = True
-                    existing_primary.save()
-
-            if existing_primary:
-                # Demote all existing IDs in this instance to non-primary
-                existing_primary.player_ids.update(primary=False)
-                # Add new ID as primary
-                PlayerId.objects.create(id=player_id, game_instance=existing_primary, primary=True)
-                primary_instance = existing_primary
-                logger.info("Merged IDs: new primary ID %s in instance %s, old IDs demoted", player_id, existing_primary.name)
+                if promote_new_id:
+                    logger.info("Merged IDs: new primary ID %s in instance %s, old IDs demoted", player_id, existing_primary.name)
+                else:
+                    logger.info("Added alt ID %s to instance %s (non-primary)", player_id, existing_primary.name)
             else:
                 # Shouldn't happen, but handle gracefully: create new instance
                 primary_instance = GameInstance.objects.create(player=player, name="Instance 1", primary=True)
@@ -223,22 +206,15 @@ def create_or_update_player(
             logger.info("Created new instance %s and retired old instances for player %d", primary_instance.name, player.pk)
 
         else:
-            # Default/legacy behavior (Scenario A or NULL action_type): Create new primary instance
-            player.game_instances.update(primary=False)
-            existing_names = player.game_instances.values_list("name", flat=True)
-            max_num = max(
-                (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)$", name)] if m),
-                default=0,
+            # Unknown action_type for an existing player — this should not happen.
+            logger.error(
+                "create_or_update_player: unexpected action_type=%r for existing player %d (platform=%s account=%s)",
+                action_type,
+                player.pk,
+                platform,
+                account_id,
             )
-            primary_instance = GameInstance.objects.create(
-                player=player,
-                name=f"Instance {max_num + 1}",
-                primary=True,
-            )
-            PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
-            if update_role_source:
-                linked_account.role_source_instance = primary_instance
-                linked_account.save()
+            raise ValueError(f"Unknown action_type for existing player: {action_type!r}")
     else:
         # Brand-new player.
         player = KnownPlayer.objects.create(name=author_name)
@@ -600,3 +576,125 @@ def toggle_linked_account_active(linked_account_id: int, active: bool) -> dict[s
     except Exception as exc:
         logger.exception("toggle_linked_account_active failed: linked_account=%d", linked_account_id)
         return {"status": "error", "message": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Query helpers for UI layers — replaces direct ORM access in UI code.
+# ---------------------------------------------------------------------------
+
+
+def check_ban_status(platform: str, account_id: str, new_player_id: str) -> dict[str, Any]:
+    """Check ban status for a platform account submitting a new Tower ID.
+
+    Performs two checks in a single DB round-trip:
+      1. Whether the submitted Tower ID itself is actively banned.
+      2. Whether the submitting account has other Tower IDs that are banned
+         (used for account-wide ban enforcement).
+
+    Args:
+        platform: Platform identifier (e.g. "discord").
+        account_id: Platform account identifier.
+        new_player_id: The Tower ID the user is trying to verify with.
+
+    Returns:
+        dict with:
+            'new_id_banned': bool — whether new_player_id is actively banned.
+            'previously_banned_ids': list[str] — other Tower IDs on this account that are banned.
+    """
+    from thetower.backend.sus.models import LinkedAccount, ModerationRecord
+
+    ban_ids = ModerationRecord.get_active_moderation_ids("ban")
+    new_id_banned = new_player_id in ban_ids
+
+    previously_banned_ids: list[str] = []
+    try:
+        link = (
+            LinkedAccount.objects.filter(platform=platform, account_id=str(account_id), active=True)
+            .select_related("player")
+            .first()
+        )
+        if link:
+            all_ids = [
+                pid.id
+                for instance in link.player.game_instances.prefetch_related("player_ids").all()
+                for pid in instance.player_ids.all()
+                if pid.id != new_player_id
+            ]
+            previously_banned_ids = [pid for pid in all_ids if pid in ban_ids]
+    except Exception:
+        logger.exception("check_ban_status: failed to retrieve previously banned IDs for %s:%s", platform, account_id)
+
+    return {
+        "new_id_banned": new_id_banned,
+        "previously_banned_ids": previously_banned_ids,
+    }
+
+
+def get_instance_primary_id(instance_id: int) -> str | None:
+    """Return the primary Tower ID for a game instance, or None if not found.
+
+    Args:
+        instance_id: GameInstance primary key.
+
+    Returns:
+        The primary Tower ID string, or None if the instance or its primary ID does not exist.
+    """
+    from thetower.backend.sus.models import GameInstance
+
+    instance = GameInstance.objects.filter(id=instance_id).first()
+    if not instance:
+        return None
+    primary = instance.player_ids.filter(primary=True).first()
+    return primary.id if primary else None
+
+
+def get_player_linked_accounts(player_pk: int, platform: str | None = None) -> list[dict[str, Any]]:
+    """Return linked accounts for a KnownPlayer, optionally filtered by platform.
+
+    Each entry includes basic account fields plus the role source instance name and
+    primary Tower ID (if a role source instance is set), matching the shape used by
+    the Discord bot's account management UI.
+
+    Args:
+        player_pk: KnownPlayer primary key.
+        platform: If given, filter to this platform only (e.g. "discord").
+            If None, returns accounts for all platforms.
+
+    Returns:
+        List of dicts with keys: id, account_id, platform, display_name, verified,
+        primary, active, verified_at, instance (dict with name/primary_id or None).
+        Returns an empty list if the player is not found.
+    """
+    from thetower.backend.sus.models import KnownPlayer, LinkedAccount
+
+    player = KnownPlayer.objects.filter(id=player_pk).first()
+    if not player:
+        return []
+
+    qs = LinkedAccount.objects.filter(player=player).select_related("role_source_instance").order_by("-verified", "-primary", "account_id")
+    if platform is not None:
+        qs = qs.filter(platform=platform)
+
+    accounts = []
+    for acc in qs:
+        instance_info = None
+        if acc.role_source_instance:
+            primary_pid = acc.role_source_instance.player_ids.filter(primary=True).first()
+            instance_info = {
+                "name": acc.role_source_instance.name,
+                "primary_id": primary_pid.id if primary_pid else None,
+            }
+        accounts.append(
+            {
+                "id": acc.id,
+                "account_id": acc.account_id,
+                "platform": acc.platform,
+                "display_name": acc.display_name,
+                "verified": acc.verified,
+                "primary": acc.primary,
+                "active": acc.active,
+                "verified_at": acc.verified_at,
+                "instance": instance_info,
+            }
+        )
+    return accounts

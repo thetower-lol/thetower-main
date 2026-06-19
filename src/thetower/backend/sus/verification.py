@@ -458,7 +458,7 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
                 submitter_name,
                 verified_player_id,
                 update_role_source=False,
-                action_type=None,  # New instance (default behavior)
+                action_type="new_instance_keep_old",
                 old_player_id=old_player_id,
             )
 
@@ -862,6 +862,43 @@ def abandon_submission(stem: str, abandoned_by: str | None = None, final_outcome
     return True
 
 
+def fail_submission(stem: str, failed_by: str | None = None, final_outcome: str | None = None) -> bool:
+    """Mark a submission as failed (validation error or system-detected block).
+
+    Sets status to "failed", records an audit event, and calls log_submission_update().
+    Safe to call on already-terminal submissions — returns False without making changes.
+
+    Args:
+        stem: Submission identifier
+        failed_by: Platform identifier of the actor (e.g., "discord:123456789") or None
+        final_outcome: Semantic reason for failure (e.g., "id_already_registered").
+            If None, stored as "failed".
+
+    Returns:
+        True if the submission was failed, False if it was already in a terminal state or not found.
+    """
+    row = get_submission(stem)
+    if not row:
+        logger.warning("fail_submission called on non-existent stem %s", stem)
+        return False
+
+    if row.get("status") in _TERMINAL_STATUSES:
+        logger.info("fail_submission called on already-terminal submission %s (status=%s) — skipping", stem, row.get("status"))
+        return False
+
+    resolved_outcome = final_outcome or "failed"
+    update_submission(stem, status="failed", final_outcome=resolved_outcome)
+    event: dict = {"type": "failed", "ts": int(time.time())}
+    if failed_by:
+        event["by"] = failed_by
+    if final_outcome and final_outcome != "failed":
+        event["reason"] = final_outcome
+    add_event(stem, event)
+    log_submission_update(stem, actor=failed_by)
+    logger.info("Submission failed: stem=%s by=%s final_outcome=%s", stem, failed_by, resolved_outcome)
+    return True
+
+
 def add_event(stem: str, event: dict) -> None:
     """Append an event dict to the events JSON array atomically."""
     if not REVIEW_DB_PATH.exists():
@@ -988,6 +1025,29 @@ def get_pending_submission_for_player_id(submitted_player_id: str) -> dict | Non
             (submitted_player_id,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def get_pending_submission_for_known_player(platform: str, account_id: str) -> dict | None:
+    """Return any non-terminal submission for the KnownPlayer linked to this platform account.
+
+    Looks up all linked accounts (any platform) for the same KnownPlayer and checks each
+    for a pending submission. Returns the first one found, or None if the account has no
+    KnownPlayer (i.e. new/unverified user — caller should fall back to get_pending_submission).
+
+    Raises if the Django DB is unreachable — callers should treat this as fail-safe.
+    """
+    from thetower.backend.sus.models import LinkedAccount
+
+    link = LinkedAccount.objects.filter(platform=platform, account_id=account_id, active=True).select_related("player").first()
+    if not link:
+        return None  # No KnownPlayer for this account — new user, skip cross-platform check
+
+    all_accounts = LinkedAccount.objects.filter(player=link.player).values_list("platform", "account_id")
+    for acct_platform, acct_id in all_accounts:
+        pending = get_pending_submission(acct_platform, acct_id)
+        if pending:
+            return pending
+    return None
 
 
 def get_mod_queue(
@@ -1577,7 +1637,7 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str) -> dict[st
 
     Args:
         stem: Submission identifier
-        action_type: "replace", "merge", "add_alt", "merge_ids", "new_instance_retire_old", or "reject"
+        action_type: "replace", "new_instance_keep_old", "add_alt", "merge_ids", "new_instance_retire_old", or "reject"
         resolved_by: Mod identifier (platform:account_id)
 
     Returns:
@@ -1657,7 +1717,7 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str) -> dict[st
             # Map action_type to final_outcome
             outcome_map = {
                 "replace": "approved",
-                "merge": "approved",
+                "new_instance_keep_old": "approved",
                 "add_alt": "approved",
                 "merge_ids": "approved",
                 "new_instance_retire_old": "approved",
@@ -1937,21 +1997,70 @@ def process_verification(
         dict with keys: status, and optionally reason, ocr_id, diff, etc.
     """
     try:
-        # Guard: one active submission at a time per account.
-        # The UI layer should also enforce this, but the backend enforces it defensively.
-        existing_pending = get_pending_submission(platform, account_id)
-        if existing_pending and existing_pending.get("stem") != stem:
+        # Guard: one active submission at a time.
+        # Three checks, applied in order. The UI layer should also enforce Guards 1 and 2,
+        # but the backend enforces all three defensively.
+
+        # Guard 2: game ID uniqueness — blocks any two submissions (same or different people)
+        # from claiming the same Tower ID concurrently.
+        existing_by_id = get_pending_submission_for_player_id(player_id)
+        if existing_by_id and existing_by_id.get("stem") != stem:
             logger.warning(
-                "Blocking process_verification: account %s:%s already has active submission %s",
-                platform,
-                account_id,
-                existing_pending.get("stem"),
+                "Blocking process_verification: Tower ID %s already has active submission %s",
+                player_id,
+                existing_by_id.get("stem"),
             )
             return {
                 "status": "error",
                 "reason": "active_submission_exists",
-                "existing_stem": existing_pending.get("stem"),
-                "existing_status": existing_pending.get("status"),
+                "existing_stem": existing_by_id.get("stem"),
+                "existing_status": existing_by_id.get("status"),
+            }
+
+        # Guard 1: same platform account — fast SQLite short-circuit before the Django lookup.
+        existing_by_account = get_pending_submission(platform, account_id)
+        if existing_by_account and existing_by_account.get("stem") != stem:
+            logger.warning(
+                "Blocking process_verification: account %s:%s already has active submission %s",
+                platform,
+                account_id,
+                existing_by_account.get("stem"),
+            )
+            return {
+                "status": "error",
+                "reason": "active_submission_exists",
+                "existing_stem": existing_by_account.get("stem"),
+                "existing_status": existing_by_account.get("status"),
+            }
+
+        # Guard 3: KnownPlayer cross-platform — catches the same verified user submitting
+        # via a different linked platform account (e.g. Discord + Reddit). Skipped for new
+        # users (no KnownPlayer yet). Fails safe if the Django DB is unreachable.
+        try:
+            existing_by_player = get_pending_submission_for_known_player(platform, account_id)
+            if existing_by_player and existing_by_player.get("stem") != stem:
+                logger.warning(
+                    "Blocking process_verification: KnownPlayer for %s:%s already has active submission %s via another platform",
+                    platform,
+                    account_id,
+                    existing_by_player.get("stem"),
+                )
+                return {
+                    "status": "error",
+                    "reason": "active_submission_exists",
+                    "existing_stem": existing_by_player.get("stem"),
+                    "existing_status": existing_by_player.get("status"),
+                }
+        except Exception:
+            logger.exception(
+                "Guard 3 (KnownPlayer) lookup failed for %s:%s — failing safe, blocking submission %s",
+                platform,
+                account_id,
+                stem,
+            )
+            return {
+                "status": "error",
+                "reason": "db_unavailable",
             }
 
         # Check if user already has this ID verified (for re-verification attempts)
