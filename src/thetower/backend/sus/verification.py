@@ -1951,7 +1951,18 @@ def register_sync_callback(callback) -> None:
     """
     if callback not in _sync_callbacks:
         _sync_callbacks.append(callback)
-        logger.debug("Registered sync callback: %s", callback)
+        logger.debug("Registered sync callback: %s (total callbacks: %d)", callback, len(_sync_callbacks))
+    else:
+        logger.debug("Sync callback already registered: %s", callback)
+
+
+def unregister_sync_callback(callback) -> None:
+    """Remove a previously registered sync callback.  No-op if not found."""
+    try:
+        _sync_callbacks.remove(callback)
+        logger.info("unregister_sync_callback: removed %s (remaining callbacks: %d)", callback, len(_sync_callbacks))
+    except ValueError:
+        logger.debug("unregister_sync_callback: callback not found: %s", callback)
 
 
 def log_submission_update(stem: str, actor: str | None = None) -> None:
@@ -1966,8 +1977,9 @@ def log_submission_update(stem: str, actor: str | None = None) -> None:
         stem: Submission identifier
         actor: Optional actor who triggered the change (e.g., "discord:123456789")
     """
+    logger.debug("log_submission_update: stem=%s actor=%s callbacks=%d", stem, actor, len(_sync_callbacks))
     if not _sync_callbacks:
-        logger.debug("log_submission_update: no callbacks registered (stem=%s actor=%s)", stem, actor)
+        logger.warning("log_submission_update: no callbacks registered — Discord embed will NOT update (stem=%s)", stem)
         return
     for cb in _sync_callbacks:
         try:
