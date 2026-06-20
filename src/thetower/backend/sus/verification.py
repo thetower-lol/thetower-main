@@ -1178,10 +1178,16 @@ def get_non_terminal_submissions() -> list[dict]:
 
 
 def get_terminal_submissions_with_notifications() -> list[dict]:
-    """Return terminal submissions that still have a discord_notification_message_id set.
+    """Return terminal submissions that still have a Discord message that needs cleanup.
 
-    These need a cleanup pass on startup: the notification message should be deleted
-    from Discord and the column cleared.
+    Covers two cases:
+    - ``discord_notification_message_id IS NOT NULL`` — notification in mod queue that
+      should be deleted now the submission is terminal.
+    - ``discord_log_message_id IS NOT NULL`` — log embed that may still show action
+      buttons (e.g., after a manual DB status fix) and needs to be updated to final state.
+
+    Called on bot startup so both the log embed and the notification are resolved to
+    their correct final state.
     """
     if not REVIEW_DB_PATH.exists():
         return []
@@ -1194,7 +1200,10 @@ def get_terminal_submissions_with_notifications() -> list[dict]:
         rows = conn.execute(
             f"""SELECT * FROM submissions
                 WHERE status IN ({placeholders})
-                AND discord_notification_message_id IS NOT NULL
+                AND (
+                    discord_notification_message_id IS NOT NULL
+                    OR discord_log_message_id IS NOT NULL
+                )
                 ORDER BY created_at DESC""",
             TERMINAL_STATES,
         ).fetchall()
