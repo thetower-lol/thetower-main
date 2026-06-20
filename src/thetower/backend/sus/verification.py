@@ -1178,16 +1178,12 @@ def get_non_terminal_submissions() -> list[dict]:
 
 
 def get_terminal_submissions_with_notifications() -> list[dict]:
-    """Return terminal submissions that still have a Discord message that needs cleanup.
+    """Return terminal submissions that still have a mod-queue notification message to delete.
 
-    Covers two cases:
-    - ``discord_notification_message_id IS NOT NULL`` — notification in mod queue that
-      should be deleted now the submission is terminal.
-    - ``discord_log_message_id IS NOT NULL`` — log embed that may still show action
-      buttons (e.g., after a manual DB status fix) and needs to be updated to final state.
-
-    Called on bot startup so both the log embed and the notification are resolved to
-    their correct final state.
+    When a submission moves to a terminal state, any outstanding notification message in
+    the mod channel should be deleted.  Running ``sync_verification_discord_state()`` on
+    these handles both the log embed update (final state, no buttons) and the notification
+    delete in one pass.
     """
     if not REVIEW_DB_PATH.exists():
         return []
@@ -1200,10 +1196,7 @@ def get_terminal_submissions_with_notifications() -> list[dict]:
         rows = conn.execute(
             f"""SELECT * FROM submissions
                 WHERE status IN ({placeholders})
-                AND (
-                    discord_notification_message_id IS NOT NULL
-                    OR discord_log_message_id IS NOT NULL
-                )
+                AND discord_notification_message_id IS NOT NULL
                 ORDER BY created_at DESC""",
             TERMINAL_STATES,
         ).fetchall()
@@ -1211,17 +1204,16 @@ def get_terminal_submissions_with_notifications() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_terminal_submissions_never_logged(lookback_days: int | None = None) -> list[dict]:
-    """Return terminal submissions that were never posted to the Discord log channel.
+def get_terminal_submissions_never_logged() -> list[dict]:
+    """Return terminal submissions that have no Discord log channel entry yet.
 
-    These submissions have no ``discord_log_message_id`` and no
-    ``discord_notification_message_id`` — they completed (approved/rejected/failed)
-    while the bot was offline or before log sync was wired up.
+    These are submissions that completed while the bot was offline, or before log
+    sync was wired up.  Running ``sync_verification_discord_state()`` on each will
+    create a log entry and set ``discord_log_message_id``.
 
-    ``lookback_days``: if provided, only include submissions created within that window.
-    If ``None`` (default), all unlogged terminal submissions are returned — useful for
-    a one-time historical backfill.  After the initial run, subsequent startups only
-    pick up new gaps (since successfully-logged submissions have their message IDs set).
+    Submissions intentionally excluded from backfill should have
+    ``discord_log_message_id`` set to a sentinel (e.g. ``'1'``) rather than left
+    NULL, so they are not picked up by this query.
     """
     if not REVIEW_DB_PATH.exists():
         return []
@@ -1229,23 +1221,14 @@ def get_terminal_submissions_never_logged(lookback_days: int | None = None) -> l
     TERMINAL_STATES = ("approved", "passed", "rejected", "failed", "abandoned")
     placeholders = ",".join("?" * len(TERMINAL_STATES))
 
-    params: tuple = TERMINAL_STATES
-    date_clause = ""
-    if lookback_days is not None:
-        cutoff = int(time.time()) - lookback_days * 86400
-        date_clause = "AND created_at >= ?"
-        params = TERMINAL_STATES + (cutoff,)
-
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             f"""SELECT * FROM submissions
                 WHERE status IN ({placeholders})
                 AND discord_log_message_id IS NULL
-                AND discord_notification_message_id IS NULL
-                {date_clause}
                 ORDER BY created_at ASC""",
-            params,
+            TERMINAL_STATES,
         ).fetchall()
 
     return [dict(r) for r in rows]
