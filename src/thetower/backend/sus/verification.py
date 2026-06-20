@@ -1211,6 +1211,40 @@ def get_terminal_submissions_with_notifications() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_terminal_submissions_never_logged(lookback_days: int = 30) -> list[dict]:
+    """Return terminal submissions that were never posted to the Discord log channel.
+
+    These submissions have no ``discord_log_message_id`` and no
+    ``discord_notification_message_id`` — they completed (approved/rejected/failed)
+    while the bot was offline or before log sync was wired up.
+
+    Limited to submissions created within ``lookback_days`` to avoid flooding the
+    channel with historical entries on the first deploy.  After the initial run,
+    subsequent startups only pick up new gaps (bot was offline briefly), since
+    successfully-logged submissions have their message IDs set and are excluded.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return []
+
+    TERMINAL_STATES = ("approved", "passed", "rejected", "failed", "abandoned")
+    placeholders = ",".join("?" * len(TERMINAL_STATES))
+    cutoff = int(time.time()) - lookback_days * 86400
+
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""SELECT * FROM submissions
+                WHERE status IN ({placeholders})
+                AND discord_log_message_id IS NULL
+                AND discord_notification_message_id IS NULL
+                AND created_at >= ?
+                ORDER BY created_at ASC""",
+            TERMINAL_STATES + (cutoff,),
+        ).fetchall()
+
+    return [dict(r) for r in rows]
+
+
 def get_mod_queue_for_player(player_pk: int) -> list[dict]:
     """Return submissions needing mod review for all accounts linked to a player."""
     from thetower.backend.sus.models import LinkedAccount
