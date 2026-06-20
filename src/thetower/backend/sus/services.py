@@ -99,7 +99,39 @@ def create_or_update_player(
                 "existing_player_name": existing_player.name,
             }
         if not existing_link:
-            # Tower ID exists but no platform link — check if this is cross-platform conflict
+            # Tower ID exists but no active platform link — check if cross-platform conflict or mod-approved relink
+            if action_type == "relink":
+                # Mod-approved relink: create a new platform link → existing KnownPlayer.
+                # The player's game data is preserved; only the Discord connection is re-established.
+                player = existing_player
+                primary_instance = player.game_instances.filter(primary=True, active=True).first() or player.game_instances.first()
+                LinkedAccount.objects.create(
+                    player=player,
+                    platform=platform,
+                    account_id=account_id,
+                    display_name=author_name,
+                    verified=True,
+                    verified_at=timezone.now(),
+                    role_source_instance=primary_instance,
+                )
+                logger.info("Relink: created %s link account_id=%s → player_pk=%d", platform, account_id, player.pk)
+                # Auto-link any orphaned ModerationRecords to the primary instance
+                if primary_instance:
+                    linked_count = ModerationRecord.objects.filter(tower_id=player_id, game_instance__isnull=True).update(
+                        game_instance=primary_instance
+                    )
+                    if linked_count:
+                        logger.info("Relink: auto-linked %d moderation record(s) for %s", linked_count, player_id)
+                primary_pid = PlayerId.objects.filter(game_instance=primary_instance, primary=True).first() if primary_instance else None
+                return {
+                    "player_pk": player.pk,
+                    "player_name": player.name,
+                    "platform": platform,
+                    "account_id": account_id,
+                    "created": True,
+                    "primary_tower_id": primary_pid.id if primary_pid else player_id,
+                }
+            # Not a relink — check for cross-platform conflict
             other_platform_link = LinkedAccount.objects.filter(player=existing_player, active=True).first()
             if other_platform_link and other_platform_link.platform != platform:
                 # e.g., verified on Reddit, now trying via Discord
@@ -447,8 +479,8 @@ def accept_account_link(link_stem: str, target_display_name: str = "") -> dict[s
     Returns dict with 'status' ('ok' or 'error'), plus on success:
         'player_name', 'linked_account_id', 'primary_player_id'
     """
-    from thetower.backend.sus.models import KnownPlayer, LinkedAccount, PlayerId
     from thetower.backend.sus import verification
+    from thetower.backend.sus.models import KnownPlayer, LinkedAccount, PlayerId
 
     try:
         link_row = verification.get_account_link(link_stem)
@@ -608,11 +640,7 @@ def check_ban_status(platform: str, account_id: str, new_player_id: str) -> dict
 
     previously_banned_ids: list[str] = []
     try:
-        link = (
-            LinkedAccount.objects.filter(platform=platform, account_id=str(account_id), active=True)
-            .select_related("player")
-            .first()
-        )
+        link = LinkedAccount.objects.filter(platform=platform, account_id=str(account_id), active=True).select_related("player").first()
         if link:
             all_ids = [
                 pid.id

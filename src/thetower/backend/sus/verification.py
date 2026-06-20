@@ -37,7 +37,8 @@ _TERMINAL_STATUSES = ("passed", "approved", "rejected", "abandoned", "failed")
 
 # Try to import OCR utilities
 try:
-    from thetower.utils.ocr import analyze_verification_screenshot, is_available as ocr_available
+    from thetower.utils.ocr import analyze_verification_screenshot
+    from thetower.utils.ocr import is_available as ocr_available
 
     OCR_ENABLED = ocr_available()
 except ImportError:
@@ -380,6 +381,51 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
             )
 
             if "error" in result:
+                error_code = result.get("error")
+                existing_player_pk = result.get("existing_player_pk")
+
+                if error_code == "no_platform_link" and existing_player_pk:
+                    # Player exists but has no active links on any platform.
+                    # Escalate to mod intent review so a mod can approve re-linking
+                    # the submitting Discord account → this existing KnownPlayer.
+                    try:
+                        from thetower.backend.sus.models import LinkedAccount as _LA
+
+                        was_previously_linked = _LA.objects.filter(platform=platform, account_id=account_id, player_id=existing_player_pk).exists()
+                    except Exception:
+                        was_previously_linked = False
+
+                    review_reason = "relink_original_owner" if was_previously_linked else "relink_new_discord"
+                    update_submission(
+                        stem,
+                        status="mod_intent_review",
+                        id_change_reason="relink",
+                        review_reason=review_reason,
+                        verified_player_id=verified_player_id,
+                    )
+                    add_event(
+                        stem,
+                        {
+                            "type": "relink_escalated",
+                            "ts": int(time.time()),
+                            "existing_player_pk": existing_player_pk,
+                            "was_previously_linked": was_previously_linked,
+                            "review_reason": review_reason,
+                        },
+                    )
+                    log_submission_update(stem)
+                    logger.info(
+                        "Relink escalated to mod intent review: stem=%s was_previously_linked=%s",
+                        stem,
+                        was_previously_linked,
+                    )
+                    return {
+                        "eligible": False,
+                        "status": "mod_intent_review",
+                        "message": "No active platform links — escalated to mod review for relink decision",
+                    }
+
+                # All other errors → fail
                 update_submission(stem, status="failed", final_outcome="failed")
                 add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
                 return {"eligible": True, "status": "failed", "message": f"Failed: {result['error']}"}
@@ -1298,6 +1344,17 @@ def get_pending_link(target_platform: str, target_account_id: str) -> dict | Non
     return dict(row) if row else None
 
 
+def is_account_verified(platform: str, account_id: str) -> bool:
+    """Return True if the given platform account is already linked to a verified KnownPlayer.
+
+    Used to guard link-request creation: we do not allow sending a link invite to an
+    account that already has its own verified identity.
+    """
+    from thetower.backend.sus.models import LinkedAccount
+
+    return LinkedAccount.objects.filter(platform=platform, account_id=account_id, active=True).exists()
+
+
 def resolve_account_link(stem: str, new_status: str, resolved_by: str | None = None) -> bool:
     """Resolve an account link request.
 
@@ -1721,6 +1778,7 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str) -> dict[st
                 "add_alt": "approved",
                 "merge_ids": "approved",
                 "new_instance_retire_old": "approved",
+                "relink": "approved",
             }
             final_outcome = outcome_map.get(action_type, "approved")
 
@@ -2156,9 +2214,15 @@ def process_verification(
                     "auto_complete": True,
                 }
             else:
-                # Shouldn't happen (logic error), but handle gracefully
-                logger.error("Auto-complete indicated but ineligible: stem=%s message=%s", stem, auto_result["message"])
-                return {"status": "error", "reason": "auto_complete_failed"}
+                # auto_complete_if_eligible returned ineligible — can happen legitimately
+                # when a player exists but has no active platform links (relink escalation).
+                logger.info(
+                    "Auto-complete returned ineligible after OCR match: stem=%s status=%s message=%s",
+                    stem,
+                    auto_result["status"],
+                    auto_result.get("message"),
+                )
+                return {"status": auto_result["status"], "reason": auto_result.get("message", "")}
 
         # Return status to caller (web/Discord)
         return status_decision["return_to_caller"]
