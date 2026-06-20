@@ -1798,6 +1798,7 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str) -> dict[st
         )
         add_event(stem, {"type": "mod_intent_reject", "ts": int(time.time()), "mod": resolved_by})
         logger.info("Intent review rejected (no action): stem=%s mod=%s", stem, resolved_by)
+        log_submission_update(stem, actor=resolved_by)
         return {"status": "ok", "message": "Intent review rejected - no changes applied"}
 
     # Apply the action type
