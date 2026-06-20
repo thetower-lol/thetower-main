@@ -32,8 +32,7 @@ MAX_UPLOAD_BYTES = int(os.getenv("WEB_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 REVIEW_DB_PATH = UPLOAD_DIR / "review_queue.db"
 
 # Terminal statuses (submissions that are complete and should not be re-actioned)
-# Note: "approved" is legacy — "passed" is the current terminal success status
-_TERMINAL_STATUSES = ("passed", "approved", "rejected", "abandoned", "failed")
+_TERMINAL_STATUSES = ("approved", "passed", "rejected", "abandoned", "failed")
 
 # Try to import OCR utilities
 try:
@@ -1162,13 +1161,13 @@ def get_mod_queue_counts() -> dict[str, Any]:
 def get_non_terminal_submissions() -> list[dict]:
     """Return all submissions that are not in a terminal state.
 
-    Terminal states are: passed, rejected, failed, abandoned.
+    Terminal states are: approved, passed (legacy), rejected, failed, abandoned.
     Used for Discord embed sync on bot startup.
     """
     if not REVIEW_DB_PATH.exists():
         return []
 
-    TERMINAL_STATES = ("passed", "rejected", "failed", "abandoned")
+    TERMINAL_STATES = ("approved", "passed", "rejected", "failed", "abandoned")
     placeholders = ",".join("?" * len(TERMINAL_STATES))
 
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
