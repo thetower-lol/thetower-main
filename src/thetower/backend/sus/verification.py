@@ -1211,24 +1211,30 @@ def get_terminal_submissions_with_notifications() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_terminal_submissions_never_logged(lookback_days: int = 30) -> list[dict]:
+def get_terminal_submissions_never_logged(lookback_days: int | None = None) -> list[dict]:
     """Return terminal submissions that were never posted to the Discord log channel.
 
     These submissions have no ``discord_log_message_id`` and no
     ``discord_notification_message_id`` — they completed (approved/rejected/failed)
     while the bot was offline or before log sync was wired up.
 
-    Limited to submissions created within ``lookback_days`` to avoid flooding the
-    channel with historical entries on the first deploy.  After the initial run,
-    subsequent startups only pick up new gaps (bot was offline briefly), since
-    successfully-logged submissions have their message IDs set and are excluded.
+    ``lookback_days``: if provided, only include submissions created within that window.
+    If ``None`` (default), all unlogged terminal submissions are returned — useful for
+    a one-time historical backfill.  After the initial run, subsequent startups only
+    pick up new gaps (since successfully-logged submissions have their message IDs set).
     """
     if not REVIEW_DB_PATH.exists():
         return []
 
     TERMINAL_STATES = ("approved", "passed", "rejected", "failed", "abandoned")
     placeholders = ",".join("?" * len(TERMINAL_STATES))
-    cutoff = int(time.time()) - lookback_days * 86400
+
+    params: tuple = TERMINAL_STATES
+    date_clause = ""
+    if lookback_days is not None:
+        cutoff = int(time.time()) - lookback_days * 86400
+        date_clause = "AND created_at >= ?"
+        params = TERMINAL_STATES + (cutoff,)
 
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
@@ -1237,9 +1243,9 @@ def get_terminal_submissions_never_logged(lookback_days: int = 30) -> list[dict]
                 WHERE status IN ({placeholders})
                 AND discord_log_message_id IS NULL
                 AND discord_notification_message_id IS NULL
-                AND created_at >= ?
+                {date_clause}
                 ORDER BY created_at ASC""",
-            TERMINAL_STATES + (cutoff,),
+            params,
         ).fetchall()
 
     return [dict(r) for r in rows]
