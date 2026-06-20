@@ -1177,6 +1177,31 @@ def get_non_terminal_submissions() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_terminal_submissions_with_notifications() -> list[dict]:
+    """Return terminal submissions that still have a discord_notification_message_id set.
+
+    These need a cleanup pass on startup: the notification message should be deleted
+    from Discord and the column cleared.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return []
+
+    TERMINAL_STATES = ("approved", "passed", "rejected", "failed", "abandoned")
+    placeholders = ",".join("?" * len(TERMINAL_STATES))
+
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""SELECT * FROM submissions
+                WHERE status IN ({placeholders})
+                AND discord_notification_message_id IS NOT NULL
+                ORDER BY created_at DESC""",
+            TERMINAL_STATES,
+        ).fetchall()
+
+    return [dict(r) for r in rows]
+
+
 def get_mod_queue_for_player(player_pk: int) -> list[dict]:
     """Return submissions needing mod review for all accounts linked to a player."""
     from thetower.backend.sus.models import LinkedAccount
