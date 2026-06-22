@@ -2228,10 +2228,11 @@ def process_verification(
         status_decision = determine_initial_status(ocr_result, player_id, user_context)
 
         # Phase 4: Update submission with OCR results and status
-        update_fields = {
+        update_fields: dict = {
             "status": status_decision["status"],
-            "ocr_player_id": status_decision["ocr_player_id"],
         }
+        if status_decision["ocr_player_id"] is not None:
+            update_fields["ocr_player_id"] = status_decision["ocr_player_id"]
         if status_decision.get("version"):
             update_fields["version"] = status_decision["version"]
         if status_decision.get("build"):
@@ -2278,7 +2279,8 @@ def process_verification(
         if status_decision["return_to_caller"].get("status") == "auto_complete":
             auto_result = auto_complete_if_eligible(stem)
             if auto_result["eligible"]:
-                # Successfully auto-completed
+                # Successfully auto-completed — notify Discord of the final state
+                log_submission_update(stem)
                 return {
                     "status": auto_result["status"],
                     "player_created": True,
