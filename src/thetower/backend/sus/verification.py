@@ -743,7 +743,7 @@ def create_submission(
     ids.update(additional_platform_ids or {})
     now = int(time.time())
     with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
-        conn.execute(
+        cursor = conn.execute(
             """INSERT OR IGNORE INTO submissions
                (stem, platform, account_id, platform_ids, submitter_name, submission_source,
                 submitted_player_id, old_player_id, id_change_reason, version, build, status, events, created_at, updated_at)
@@ -765,8 +765,10 @@ def create_submission(
             ),
         )
 
-    # Trigger initial "pending" embed in the log channel
-    log_submission_update(stem)
+    # Only notify on first insert — INSERT OR IGNORE is a no-op for duplicate stems,
+    # and the caller (process_verification) fires log_submission_update after OCR anyway.
+    if cursor.rowcount > 0:
+        log_submission_update(stem)
 
 
 def get_submission(stem: str) -> dict | None:
