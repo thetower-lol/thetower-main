@@ -38,7 +38,7 @@ async def refresh_verification_discord_messages(stem: str, mod_user: str) -> Non
             # Opportunistically process any pending retries on successful send
             await _process_pending_retries()
         else:
-            error_msg = response.get("error", "Unknown error") if response else "No response"
+            error_msg = response.get("message", response.get("error", "Unknown error")) if response else "No response"
             logger.warning(f"Failed to refresh Discord messages: {error_msg}")
             # Save for retry
             await _save_failed_refresh(stem, mod_user, error_msg)
