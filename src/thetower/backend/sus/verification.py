@@ -627,6 +627,9 @@ def ensure_db() -> None:
 
                 discord_log_message_id  TEXT,
                 discord_notification_message_id  TEXT,
+                -- TODO: once all callers are migrated to use discord_log_url, consider replacing
+                -- discord_log_message_id with discord_log_url and parsing the ID from the URL.
+                discord_log_url         TEXT,
 
                 final_outcome       TEXT,
                 events              TEXT    NOT NULL DEFAULT '[]',
@@ -649,6 +652,14 @@ def ensure_db() -> None:
                 logger.info("Dropped legacy column: %s", col)
             except Exception:
                 pass  # Column already removed or not present
+
+        # Add new columns (idempotent — ignore errors if already present)
+        for add_col in ("discord_log_url TEXT",):
+            try:
+                conn.execute(f"ALTER TABLE submissions ADD COLUMN {add_col}")
+                logger.info("Added column: %s", add_col)
+            except Exception:
+                pass  # Column already exists
 
         # Table for tracking failed Discord message refresh attempts (for retry)
         conn.execute("""
@@ -1735,6 +1746,7 @@ def mod_resolve_ocr(stem: str, verdict: str, resolved_by: str, verified_player_i
             resolved_by,
             auto_result["status"],
         )
+        log_submission_update(stem, actor=resolved_by)
         return {"status": "ok", "message": f"OCR review complete: {auto_result['message']}"}
     else:
         # Requires Intent review (existing user with mod-review intent)

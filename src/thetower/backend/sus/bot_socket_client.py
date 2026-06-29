@@ -13,7 +13,7 @@ DISCORD_BOT_SOCKET_PORT = int(os.getenv("DISCORD_BOT_SOCKET_PORT", "19876"))
 DISCORD_BOT_SOCKET_TOKEN = os.getenv("BOT_SOCKET_TOKEN")
 
 
-async def refresh_verification_discord_messages(stem: str, mod_user: str) -> None:
+async def refresh_verification_discord_messages(stem: str, mod_user: str) -> str | None:
     """Request the Discord bot to refresh verification messages for a submission.
 
     This is called after web-based mod actions to ensure Discord embeds update
@@ -24,6 +24,9 @@ async def refresh_verification_discord_messages(stem: str, mod_user: str) -> Non
     Args:
         stem: Submission identifier
         mod_user: Moderator identifier (e.g. "discord:123456" or "web_username")
+
+    Returns:
+        Direct Discord URL to the log message if available, otherwise None.
     """
     request = {"action": "refresh_verification_messages", "stem": stem, "mod_user": mod_user}
 
@@ -37,16 +40,19 @@ async def refresh_verification_discord_messages(stem: str, mod_user: str) -> Non
             logger.info(f"Successfully refreshed Discord messages for submission {stem}")
             # Opportunistically process any pending retries on successful send
             await _process_pending_retries()
+            return response.get("discord_url")
         else:
             error_msg = response.get("message", response.get("error", "Unknown error")) if response else "No response"
             logger.warning(f"Failed to refresh Discord messages: {error_msg}")
             # Save for retry
             await _save_failed_refresh(stem, mod_user, error_msg)
+            return None
     except Exception as e:
         # Log but don't fail the web request if Discord updates fail
         logger.warning(f"Failed to refresh Discord messages for submission {stem}: {e}")
         # Save for retry
         await _save_failed_refresh(stem, mod_user, str(e))
+        return None
 
 
 async def _save_failed_refresh(stem: str, mod_user: str, error: str) -> None:
