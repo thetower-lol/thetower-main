@@ -623,6 +623,7 @@ def ensure_db() -> None:
                 review_reason       TEXT,
                 mod_verdict         TEXT,
                 mod_resolved_by     TEXT,
+                mod_resolved_name    TEXT,
                 mod_notes           TEXT,
 
                 discord_log_message_id  TEXT,
@@ -654,7 +655,7 @@ def ensure_db() -> None:
                 pass  # Column already removed or not present
 
         # Add new columns (idempotent — ignore errors if already present)
-        for add_col in ("discord_log_url TEXT",):
+        for add_col in ("discord_log_url TEXT", "mod_resolved_name TEXT"):
             try:
                 conn.execute(f"ALTER TABLE submissions ADD COLUMN {add_col}")
                 logger.info("Added column: %s", add_col)
@@ -1590,7 +1591,7 @@ def get_submission_phase(stem: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, player_id: str | None = None) -> None:
+def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, player_id: str | None = None, resolved_name: str | None = None) -> None:
     """Resolve a mod review: update status, store verdict, and create player if needed.
 
     .. deprecated:: 2026-06-13
@@ -1625,6 +1626,8 @@ def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, player_id:
         "mod_resolved_by": resolved_by,
         "status": new_status,
     }
+    if resolved_name:
+        fields["mod_resolved_name"] = resolved_name
     if player_id:
         fields["verified_player_id"] = player_id
 
@@ -1666,7 +1669,9 @@ def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, player_id:
     log_submission_update(stem, actor=resolved_by)
 
 
-def mod_resolve_ocr(stem: str, verdict: str, resolved_by: str, verified_player_id: str | None = None) -> dict[str, Any]:
+def mod_resolve_ocr(
+    stem: str, verdict: str, resolved_by: str, verified_player_id: str | None = None, resolved_name: str | None = None
+) -> dict[str, Any]:
     """Resolve OCR review: Verify OCR result (refactored to use auto_complete_if_eligible).
 
     Args:
@@ -1709,6 +1714,7 @@ def mod_resolve_ocr(stem: str, verdict: str, resolved_by: str, verified_player_i
             status="rejected",
             mod_verdict=verdict,
             mod_resolved_by=resolved_by,
+            mod_resolved_name=resolved_name,
             final_outcome="rejected",
         )
         add_event(stem, {"type": "mod_ocr_reject", "ts": int(time.time()), "mod": resolved_by})
@@ -1720,7 +1726,7 @@ def mod_resolve_ocr(stem: str, verdict: str, resolved_by: str, verified_player_i
         return {"status": "error", "message": "Missing verified_player_id"}
 
     # Store verified_player_id (signals OCR review complete)
-    update_submission(stem, verified_player_id=verified_player_id)
+    update_submission(stem, verified_player_id=verified_player_id, mod_resolved_name=resolved_name)
 
     # Add OCR review complete event
     add_event(
@@ -1759,7 +1765,7 @@ def mod_resolve_ocr(stem: str, verdict: str, resolved_by: str, verified_player_i
     return result
 
 
-def mod_resolve_intent(stem: str, action_type: str, resolved_by: str) -> dict[str, Any]:
+def mod_resolve_intent(stem: str, action_type: str, resolved_by: str, resolved_name: str | None = None) -> dict[str, Any]:
     """Resolve intent review: Apply action type to verified ID (updated with new status values).
 
     Args:
@@ -1808,6 +1814,7 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str) -> dict[st
             status="rejected",
             mod_verdict="rejected_no_action",
             mod_resolved_by=resolved_by,
+            mod_resolved_name=resolved_name,
             final_outcome="rejected",
         )
         add_event(stem, {"type": "mod_intent_reject", "ts": int(time.time()), "mod": resolved_by})
@@ -1858,6 +1865,7 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str) -> dict[st
                 status="approved",
                 mod_verdict=action_type,
                 mod_resolved_by=resolved_by,
+                mod_resolved_name=resolved_name,
                 final_outcome=final_outcome,
             )
             add_event(
