@@ -91,13 +91,13 @@ class BanPlayerAPI(APIView):
             # For unban/unsus actions, check if there's an active moderation to resolve
             if action in ["unban", "unsus"]:
                 active_records = ModerationRecord.objects.filter(
-                    tower_id=player_id,
-                    moderation_type=moderation_type,
-                    resolved_at__isnull=True  # Active = not resolved
+                    tower_id=player_id, moderation_type=moderation_type, resolved_at__isnull=True  # Active = not resolved
                 )
                 if not active_records.exists():
                     log_api_request(api_key_user, player_id, action, False, note=f"No active {moderation_type} record to resolve")
-                    return Response({"detail": f"No active {moderation_type} record found for player {player_id}."}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response(
+                        {"detail": f"No active {moderation_type} record found for player {player_id}."}, status=status.HTTP_400_BAD_REQUEST
+                    )
 
                 # Resolve the active record(s)
                 for record in active_records:
@@ -109,19 +109,29 @@ class BanPlayerAPI(APIView):
                             record.reason = f"Resolved: {note}"
                         record.save()
 
-                    record.resolve(
-                        resolved_by_api_key=api_key_obj
-                    )
+                    record.resolve(resolved_by_api_key=api_key_obj)
                 action_desc = f"un{moderation_type.lower()}"
             else:
                 # Create new active moderation record
-                ModerationRecord.create_for_api(
-                    tower_id=player_id,
-                    moderation_type=moderation_type,
-                    api_key=api_key_obj,
-                    reason=note
-                )
+                ModerationRecord.create_for_api(tower_id=player_id, moderation_type=moderation_type, api_key=api_key_obj, reason=note)
                 action_desc = moderation_type.lower()
+
+                # Notify bot immediately for bans so the verified role is removed in real time
+                if action == "ban":
+                    try:
+                        import asyncio
+
+                        from thetower.backend.sus.bot_socket_client import DISCORD_BOT_SOCKET_TOKEN, _send_socket_request
+
+                        enforce_request = {"action": "enforce_ban", "tower_id": player_id}
+                        if DISCORD_BOT_SOCKET_TOKEN:
+                            enforce_request["token"] = DISCORD_BOT_SOCKET_TOKEN
+                        asyncio.run(_send_socket_request(enforce_request, timeout=3.0))
+                    except Exception as notify_exc:
+                        # Non-fatal: bot notification is best-effort; ban record is already saved
+                        import logging
+
+                        logging.getLogger(__name__).warning("enforce_ban socket notify failed for %s: %s", player_id, notify_exc)
 
             log_api_request(api_key_user, player_id, action, True, note=note)
             return Response({"detail": f"Player {player_id} marked as {action_desc}."}, status=status.HTTP_200_OK)
