@@ -13,6 +13,38 @@ DISCORD_BOT_SOCKET_PORT = int(os.getenv("DISCORD_BOT_SOCKET_PORT", "19876"))
 DISCORD_BOT_SOCKET_TOKEN = os.getenv("BOT_SOCKET_TOKEN")
 
 
+async def get_discord_user(user_id: str) -> dict[str, str] | None:
+    """Resolve a Discord user ID to display name fields.
+
+    Args:
+        user_id: Numeric Discord snowflake (string or int).  May include a
+                 platform prefix like "discord:123456" — the prefix is stripped.
+
+    Returns:
+        Dict with username, global_name, display_name, or None if unavailable.
+    """
+    # Strip optional "discord:" prefix
+    clean_id = user_id.split(":")[-1].strip() if ":" in user_id else user_id.strip()
+    if not clean_id.isdigit():
+        return None
+
+    request = {"action": "get_discord_user", "user_id": clean_id}
+    if DISCORD_BOT_SOCKET_TOKEN:
+        request["token"] = DISCORD_BOT_SOCKET_TOKEN
+
+    try:
+        response = await _send_socket_request(request)
+        if response and response.get("status") == "ok":
+            return {
+                "username": response.get("username", ""),
+                "global_name": response.get("global_name", ""),
+                "display_name": response.get("display_name", ""),
+            }
+    except Exception as exc:
+        logger.debug("get_discord_user failed for %s: %s", user_id, exc)
+    return None
+
+
 async def refresh_verification_discord_messages(stem: str, mod_user: str) -> str | None:
     """Request the Discord bot to refresh verification messages for a submission.
 
