@@ -2233,10 +2233,9 @@ def process_verification(
                 "message": "Existing users must declare intent (id_change_reason) before submitting verification.",
             }
 
-        # Create the DB row (idempotent via INSERT OR IGNORE on stem UNIQUE)
-        create_submission(
-            stem, platform, account_id, display_name, submission_source, player_id, additional_platform_ids, old_player_id, id_change_reason
-        )
+        # NOTE: callers (web route, bot) must call create_submission() before process_verification().
+        # The call was removed from here because INSERT OR IGNORE with AUTOINCREMENT burns the next
+        # ID even when the row is ignored, causing every submission to have an odd ID.
 
         # Phase 1: Run OCR (pure function)
         ocr_result = run_ocr(image_path, player_id)
