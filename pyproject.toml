@@ -71,7 +71,6 @@ Repository = "https://github.com/thetower-lol/thetower-main"
 Issues = "https://github.com/thetower-lol/thetower-main/issues"
 
 [project.scripts]
-thetower-web = "thetower.web.pages:main"
 thetower-init-streamlit = "thetower.scripts.setup_streamlit:main"
 thetower-backup = "thetower.backend.backup.service:main"
 

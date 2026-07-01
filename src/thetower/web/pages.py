@@ -150,7 +150,8 @@ icon_path = current_dir / "static" / "images" / "TTIcon.png"
 
 # Only show logo if not on the overview page
 # Check if we're navigating to the overview page
-if pg.title != "Overview":
+# Use getattr to guard against Streamlit 1.54+ not initialising _title outside a run context
+if getattr(pg, "title", None) != "Overview":
     st.logo(str(logo_path), size="large", icon_image=str(icon_path))
 
 # Only show toggle and make it rain if there are active rain periods
