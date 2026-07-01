@@ -2280,6 +2280,11 @@ def process_verification(
             event_data["reason"] = status_decision["return_to_caller"]["reason"]
         if status_decision.get("ocr_player_id"):
             event_data["ocr_id"] = status_decision["ocr_player_id"]
+        # OCR diagnostic fields — helps diagnose failures on the event timeline
+        if not ocr_result.get("has_valid_labels", True):
+            event_data["valid_screen"] = False
+        if ocr_result.get("error"):
+            event_data["ocr_error_detail"] = ocr_result["error"]
         add_event(stem, event_data)
 
         # Notify Discord (and any other registered platforms) of the status change
