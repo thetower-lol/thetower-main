@@ -425,8 +425,11 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
                     }
 
                 # All other errors → fail
+                # Normalise "already_linked" to "id_already_registered" so event history
+                # uses the same reason code as the pre-OCR early check.
+                event_reason = "id_already_registered" if result["error"] == "already_linked" else result["error"]
                 update_submission(stem, status="failed", final_outcome="failed")
-                add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": result["error"]})
+                add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": event_reason})
                 return {"eligible": True, "status": "failed", "message": f"Failed: {result['error']}"}
 
             update_submission(stem, status="approved", final_outcome="approved")
