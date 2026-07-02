@@ -134,11 +134,11 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         # ------------------------------------------------------------------
         # Pass 1 – label check + version extraction
         # Word-level detection (PSM 3) at 3× is more reliable than full-text
-        # PSM 6 for sparse game-UI text.  We require "subreddit" to confirm
-        # the screenshot is the Settings screen.  "Discord" is intentionally
-        # NOT checked: that button text is rendered in a font weight that
-        # Tesseract consistently misreads, while "Subreddit" is reliably
-        # detected and is sufficient to confirm the correct screen.
+        # PSM 6 for sparse game-UI text.  We require ≥2 of {subreddit, discord,
+        # eula} to confirm the Settings screen — a single signal is not enough
+        # (a cropped screenshot showing only the bottom with the EULA link would
+        # otherwise pass).  "Discord" uses a heavy font weight that Tesseract
+        # sometimes misreads, but including EULA and subreddit makes the detection robust.
         # ------------------------------------------------------------------
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray3x = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
@@ -148,31 +148,30 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
             output_type=pytesseract.Output.DICT,
         )
         label_words = {w.lower() for w in label_data["text"] if w.strip()}
-        # "Subreddit" is the primary gate: it reliably OCRs on the Settings
-        # screen and is unique to it.  "Discord" uses a heavy font weight that
-        # Tesseract sometimes mangles, so it is treated as a secondary signal —
-        # either one present is sufficient to confirm the correct screen.
-        # "EULA" is a language-independent fallback for non-English game UIs
-        # where "Subreddit"/"Discord" buttons may not appear in English text.
-        has_valid_labels = any("subreddit" in w or "reddit" in w or "discord" in w or w == "eula" for w in label_words)
+        # Require ≥2 of {subreddit, discord, eula} to confirm the Settings screen.
+        # A single signal (e.g. just "eula") is insufficient — a cropped screenshot
+        # showing only the bottom of the screen would pass otherwise.
+
+        def _signal_count(words: set) -> int:
+            return int(any("subreddit" in w for w in words)) + int(any("discord" in w for w in words)) + int("eula" in words)
+
+        _count = _signal_count(label_words)
 
         # Fallback: scan four overlapping horizontal bands to handle photos of devices
         # where the screen can appear anywhere in the frame (not just the center).
-        # Each band covers a different vertical region; capping width to 1500 px before
-        # the 3× upscale keeps Tesseract tractable even for high-res camera photos.
-        if not has_valid_labels:
-            h, w_img = gray.shape[:2]
+        # All band words are combined before recounting so signals split across bands
+        # (e.g. "discord" in one strip, "eula" in another) still add up to ≥2.
+        if _count < 2:
+            h = gray.shape[0]
+            all_words = set(label_words)
             for top_pct, bot_pct in ((0, 35), (25, 60), (50, 80), (65, 100)):
-                band = gray[int(h * top_pct / 100) : int(h * bot_pct / 100), int(w_img * 0.03) : int(w_img * 0.97)]
-                bh, bw = band.shape[:2]
-                if bw > 1500:
-                    band = cv2.resize(band, None, fx=1500 / bw, fy=1500 / bw, interpolation=cv2.INTER_AREA)
+                band = gray[int(h * top_pct / 100) : int(h * bot_pct / 100), :]
                 band3x = cv2.resize(band, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
                 band_data = pytesseract.image_to_data(band3x, config="--oem 3 --psm 3", output_type=pytesseract.Output.DICT)
-                band_words = {w.lower() for w in band_data["text"] if w.strip()}
-                has_valid_labels = any("subreddit" in w or "reddit" in w or "discord" in w or w == "eula" for w in band_words)
-                if has_valid_labels:
-                    break
+                all_words.update(w.lower() for w in band_data["text"] if w.strip())
+            _count = _signal_count(all_words)
+
+        has_valid_labels = _count >= 2
 
         # Version + build: run image_to_string on the same 3× gray for line parsing
         gray2x = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
