@@ -152,18 +152,27 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         # screen and is unique to it.  "Discord" uses a heavy font weight that
         # Tesseract sometimes mangles, so it is treated as a secondary signal —
         # either one present is sufficient to confirm the correct screen.
-        has_valid_labels = any("subreddit" in w or "reddit" in w or "discord" in w for w in label_words)
+        # "EULA" is a language-independent fallback for non-English game UIs
+        # where "Subreddit"/"Discord" buttons may not appear in English text.
+        has_valid_labels = any("subreddit" in w or "reddit" in w or "discord" in w or w == "eula" for w in label_words)
 
-        # Fallback: tall screenshots (portrait orientation) can dilute the button
-        # region at full-image scale.  Crop to the center button rows (45–75% of
-        # height) where the Settings buttons live and re-scan at 3× to catch "Subreddit".
+        # Fallback: scan four overlapping horizontal bands to handle photos of devices
+        # where the screen can appear anywhere in the frame (not just the center).
+        # Each band covers a different vertical region; capping width to 1500 px before
+        # the 3× upscale keeps Tesseract tractable even for high-res camera photos.
         if not has_valid_labels:
             h, w_img = gray.shape[:2]
-            crop = gray[int(h * 0.45) : int(h * 0.75), int(w_img * 0.05) : int(w_img * 0.95)]
-            crop3x = cv2.resize(crop, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-            crop_data = pytesseract.image_to_data(crop3x, config="--oem 3 --psm 3", output_type=pytesseract.Output.DICT)
-            crop_words = {w.lower() for w in crop_data["text"] if w.strip()}
-            has_valid_labels = any("subreddit" in w or "reddit" in w or "discord" in w for w in crop_words)
+            for top_pct, bot_pct in ((0, 35), (25, 60), (50, 80), (65, 100)):
+                band = gray[int(h * top_pct / 100) : int(h * bot_pct / 100), int(w_img * 0.03) : int(w_img * 0.97)]
+                bh, bw = band.shape[:2]
+                if bw > 1500:
+                    band = cv2.resize(band, None, fx=1500 / bw, fy=1500 / bw, interpolation=cv2.INTER_AREA)
+                band3x = cv2.resize(band, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+                band_data = pytesseract.image_to_data(band3x, config="--oem 3 --psm 3", output_type=pytesseract.Output.DICT)
+                band_words = {w.lower() for w in band_data["text"] if w.strip()}
+                has_valid_labels = any("subreddit" in w or "reddit" in w or "discord" in w or w == "eula" for w in band_words)
+                if has_valid_labels:
+                    break
 
         # Version + build: run image_to_string on the same 3× gray for line parsing
         gray2x = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
