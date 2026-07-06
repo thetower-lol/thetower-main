@@ -138,7 +138,9 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         # eula} to confirm the Settings screen — a single signal is not enough
         # (a cropped screenshot showing only the bottom with the EULA link would
         # otherwise pass).  "Discord" uses a heavy font weight that Tesseract
-        # sometimes misreads, but including EULA and subreddit makes the detection robust.
+        # sometimes misreads, but subreddit + eula make the detection robust.
+        # CLAHE is also applied and merged because dark-background screenshots
+        # cause Tesseract to misread "EULA" as "euta" without contrast enhancement.
         # ------------------------------------------------------------------
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray3x = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
@@ -148,12 +150,18 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
             output_type=pytesseract.Output.DICT,
         )
         label_words = {w.lower() for w in label_data["text"] if w.strip()}
+        # Also run CLAHE variant and merge — dark screenshots cause misreads (e.g. "EULA" → "euta")
+        _clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        clahe_3x = cv2.resize(_clahe.apply(gray), None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+        clahe_label_data = pytesseract.image_to_data(clahe_3x, config="--oem 3 --psm 3", output_type=pytesseract.Output.DICT)
+        label_words |= {w.lower() for w in clahe_label_data["text"] if w.strip()}
         # Require ≥2 of {subreddit, discord, eula} to confirm the Settings screen.
         # A single signal (e.g. just "eula") is insufficient — a cropped screenshot
         # showing only the bottom of the screen would pass otherwise.
+        # All three checks use substring matching for consistency.
 
         def _signal_count(words: set) -> int:
-            return int(any("subreddit" in w for w in words)) + int(any("discord" in w for w in words)) + int("eula" in words)
+            return int(any("subreddit" in w for w in words)) + int(any("discord" in w for w in words)) + int(any("eula" in w for w in words))
 
         _count = _signal_count(label_words)
 
