@@ -155,13 +155,23 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         clahe_3x = cv2.resize(_clahe.apply(gray), None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
         clahe_label_data = pytesseract.image_to_data(clahe_3x, config="--oem 3 --psm 3", output_type=pytesseract.Output.DICT)
         label_words |= {w.lower() for w in clahe_label_data["text"] if w.strip()}
-        # Require ≥2 of {subreddit, discord, eula} to confirm the Settings screen.
-        # A single signal (e.g. just "eula") is insufficient — a cropped screenshot
-        # showing only the bottom of the screen would pass otherwise.
-        # All three checks use substring matching for consistency.
+        # Require ≥2 of {subreddit, discord, eula, id:} to confirm the Settings screen.
+        # A single signal is insufficient — a cropped screenshot showing only the bottom
+        # of the screen would otherwise pass.  Signals used:
+        #   - "subreddit"  locale-independent; reliably detected in all tested locales
+        #   - "discord"    locale-independent; detected if Tesseract resolves the font
+        #   - "eula"       English locale; other locales use different abbreviations
+        #   - "id:"        locale-independent (Tower always uses "ID:" prefix); reliably detected
+        # The "subreddit" + "id:" combination guarantees ≥2 for every locale.
+        # All checks use substring matching for consistency.
 
         def _signal_count(words: set) -> int:
-            return int(any("subreddit" in w for w in words)) + int(any("discord" in w for w in words)) + int(any("eula" in w for w in words))
+            return (
+                int(any("subreddit" in w for w in words))
+                + int(any("discord" in w for w in words))
+                + int(any("eula" in w for w in words))
+                + int(any("id:" in w for w in words))
+            )
 
         _count = _signal_count(label_words)
 
