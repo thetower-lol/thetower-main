@@ -68,6 +68,9 @@ def quantile_analysis():
         st.warning("No quantile data available for this tournament yet.")
         return
 
+    # Sort so quantile curves draw left-to-right (0% → 5% → ... → 95% → 100%)
+    quantile_df = quantile_df.sort_values(["rank", "quantile"]).reset_index(drop=True)
+
     # Create the main quantile curves chart
     fig = px.line(
         quantile_df,
