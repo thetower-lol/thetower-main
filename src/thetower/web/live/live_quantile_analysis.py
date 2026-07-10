@@ -48,8 +48,7 @@ def quantile_analysis():
     st.caption(f"Tournament start date: {tourney_start_date}")
 
     # Introduction and explanation
-    st.markdown(
-        """
+    st.markdown("""
     This analysis shows the **distribution of waves required** to achieve specific placements
     across all brackets in the current tournament. Each curve represents a different placement
     position (1st, 4th, 10th, etc.).
@@ -62,8 +61,7 @@ def quantile_analysis():
     **Example**: If the 75% quantile for 10th place shows 2500 waves, it means:
     - 75% of brackets required **2500 or fewer waves** to reach 10th place
     - 25% of brackets required **more than 2500 waves** to reach 10th place
-    """
-    )
+    """)
 
     # Display the quantile data
     if quantile_df.empty:
@@ -128,19 +126,25 @@ def quantile_analysis():
     st.markdown("### Summary Statistics by Placement")
 
     # Create summary table with key quantiles
+    def _wave_at_q(rank_data: pd.DataFrame, q: float):
+        """Return wave count at quantile q, or None if not in data (e.g. old cache)."""
+        matches = rank_data[rank_data["quantile"] == q]["waves"]
+        return int(matches.iloc[0]) if not matches.empty else None
+
     summary_data = []
     for rank in quantile_df["rank"].unique():
         rank_data = quantile_df[quantile_df["rank"] == rank]
-        summary_data.append(
-            {
-                "Placement": f"Top {int(rank)}",
-                "5th %ile": int(rank_data[rank_data["quantile"] == 0.05]["waves"].iloc[0]),
-                "25th %ile": int(rank_data[rank_data["quantile"] == 0.25]["waves"].iloc[0]),
-                "Median (50th)": int(rank_data[rank_data["quantile"] == 0.50]["waves"].iloc[0]),
-                "75th %ile": int(rank_data[rank_data["quantile"] == 0.75]["waves"].iloc[0]),
-                "95th %ile": int(rank_data[rank_data["quantile"] == 0.95]["waves"].iloc[0]),
-            }
-        )
+        row = {
+            "Placement": f"Top {int(rank)}",
+            "Min": _wave_at_q(rank_data, 0.0),
+            "5th %ile": _wave_at_q(rank_data, 0.05),
+            "25th %ile": _wave_at_q(rank_data, 0.25),
+            "Median (50th)": _wave_at_q(rank_data, 0.50),
+            "75th %ile": _wave_at_q(rank_data, 0.75),
+            "95th %ile": _wave_at_q(rank_data, 0.95),
+            "Max": _wave_at_q(rank_data, 1.0),
+        }
+        summary_data.append(row)
 
     summary_df = pd.DataFrame(summary_data)
 
@@ -149,18 +153,19 @@ def quantile_analysis():
         hide_index=True,
         column_config={
             "Placement": st.column_config.TextColumn("Placement", help="Placement position in bracket"),
+            "Min": st.column_config.NumberColumn("Min", help="Minimum waves across all brackets"),
             "5th %ile": st.column_config.NumberColumn("5th %ile", help="Easiest 5% of brackets"),
             "25th %ile": st.column_config.NumberColumn("25th %ile", help="Lower quartile"),
             "Median (50th)": st.column_config.NumberColumn("Median (50th)", help="Middle value across all brackets"),
             "75th %ile": st.column_config.NumberColumn("75th %ile", help="Upper quartile"),
             "95th %ile": st.column_config.NumberColumn("95th %ile", help="Hardest 5% of brackets"),
+            "Max": st.column_config.NumberColumn("Max", help="Maximum waves across all brackets"),
         },
     )
 
     # Add interpretation guidance
     with st.expander("📖 How to Use This Information"):
-        st.markdown(
-            """
+        st.markdown("""
         ### Strategic Planning:
 
         **Conservative Strategy** (75th-90th percentile):
@@ -184,8 +189,7 @@ def quantile_analysis():
         **Narrow spread** (small difference between 25th and 75th percentile):
         - Consistent requirements across brackets
         - Performance matters more than bracket luck
-        """
-        )
+        """)
 
     # Additional insights section
     st.markdown("### Bracket Variability Analysis")
@@ -218,15 +222,13 @@ def quantile_analysis():
         )
 
     with col2:
-        st.markdown(
-            """
+        st.markdown("""
         **Interquartile Range (IQR)** measures the spread of the middle 50% of brackets.
 
         - **Lower IQR**: More consistent across brackets
         - **Higher IQR**: More bracket-to-bracket variation
         - **IQR % of Median**: Normalizes variability for comparison
-        """
-        )
+        """)
 
     # Log execution time
     t2_stop = perf_counter()

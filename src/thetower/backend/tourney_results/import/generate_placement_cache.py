@@ -9,6 +9,7 @@ safe to run periodically (every 30 minutes) or once via --once.
 Writes are atomic; the cache file contains a `last_processed_iso` marker so the
 generator only processes new snapshots since the last run.
 """
+
 import argparse
 import datetime
 import json
@@ -42,7 +43,7 @@ logging.info(f"Resolved LIVE_BASE: {LIVE_BASE}")
 # cache files will be written under LIVE_BASE to keep them alongside snapshots
 CACHE_BASE = LIVE_BASE
 # Cache schema versioning: bump when the on-disk JSON structure changes
-SCHEMA_VERSION = 2  # v2 introduces precomputed quantile_data
+SCHEMA_VERSION = 3  # v3 adds min/max (quantile 0.0/1.0) to quantile_data
 # Tourney grouping: snapshots > 42 hours apart indicate a new tourney
 GAP_HOURS = 42
 
@@ -223,6 +224,8 @@ def calculate_quantiles_for_cache(df: pd.DataFrame) -> dict:
                         rank_quantiles[str(q)] = float(wave_series.quantile(q))
                     except Exception:
                         rank_quantiles[str(q)] = None
+                rank_quantiles["0.0"] = float(wave_series.min())
+                rank_quantiles["1.0"] = float(wave_series.max())
                 results[str(rank)] = rank_quantiles
             else:
                 # No valid data for this rank
