@@ -8,6 +8,52 @@ from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 
 
+@st.cache_data(ttl=300, show_spinner="Loading tournament data...")
+def _load_median_data(
+    num_tourneys: int,
+    selected_leagues: tuple[str, ...],
+) -> tuple[dict[str, dict[str, int]], dict[int, list[int]], dict[str, str], list[str]]:
+    """Load and cache tournament wave data for median/mean history.
+
+    Returns:
+        league_to_date_id: {league: {date_str: result_id}}
+        waves_by_result:   {result_id: [wave, ...]}
+        date_to_bc:        {date_str: bc_shortcut_str}
+        date_strs:         sorted list of date strings, descending
+    """
+    league_to_date_id: dict[str, dict[str, int]] = {}
+    all_result_ids: list[int] = []
+    all_dates: set[str] = set()
+
+    for league in selected_leagues:
+        results = list(TourneyResult.objects.filter(league=league, public=True).order_by("-date").values("id", "date")[:num_tourneys])
+        league_to_date_id[league] = {str(r["date"]): r["id"] for r in results}
+        for r in results:
+            all_result_ids.append(r["id"])
+            all_dates.add(str(r["date"]))
+
+    # Fetch all waves in one query
+    waves_by_result: dict[int, list[int]] = defaultdict(list)
+    for row in TourneyRow.objects.filter(result__in=all_result_ids, position__gt=0).values("result_id", "wave"):
+        waves_by_result[row["result_id"]].append(row["wave"])
+
+    # Fetch BCs with prefetch_related to avoid N+1 queries
+    result_bcs: dict[int, str] = {}
+    for r in TourneyResult.objects.filter(id__in=all_result_ids).prefetch_related("conditions"):
+        bcs = r.conditions.all()
+        result_bcs[r.id] = " / ".join(bc.shortcut for bc in bcs) if bcs else ""
+
+    # Build per-date BC tooltip (first non-empty value across leagues wins)
+    date_to_bc: dict[str, str] = {}
+    for league in selected_leagues:
+        for date_str, result_id in league_to_date_id[league].items():
+            if date_str not in date_to_bc or not date_to_bc[date_str]:
+                date_to_bc[date_str] = result_bcs.get(result_id, "")
+
+    date_strs = sorted(all_dates, reverse=True)
+    return league_to_date_id, dict(waves_by_result), date_to_bc, date_strs
+
+
 def compute_median_history():
     st.header("Median Wave History")
     st.caption(
@@ -35,62 +81,23 @@ def compute_median_history():
         st.warning("Please select at least one league.")
         return
 
-    # Collect the last num_tourneys results per league and build a lookup from result_id to (league, date)
-    league_results: dict[str, list] = {}
-    result_to_meta: dict[int, tuple[str, object]] = {}  # result_id -> (league, date)
-    all_result_ids: list[int] = []
-
-    for league in selected_leagues:
-        results = list(TourneyResult.objects.filter(league=league, public=True).order_by("-date")[:num_tourneys])
-        league_results[league] = results
-        for r in results:
-            result_to_meta[r.id] = (league, r.date)
-            all_result_ids.append(r.id)
-
-    # Fetch all waves in one query
-    rows = TourneyRow.objects.filter(result__in=all_result_ids, position__gt=0).values("result_id", "wave")
-
-    waves_by_result: dict[int, list[int]] = defaultdict(list)
-    for row in rows:
-        waves_by_result[row["result_id"]].append(row["wave"])
-
-    # Build BC tooltip lookup: result_id -> short BC string
-    result_bcs: dict[int, str] = {}
-    for league in selected_leagues:
-        for r in league_results[league]:
-            bcs = r.conditions.all()
-            result_bcs[r.id] = " / ".join(bc.shortcut for bc in bcs) if bcs else ""
-
-    # Determine all unique dates (used as columns)
-    all_dates = sorted(
-        {r.date for results in league_results.values() for r in results},
-        reverse=True,
-    )
-    date_strs = [str(d) for d in all_dates]
-
-    # Build per-date BC tooltip (may differ by league but we use any non-empty one)
-    date_to_bc: dict[str, str] = {}
-    for league in selected_leagues:
-        for r in league_results[league]:
-            key = str(r.date)
-            if key not in date_to_bc or not date_to_bc[key]:
-                date_to_bc[key] = result_bcs[r.id]
+    league_to_date_id, waves_by_result, date_to_bc, date_strs = _load_median_data(num_tourneys, tuple(selected_leagues))
 
     # Build rows: one per league (two if both median + mean)
     table_rows = []
     for league in selected_leagues:
-        date_to_result = {str(r.date): r for r in league_results[league]}
+        date_to_result_id = league_to_date_id.get(league, {})
 
         if stat_choice == "Both":
             row_med: dict[str, object] = {"League": f"{league} (median)"}
             row_mean: dict[str, object] = {"League": f"{league} (mean)"}
             for d in date_strs:
-                result = date_to_result.get(d)
-                if result is None:
+                result_id = date_to_result_id.get(d)
+                if result_id is None:
                     row_med[d] = None
                     row_mean[d] = None
                 else:
-                    waves = waves_by_result.get(result.id, [])
+                    waves = waves_by_result.get(result_id, [])
                     if not waves:
                         row_med[d] = None
                         row_mean[d] = None
@@ -102,11 +109,11 @@ def compute_median_history():
         else:
             row: dict[str, object] = {"League": league}
             for d in date_strs:
-                result = date_to_result.get(d)
-                if result is None:
+                result_id = date_to_result_id.get(d)
+                if result_id is None:
                     row[d] = None
                 else:
-                    waves = waves_by_result.get(result.id, [])
+                    waves = waves_by_result.get(result_id, [])
                     if not waves:
                         row[d] = None
                     elif stat_choice == "Median":
