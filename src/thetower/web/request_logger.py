@@ -13,6 +13,7 @@ import logging
 import logging.handlers
 import os
 import secrets
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -25,10 +26,24 @@ _render_logger = logging.getLogger("web.render")
 _configured = False
 _render_configured = False
 
-# Module-level dedup: {session_id: last_logged_url}
+# Module-level dedup: {session_id: (dedup_key, monotonic_timestamp)}
 # Keyed by Streamlit session ID so it works across both script runs per navigation,
 # unlike session_state which can be cleared between the routing and render runs.
-_session_last_url: dict[str, str] = {}
+# Entries expire after _SESSION_DEDUP_TTL seconds, which:
+#   - prevents double-logging from Streamlit's automatic reruns (< 2 seconds apart)
+#   - allows re-logging a genuine refresh or revisit after the TTL elapses
+_SESSION_DEDUP_TTL: float = 30.0  # seconds
+_SESSION_PURGE_INTERVAL: int = 200  # purge stale entries every N writes
+_session_write_count: int = 0
+_session_last_url: dict[str, tuple[str, float]] = {}
+
+
+def _purge_stale_sessions() -> None:
+    """Remove session dedup entries older than _SESSION_DEDUP_TTL seconds."""
+    cutoff = time.monotonic() - _SESSION_DEDUP_TTL
+    stale = [k for k, (_, ts) in _session_last_url.items() if ts < cutoff]
+    for k in stale:
+        del _session_last_url[k]
 
 
 def _get_session_id() -> str:
@@ -173,9 +188,16 @@ def log_request() -> tuple[str, str]:
 
     session_id = _get_session_id()
     dedup_key = f"{current_url}|{ctx}"
-    if _session_last_url.get(session_id) == dedup_key:
-        return path, ""
-    _session_last_url[session_id] = dedup_key
+    cached = _session_last_url.get(session_id)
+    if cached is not None:
+        cached_key, ts = cached
+        if cached_key == dedup_key and time.monotonic() - ts < _SESSION_DEDUP_TTL:
+            return path, ""
+    global _session_write_count
+    _session_last_url[session_id] = (dedup_key, time.monotonic())
+    _session_write_count += 1
+    if _session_write_count % _SESSION_PURGE_INTERVAL == 0:
+        _purge_stale_sessions()
 
     try:
         query_params = dict(st.query_params)
