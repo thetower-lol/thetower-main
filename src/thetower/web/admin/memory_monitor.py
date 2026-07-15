@@ -82,12 +82,16 @@ def render_memory_monitor() -> None:
     span_days = max(1, (latest - earliest).days + 1)
 
     col1, col2 = st.columns([2, 1])
-    lookback_days = col1.slider(
-        "Show last N days",
-        min_value=1,
-        max_value=min(14, span_days),
-        value=min(2, span_days),
-    )
+    if span_days > 1:
+        lookback_days = col1.slider(
+            "Show last N days",
+            min_value=1,
+            max_value=min(14, span_days),
+            value=min(2, span_days),
+        )
+    else:
+        lookback_days = span_days
+        col1.caption(f"Showing all {span_days} day(s) of data available.")
     cutoff = latest - pd.Timedelta(days=lookback_days)
     filtered = df[df["timestamp"] >= cutoff]
 
