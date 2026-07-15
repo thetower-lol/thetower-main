@@ -14,6 +14,7 @@ import argparse
 import datetime
 import json
 import logging
+import logging.handlers
 import os
 import tempfile
 import time
@@ -21,6 +22,7 @@ from pathlib import Path
 
 import django
 import pandas as pd
+import psutil
 import schedule
 
 # Django setup
@@ -416,6 +418,94 @@ def process_tourney_group(league: str, group: list[Path], include_shun: bool = F
         logging.exception("Failed to update player_index from latest snapshot")
 
 
+_memory_logger = logging.getLogger("tower.memory")
+_memory_logger_configured = False
+
+
+def _setup_memory_logger() -> None:
+    global _memory_logger_configured
+    if _memory_logger_configured:
+        return
+    log_file = LIVE_BASE / "memory.log"
+    handler = logging.handlers.TimedRotatingFileHandler(
+        log_file,
+        when="d",
+        backupCount=14,
+        encoding="utf-8",
+        utc=True,
+    )
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    _memory_logger.addHandler(handler)
+    _memory_logger.setLevel(logging.INFO)
+    _memory_logger.propagate = False
+    _memory_logger_configured = True
+
+
+def _get_service_name(proc: psutil.Process) -> str | None:
+    """Return a human-readable service name based on process cmdline, or None if not a known tower service."""
+    try:
+        cmdline = " ".join(proc.cmdline())
+    except (psutil.AccessDenied, psutil.NoSuchProcess):
+        return None
+    if not cmdline:
+        return None
+
+    if "streamlit" in cmdline and "pages.py" in cmdline:
+        port = ""
+        try:
+            env_raw = Path(f"/proc/{proc.pid}/environ").read_bytes()
+            for kv in env_raw.split(b"\x00"):
+                if kv.startswith(b"STREAMLIT_SERVER_PORT="):
+                    port = kv.split(b"=", 1)[1].decode("utf-8", errors="replace")
+                    break
+        except Exception:
+            pass
+        if port == "8501":
+            return "streamlit_public"
+        if port == "8503":
+            return "streamlit_hidden"
+        return f"streamlit_{port}" if port else "streamlit_unknown"
+
+    patterns = [
+        ("thetower-botui", "bot_ui"),
+        ("thetower-bot", "discord_bot"),
+        ("thetower-web", "web_platform"),
+        ("thetower-backup", "backup"),
+        ("generate_placement_cache", "placement_cache"),
+        ("process_recalc_queue", "recalc_worker"),
+        ("process_zendesk_queue", "zendesk_queue"),
+        ("import_live_results", "import_live"),
+        ("import_results", "import_results"),
+        ("get_live_results", "get_live_results"),
+        ("get_results", "get_results"),
+    ]
+    for pattern, name in patterns:
+        if pattern in cmdline:
+            return name
+    return None
+
+
+def _log_memory_snapshot() -> None:
+    """Append an RSS memory snapshot for all known tower processes to the rotating memory log."""
+    _setup_memory_logger()
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    my_uid = os.getuid()
+    try:
+        for proc in psutil.process_iter(["pid", "uids"]):
+            try:
+                if proc.info["uids"].real != my_uid:
+                    continue
+                name = _get_service_name(proc)
+                if name is None:
+                    continue
+                rss_kb = proc.memory_info().rss // 1024
+                _memory_logger.info("%s,%s,%d,%d", now, name, proc.pid, rss_kb)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        logging.exception("Memory snapshot scan failed")
+
+
 def execute_once():
     logging.info("Starting placement cache generation run")
     # Read current desired include_shun value for placement cache pages so we
@@ -435,6 +525,7 @@ def execute_once():
         except Exception:
             logging.exception(f"Failed processing league {league}")
     logging.info("Placement cache generation run complete")
+    _log_memory_snapshot()
 
 
 def main():
