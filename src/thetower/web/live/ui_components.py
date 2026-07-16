@@ -4,6 +4,7 @@ import streamlit as st
 
 from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import check_live_entry
 from thetower.web.util import fmt_dt, get_league_selection, get_options
 
@@ -61,7 +62,9 @@ def render_data_status(league: str, page_key: str):
     if os.environ.get("HIDDEN_FEATURES"):
         try:
             include_shun = include_shun_enabled_for(page_key)
+            include_sus = include_sus_enabled_for(page_key)
             st.caption(f"🔍Including shunned players: {'Yes' if include_shun else 'No'}")
+            st.caption(f"🔍Including sus players: {'Yes' if include_sus else 'No'}")
         except Exception:
             pass
 

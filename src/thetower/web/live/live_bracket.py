@@ -10,6 +10,7 @@ import streamlit as st
 from thetower.backend.tourney_results.data import get_player_id_lookup
 from thetower.backend.tourney_results.formatting import BASE_URL, make_player_url
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
     format_time_ago,
     get_bracket_data,
@@ -43,9 +44,11 @@ def live_bracket():
         if hidden_features:
             try:
                 include_shun = include_shun_enabled_for("live_bracket")
+                include_sus = include_sus_enabled_for("live_bracket")
                 st.caption(f"🔍 Including shunned players: {'Yes' if include_shun else 'No'}")
+                st.caption(f"🔍 Including sus players: {'Yes' if include_sus else 'No'}")
             except Exception:
-                # Don't break the page if the shun config can't be read
+                # Don't break the page if the config can't be read
                 pass
     else:
         st.caption("📊 Data refresh time: Unknown")
@@ -53,7 +56,8 @@ def live_bracket():
     # Get live data and process brackets
     try:
         include_shun = include_shun_enabled_for("live_bracket")
-        df = get_live_data(league, include_shun)
+        include_sus = include_sus_enabled_for("live_bracket")
+        df = get_live_data(league, include_shun, include_sus)
         bracket_order, fullish_brackets = get_bracket_data(df)
         df_filtered = df[df.bracket.isin(fullish_brackets)].copy()  # no sniping
 
@@ -140,7 +144,8 @@ def live_bracket():
             for lg in ALL_LEAGUES:
                 try:
                     include_shun = include_shun_enabled_for("live_bracket")
-                    df_tmp = get_live_data(lg, include_shun)
+                    include_sus = include_sus_enabled_for("live_bracket")
+                    df_tmp = get_live_data(lg, include_shun, include_sus)
                     order_tmp, full_tmp = get_bracket_data(df_tmp)
                     df_tmp = df_tmp[df_tmp.bracket.isin(full_tmp)].copy()
                     if not df_tmp.empty:
@@ -173,7 +178,8 @@ def live_bracket():
                 league = all_matches[0][2]
                 # Reload data for the correct league
                 include_shun = include_shun_enabled_for("live_bracket")
-                df = get_live_data(league, include_shun)
+                include_sus = include_sus_enabled_for("live_bracket")
+                df = get_live_data(league, include_shun, include_sus)
                 bracket_order, fullish_brackets = get_bracket_data(df)
                 df = df[df.bracket.isin(fullish_brackets)].copy()
         elif selected_real_name_input.strip():
@@ -187,7 +193,8 @@ def live_bracket():
             for lg in ALL_LEAGUES:
                 try:
                     include_shun = include_shun_enabled_for("live_bracket")
-                    df_tmp = get_live_data(lg, include_shun)
+                    include_sus = include_sus_enabled_for("live_bracket")
+                    df_tmp = get_live_data(lg, include_shun, include_sus)
                     order_tmp, full_tmp = get_bracket_data(df_tmp)
                     df_tmp = df_tmp[df_tmp.bracket.isin(full_tmp)].copy()
                     if not df_tmp.empty:
@@ -224,7 +231,8 @@ def live_bracket():
                 league = all_matches[0][2]
                 # Reload data for the correct league
                 include_shun = include_shun_enabled_for("live_bracket")
-                df = get_live_data(league, include_shun)
+                include_sus = include_sus_enabled_for("live_bracket")
+                df = get_live_data(league, include_shun, include_sus)
                 bracket_order, fullish_brackets = get_bracket_data(df)
                 df = df[df.bracket.isin(fullish_brackets)].copy()
             # Store search term for later

@@ -6,6 +6,7 @@ import plotly.express as px
 import streamlit as st
 
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
     get_bracket_stats,
     get_cached_plot_data,
@@ -27,7 +28,8 @@ def bracket_analysis():
 
     # Get processed data
     include_shun = include_shun_enabled_for("live_bracket_analysis")
-    df, _, ldf, _, _ = get_processed_data(league, include_shun)
+    include_sus = include_sus_enabled_for("live_bracket_analysis")
+    df, _, ldf, _, _ = get_processed_data(league, include_shun, include_sus)
 
     # Sidebar option to include single-player brackets
     show_singles = st.sidebar.checkbox("Show full fidelity", value=False)

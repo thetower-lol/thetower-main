@@ -6,6 +6,7 @@ import plotly.express as px
 import streamlit as st
 
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
     get_processed_data,
     get_quantile_analysis_data,
@@ -34,7 +35,8 @@ def quantile_analysis():
     if options.current_player_id:
         try:
             include_shun = include_shun_enabled_for("live_placement_cache")
-            df, _, _, _, _ = get_processed_data(league, include_shun)
+            include_sus = include_sus_enabled_for("live_placement_cache")
+            df, _, _, _, _ = get_processed_data(league, include_shun, include_sus)
             player_df = df[df.player_id == options.current_player_id].copy()
             if not player_df.empty:
                 player_data = player_df

@@ -18,6 +18,7 @@ from thetower.backend.tourney_results.data import get_results_for_patch, get_sus
 from thetower.backend.tourney_results.formatting import am_i_sus, color_position__top, make_player_url, strike
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyResult
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.util import escape_df_html, get_league_selection, get_options
 
 
@@ -85,13 +86,13 @@ class Results:
             with st.expander("Writeup..."):
                 st.write(qs[0].overview)
 
-        self.df = get_tourneys(qs, offset=begin, limit=step)
+        self.df = get_tourneys(qs, offset=begin, limit=step, filter_sus=not include_sus_enabled_for("tourney_results"))
         self.df = self.df.reset_index(drop=True)
 
         if self.df.empty:
             return None
 
-        if not self.hidden_features:
+        if not self.hidden_features and not include_sus_enabled_for("tourney_results"):
             to_be_displayed = self.df[~self.df.id.isin(get_sus_ids())]
         else:
             to_be_displayed = self.df

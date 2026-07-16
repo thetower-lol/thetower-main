@@ -28,6 +28,7 @@ from thetower.backend.tourney_results.formatting import BASE_URL, color_position
 from thetower.backend.tourney_results.models import BattleCondition
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyRow
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import check_all_live_entry
 from thetower.web.historical.search import compute_search
 from thetower.web.util import escape_df_html, get_options
@@ -96,7 +97,7 @@ def compute_player_lookup():
         st.error(f"No results found for the player {player_id}.")
         return
 
-    if (is_sus(player_id) or is_support_flagged(player_id)) and not hidden_features:
+    if (is_sus(player_id) or is_support_flagged(player_id)) and not hidden_features and not include_sus_enabled_for("player"):
         st.error(f"No results found for the player {player_id}.")
         return
 

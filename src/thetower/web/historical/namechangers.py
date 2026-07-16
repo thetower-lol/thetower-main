@@ -8,6 +8,7 @@ from thetower.backend.tourney_results.constants import champ, legend
 from thetower.backend.tourney_results.data import get_sus_ids
 from thetower.backend.tourney_results.formatting import make_player_url
 from thetower.backend.tourney_results.models import TourneyRow
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 
 
 def get_namechangers():
@@ -48,7 +49,8 @@ def get_namechangers():
     # Filter out rows with no matching primary ID
     rdf = rdf[rdf.player_id.notna()]
 
-    rdf = rdf[~rdf.player_id.isin(get_sus_ids())]
+    if not include_sus_enabled_for("namechangers"):
+        rdf = rdf[~rdf.player_id.isin(get_sus_ids())]
     rdf = rdf.rename(columns={"player_id": "id", "nickname": "tourney_name"})
 
     combined_data = []

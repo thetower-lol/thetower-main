@@ -33,6 +33,7 @@ from thetower.backend.env_config import get_csv_data
 from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.data import get_player_id_lookup
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import get_time
 
 logging.basicConfig(level=logging.INFO)
@@ -240,7 +241,7 @@ def calculate_quantiles_for_cache(df: pd.DataFrame) -> dict:
     return {"ranks": ranks, "quantiles": quantiles, "data": results}
 
 
-def process_tourney_group(league: str, group: list[Path], include_shun: bool = False):
+def process_tourney_group(league: str, group: list[Path], include_shun: bool = False, include_sus: bool = False):
     """Process a single tourney group (chronological list of snapshot Paths).
 
     Writes a flat cache file named {tourney_date}_placement_cache.json under
@@ -278,8 +279,8 @@ def process_tourney_group(league: str, group: list[Path], include_shun: bool = F
                 last_processed_iso = None
                 bracket_times = {}
                 player_index = {}
-            elif payload.get("include_shun") != include_shun:
-                logging.info(f"include_shun changed for {league} {tourney_date}; forcing full regen")
+            elif payload.get("include_shun") != include_shun or payload.get("include_sus", False) != include_sus:
+                logging.info(f"include_shun/include_sus changed for {league} {tourney_date}; forcing full regen")
                 last_processed_iso = None
                 bracket_times = {}
                 player_index = {}
@@ -406,6 +407,7 @@ def process_tourney_group(league: str, group: list[Path], include_shun: bool = F
             "snapshot_iso": last_processed_iso,
             "last_processed_iso": last_processed_iso,
             "include_shun": include_shun,
+            "include_sus": include_sus,
             "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "bracket_creation_times": bracket_times,
             "player_index": player_index,
@@ -514,14 +516,15 @@ def execute_once():
     # a cache with the matching payload and the consumer will accept it.
     # This setting is used by both live_placement_analysis and live_quantile_analysis pages.
     include_shun = include_shun_enabled_for("live_placement_cache")
-    logging.info(f"Placement cache generation: include_shun={include_shun}")
+    include_sus = include_sus_enabled_for("live_placement_cache")
+    logging.info(f"Placement cache generation: include_shun={include_shun}, include_sus={include_sus}")
     for league in leagues:
         try:
             snaps = list_live_snapshots(league)
             groups = group_snapshots_into_tourneys(snaps)
             logging.info(f"Found {len(groups)} tourney groups for league {league}")
             for group in groups:
-                process_tourney_group(league, group, include_shun=include_shun)
+                process_tourney_group(league, group, include_shun=include_shun, include_sus=include_sus)
         except Exception:
             logging.exception(f"Failed processing league {league}")
     logging.info("Placement cache generation run complete")

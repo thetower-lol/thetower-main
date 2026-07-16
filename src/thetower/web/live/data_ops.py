@@ -19,6 +19,7 @@ from thetower.backend.tourney_results.archive_utils import (
 )
 from thetower.backend.tourney_results.data import get_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_ids
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import (
     get_full_brackets,
     get_latest_live_df,
@@ -56,13 +57,14 @@ def cache_data_if_enabled(**cache_args):
 
 
 @cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
-def get_live_data(league: str, shun: bool = False) -> pd.DataFrame:
+def get_live_data(league: str, shun: bool = False, sus: bool = False) -> pd.DataFrame:
     """
     Get and cache live tournament data.
 
     Args:
         league: League identifier
         shun: Whether to include shunned players
+        sus: Whether to include sus players
 
     Returns:
         DataFrame containing live tournament data
@@ -71,7 +73,9 @@ def get_live_data(league: str, shun: bool = False) -> pd.DataFrame:
     archive, expected_timestamps = _load_archive_df(league)
     df = reconstruct_all_snapshots(archive, extra_timestamps=expected_timestamps)
 
-    excluded_ids = get_sus_ids() | get_banned_ids()
+    excluded_ids = get_banned_ids()
+    if not sus:
+        excluded_ids = excluded_ids | get_sus_ids()
     if not shun:
         excluded_ids = excluded_ids | get_shun_ids()
     df = df[~df["player_id"].isin(excluded_ids)]
@@ -86,13 +90,14 @@ def get_live_data(league: str, shun: bool = False) -> pd.DataFrame:
 
 
 @cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
-def get_processed_data(league: str, shun: bool = False):
+def get_processed_data(league: str, shun: bool = False, sus: bool = False):
     """
     Get processed tournament data with common transformations.
 
     Args:
         league: League identifier
         shun: Whether to include shunned players
+        sus: Whether to include sus players
 
     Returns:
         Tuple containing:
@@ -102,7 +107,7 @@ def get_processed_data(league: str, shun: bool = False):
         - First moment datetime
         - Last moment datetime
     """
-    df = get_live_data(league, shun)
+    df = get_live_data(league, shun, sus)
 
     # Common data processing
     group_by_id = df.groupby("player_id")
@@ -198,9 +203,10 @@ def get_placement_analysis_data(league: str):
         - Latest time
         - Bracket creation times dict
     """
-    # Respect filesystem/JSON flag: include shunned players when configured
+    # Respect filesystem/JSON flags: include shunned/sus players when configured
     # for live_placement_cache (shared by live_placement_analysis and live_quantile_analysis)
     include_shun = include_shun_enabled_for("live_placement_cache")
+    include_sus = include_sus_enabled_for("live_placement_cache")
 
     # Try to use per-tourney cache: snapshots live in current_tourney/{league}/
     # and placement cache files live in {league}_live/ (permanent location).
@@ -237,10 +243,11 @@ def get_placement_analysis_data(league: str):
                     payload = json.loads(payload_text)
 
                     payload_include_shun = payload.get("include_shun")
+                    payload_include_sus = payload.get("include_sus", False)
                     logging.debug(f"get_placement_analysis_data: payload include_shun={payload_include_shun}, desired include_shun={include_shun}")
 
-                    # only accept cache if include_shun matches what we're using
-                    if payload_include_shun == include_shun:
+                    # only accept cache if include_shun and include_sus both match
+                    if payload_include_shun == include_shun and payload_include_sus == include_sus:
                         # Ensure the cache was generated against the latest snapshot.
                         # If the cache refers to a different snapshot than the
                         # latest available CSV, refuse to use it and surface a
@@ -272,7 +279,7 @@ def get_placement_analysis_data(league: str):
                         logging.debug(f"get_placement_analysis_data: parsed {len(bracket_creation_times)} bracket_creation_times from cache")
 
                         # Load only latest snapshot to build the live DataFrame for analysis
-                        df_latest = get_latest_live_df(league, include_shun)
+                        df_latest = get_latest_live_df(league, include_shun, include_sus)
                         logging.debug(f"get_placement_analysis_data: df_latest.shape={getattr(df_latest, 'shape', None)}")
 
                         # compute fullish brackets from latest snapshot
@@ -290,7 +297,7 @@ def get_placement_analysis_data(league: str):
                         tourney_start_date = found_date or tourney_date
                         return df, latest_time, bracket_creation_times, tourney_start_date
                     else:
-                        logging.debug("get_placement_analysis_data: cache include_shun mismatch; rejecting cache")
+                        logging.debug("get_placement_analysis_data: cache include_shun/include_sus mismatch; rejecting cache")
                 except Exception:
                     logging.exception(f"Failed to read/parse placement cache {cache_file}; will fall back to raising ValueError")
             else:
@@ -308,12 +315,13 @@ def get_placement_analysis_data(league: str):
                 try:
                     payload = json.loads(fallback_cache.read_text(encoding="utf8"))
                     payload_include_shun = payload.get("include_shun")
-                    if payload_include_shun == include_shun:
+                    payload_include_sus = payload.get("include_sus", False)
+                    if payload_include_shun == include_shun and payload_include_sus == include_sus:
                         raw_times = payload.get("bracket_creation_times", {}) or {}
                         bracket_creation_times = {
                             br: (datetime.datetime.fromisoformat(ts) if isinstance(ts, str) else ts) for br, ts in raw_times.items()
                         }
-                        df_latest = get_latest_live_df(league, include_shun)
+                        df_latest = get_latest_live_df(league, include_shun, include_sus)
                         bracket_counts = dict(df_latest.groupby("bracket").player_id.unique().map(lambda player_ids: len(player_ids)))
                         fullish_brackets = [bracket for bracket, count in bracket_counts.items() if count >= 28]
                         df = df_latest[df_latest.bracket.isin(fullish_brackets)].copy()
@@ -322,7 +330,7 @@ def get_placement_analysis_data(league: str):
                         logging.debug(f"get_placement_analysis_data: archive fallback succeeded, df.shape={df.shape}")
                         return df, latest_time, bracket_creation_times, found_date
                     else:
-                        logging.debug("get_placement_analysis_data: archive fallback cache include_shun mismatch")
+                        logging.debug("get_placement_analysis_data: archive fallback cache include_shun/include_sus mismatch")
                 except Exception:
                     logging.exception("get_placement_analysis_data: archive fallback cache read failed")
             else:
@@ -532,8 +540,9 @@ def get_quantile_analysis_data(league: str):
         - tourney_start_date: Tournament start date string
         - latest_time: Latest timestamp from the data
     """
-    # Respect filesystem/JSON flag: shared setting for all placement cache pages
+    # Respect filesystem/JSON flags: shared setting for all placement cache pages
     include_shun = include_shun_enabled_for("live_placement_cache")
+    include_sus = include_sus_enabled_for("live_placement_cache")
 
     # Try to use per-tourney cache: snapshots live in current_tourney/{league}/
     # and placement cache files live in {league}_live/ (permanent location).
@@ -569,10 +578,11 @@ def get_quantile_analysis_data(league: str):
                     payload = json.loads(payload_text)
 
                     payload_include_shun = payload.get("include_shun")
+                    payload_include_sus = payload.get("include_sus", False)
                     logging.debug(f"get_quantile_analysis_data: payload include_shun={payload_include_shun}, desired include_shun={include_shun}")
 
-                    # Only accept cache if include_shun matches
-                    if payload_include_shun == include_shun:
+                    # Only accept cache if include_shun and include_sus both match
+                    if payload_include_shun == include_shun and payload_include_sus == include_sus:
                         # Check if cache has quantile data
                         quantile_data = payload.get("quantile_data")
                         if not quantile_data or not quantile_data.get("data"):
@@ -616,14 +626,14 @@ def get_quantile_analysis_data(league: str):
                         quantile_df = pd.DataFrame(results)
 
                         # Get latest timestamp from a quick CSV read
-                        df_latest = get_latest_live_df(league, include_shun)
+                        df_latest = get_latest_live_df(league, include_shun, include_sus)
                         latest_time = df_latest["datetime"].max()
 
                         tourney_start_date = found_date or tourney_date
                         logging.debug(f"Using quantile cache for {league} {tourney_start_date}")
                         return quantile_df, tourney_start_date, latest_time
                     else:
-                        logging.debug("get_quantile_analysis_data: cache include_shun mismatch; rejecting cache")
+                        logging.debug("get_quantile_analysis_data: cache include_shun/include_sus mismatch; rejecting cache")
                 except Exception:
                     logging.exception(f"Failed to read/parse quantile cache {cache_file}")
             else:
@@ -640,7 +650,8 @@ def get_quantile_analysis_data(league: str):
                 try:
                     payload = json.loads(fallback_cache.read_text(encoding="utf8"))
                     payload_include_shun = payload.get("include_shun")
-                    if payload_include_shun == include_shun:
+                    payload_include_sus = payload.get("include_sus", False)
+                    if payload_include_shun == include_shun and payload_include_sus == include_sus:
                         quantile_data = payload.get("quantile_data")
                         if not quantile_data or not quantile_data.get("data"):
                             logging.warning("get_quantile_analysis_data: archive fallback cache has no quantile_data")
@@ -655,14 +666,14 @@ def get_quantile_analysis_data(league: str):
                                         results.append({"rank": rank, "quantile": q, "waves": wave_value})
                             if results:
                                 quantile_df = pd.DataFrame(results)
-                                df_latest = get_latest_live_df(league, include_shun)
+                                df_latest = get_latest_live_df(league, include_shun, include_sus)
                                 latest_time = df_latest["datetime"].max()
                                 logging.debug(f"get_quantile_analysis_data: archive fallback succeeded for {found_date}")
                                 return quantile_df, found_date, latest_time
                             else:
                                 logging.warning("get_quantile_analysis_data: archive fallback cache has no valid results")
                     else:
-                        logging.debug("get_quantile_analysis_data: archive fallback cache include_shun mismatch")
+                        logging.debug("get_quantile_analysis_data: archive fallback cache include_shun/include_sus mismatch")
                 except Exception:
                     logging.exception("get_quantile_analysis_data: archive fallback cache read failed")
             else:

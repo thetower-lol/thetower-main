@@ -116,7 +116,7 @@ if hidden_features:
     ]
 
     admin_moderation_pages = [
-        st.Page("admin/shun_admin.py", title="Shun List Management", icon="🛑", url_path="shunadmin"),
+        st.Page("admin/visibility_admin.py", title="Moderation Visibility Config", icon="🛑", url_path="visibilityadmin"),
         st.Page("admin/sus_moderation.py", title="Sus Moderation", icon="🚫", url_path="susmoderation"),
         st.Page("admin/multiple_moderation.py", title="Multiple Moderation", icon="⚠️", url_path="multiplemoderation"),
         st.Page("admin/league_progression.py", title="League Progression", icon="📈", url_path="leagueprogression"),

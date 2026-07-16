@@ -22,6 +22,7 @@ from .constants import leagues, legend
 from .data import get_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_ids, get_tourneys
 from .models import PromptTemplate, TourneyResult, TourneyRow
 from .shun_config import include_shun_enabled_for
+from .sus_config import include_sus_enabled_for
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -135,10 +136,11 @@ def create_tourney_rows(tourney_result: TourneyResult) -> None:
         logging.info(f"There are {len(df.query('tourney_name.str.len() == 0'))} blank tourney names.")
         df.loc[df["tourney_name"].str.len() == 0, "tourney_name"] = df["id"]
 
-    # Exclude suspicious and banned IDs. Also exclude shunned IDs unless the
-    # per-operation shun flag (configured via include_shun.json) allows inclusion.
-    # for create_tourney_rows is enabled.
-    excluded_ids = get_sus_ids() | get_banned_ids()
+    # Exclude banned IDs always. Exclude sus IDs unless include_sus.json enables them
+    # for create_tourney_rows. Exclude shunned IDs unless include_shun.json enables them.
+    excluded_ids = get_banned_ids()
+    if not include_sus_enabled_for("create_tourney_rows"):
+        excluded_ids = excluded_ids | get_sus_ids()
     if not include_shun_enabled_for("create_tourney_rows"):
         excluded_ids = excluded_ids | get_shun_ids()
     positions = calculate_positions(df.id, df.index, df.wave, excluded_ids)
@@ -222,10 +224,11 @@ def reposition(tourney_result: TourneyResult, testrun: bool = False, verbose: bo
     waves = [datum[1] for datum in bulk_data]
     nicknames = [datum[2] for datum in bulk_data]
 
-    # Exclude suspicious and banned IDs. Also exclude shunned IDs unless the
-    # per-operation shun flag (configured via include_shun.json) allows inclusion.
-    # for reposition is enabled.
-    excluded_ids = get_sus_ids() | get_banned_ids()
+    # Exclude banned IDs always. Exclude sus IDs unless include_sus.json enables them
+    # for reposition. Exclude shunned IDs unless include_shun.json enables them.
+    excluded_ids = get_banned_ids()
+    if not include_sus_enabled_for("reposition"):
+        excluded_ids = excluded_ids | get_sus_ids()
     if not include_shun_enabled_for("reposition"):
         excluded_ids = excluded_ids | get_shun_ids()
     positions = calculate_positions(ids, indexes, waves, excluded_ids)
@@ -366,7 +369,7 @@ def get_full_brackets(df: pd.DataFrame, anti_snipe: bool = True) -> tuple[list[s
     return bracket_order, fullish_brackets
 
 
-def get_latest_live_df(league: str, shun: bool = False) -> pd.DataFrame:
+def get_latest_live_df(league: str, shun: bool = False, sus: bool = False) -> pd.DataFrame:
     """Load only the latest non-empty live tournament CSV for a league.
 
     This is a slimmer alternative to `get_live_df` when callers only need the
@@ -412,7 +415,9 @@ def get_latest_live_df(league: str, shun: bool = False) -> pd.DataFrame:
         lookup = get_player_id_lookup()
         df["real_name"] = [lookup.get(pid, name) for pid, name in zip(df.player_id, df.name)]
         df["real_name"] = df["real_name"].astype(str)
-        excluded_ids = get_sus_ids() | get_banned_ids()
+        excluded_ids = get_banned_ids()
+        if not sus:
+            excluded_ids = excluded_ids | get_sus_ids()
         if not shun:
             excluded_ids = excluded_ids | get_shun_ids()
         df = df[~df.player_id.isin(excluded_ids)].reset_index(drop=True)
@@ -438,8 +443,10 @@ def get_latest_live_df(league: str, shun: bool = False) -> pd.DataFrame:
     df["real_name"] = [lookup.get(id, name) for id, name in zip(df.player_id, df.name)]
     df["real_name"] = df["real_name"].astype(str)
 
-    # Always exclude banned and suspicious IDs, optionally exclude shunned IDs
-    excluded_ids = get_sus_ids() | get_banned_ids()
+    # Optionally exclude sus IDs; always exclude banned IDs; optionally exclude shunned IDs
+    excluded_ids = get_banned_ids()
+    if not sus:
+        excluded_ids = excluded_ids | get_sus_ids()
     if not shun:
         excluded_ids = excluded_ids | get_shun_ids()
     df = df[~df.player_id.isin(excluded_ids)]

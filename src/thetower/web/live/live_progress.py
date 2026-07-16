@@ -10,6 +10,7 @@ from thetower.backend.tourney_results.constants import champ
 from thetower.backend.tourney_results.data import get_tourneys
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
     get_processed_data,
     process_display_names,
@@ -32,7 +33,8 @@ def live_progress():
 
     # Get processed data
     include_shun = include_shun_enabled_for("live_progress")
-    df, tdf, ldf, first_moment, last_moment = get_processed_data(league, include_shun)
+    include_sus = include_sus_enabled_for("live_progress")
+    df, tdf, ldf, first_moment, last_moment = get_processed_data(league, include_shun, include_sus)
 
     # Process display names for better visualization
     tdf = process_display_names(tdf)

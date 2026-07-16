@@ -21,6 +21,7 @@ from thetower.backend.tourney_results.models import BattleCondition
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import get_latest_live_df
 from thetower.web.historical.search import compute_search
 from thetower.web.util import escape_df_html, get_league_selection
@@ -121,7 +122,8 @@ def compute_comparison(player_id=None, canvas=st):
         canvas.code(f"https://{BASE_URL}/comparison?" + urlencode({"compare": users}, doseq=True))
 
     player_ids = PlayerId.objects.filter(id__in=users).select_related("game_instance__player")
-    player_ids = player_ids.exclude(id__in=sus_ids)
+    if not include_sus_enabled_for("comparison"):
+        player_ids = player_ids.exclude(id__in=sus_ids)
     # Get all game instances from the player_ids
     game_instances = [pid.game_instance for pid in player_ids if pid.game_instance]
     # Get all known players from these game instances
@@ -321,7 +323,8 @@ def get_bracket_players(player_id: str) -> tuple[list[str], str | None]:
         # Get live data for all available leagues
         for league in leagues:
             include_shun = include_shun_enabled_for("comparison")
-            df = get_latest_live_df(league, include_shun)
+            include_sus = include_sus_enabled_for("comparison")
+            df = get_latest_live_df(league, include_shun, include_sus)
 
             # Find if player is in this dataframe
             player_df = df[df.player_id == player_id]

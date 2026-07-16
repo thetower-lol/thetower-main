@@ -8,6 +8,7 @@ from thetower.backend.tourney_results.constants import champ, how_many_results_p
 from thetower.backend.tourney_results.data import get_tourneys
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import get_tourney_state
 from thetower.web.live.data_ops import format_time_ago, get_data_refresh_timestamp, get_processed_data, require_tournament_data
 from thetower.web.live.ui_components import setup_common_ui
@@ -33,7 +34,9 @@ def live_results():
         if hidden_features:
             try:
                 include_shun = include_shun_enabled_for("live_results")
+                include_sus = include_sus_enabled_for("live_results")
                 st.caption(f"🔍 Including shunned players: {'Yes' if include_shun else 'No'}")
+                st.caption(f"🔍 Including sus players: {'Yes' if include_sus else 'No'}")
             except Exception:
                 pass
     else:
@@ -41,7 +44,8 @@ def live_results():
 
     # Get processed data
     include_shun = include_shun_enabled_for("live_results")
-    df, tdf, ldf, _, _ = get_processed_data(league, include_shun)
+    include_sus = include_sus_enabled_for("live_results")
+    df, tdf, ldf, _, _ = get_processed_data(league, include_shun, include_sus)
 
     # Get reference data for joined calculation
     qs = TourneyResult.objects.filter(league=league, public=True).order_by("-date")
