@@ -47,9 +47,7 @@ def cache_data_if_enabled(**cache_args):
         @wraps(func)
         def wrapper(*args, **kwargs):
             if is_caching_disabled():
-                logging.info(f"Cache disabled for {func.__name__}")
                 return func(*args, **kwargs)
-            logging.info(f"Cache enabled for {func.__name__}")
             return cached_func(*args, **kwargs)
 
         return wrapper
@@ -208,20 +206,20 @@ def get_placement_analysis_data(league: str):
     # and placement cache files live in {league}_live/ (permanent location).
     try:
         csv_data = get_csv_data()
-        logging.info(f"get_placement_analysis_data: CSV_DATA={csv_data!s}")
+        logging.debug(f"get_placement_analysis_data: CSV_DATA={csv_data!s}")
         staging_path = Path(csv_data) / "current_tourney" / league
         cache_dir = Path(csv_data) / f"{league}_live"
-        logging.info(f"get_placement_analysis_data: staging_path={staging_path}")
+        logging.debug(f"get_placement_analysis_data: staging_path={staging_path}")
 
         all_files = sorted([p for p in staging_path.glob("*.csv.gz") if p.stat().st_size > 0], key=get_time)
-        logging.info(f"get_placement_analysis_data: found {len(all_files)} non-empty CSV snapshots in {staging_path}")
+        logging.debug(f"get_placement_analysis_data: found {len(all_files)} non-empty CSV snapshots in {staging_path}")
 
         if all_files:
             last_file = all_files[-1]
-            logging.info(f"get_placement_analysis_data: last_file={last_file}")
+            logging.debug(f"get_placement_analysis_data: last_file={last_file}")
             last_time = get_time(last_file)
             tourney_date = last_time.date().isoformat()
-            logging.info(f"get_placement_analysis_data: last_time={last_time}, initial tourney_date={tourney_date}")
+            logging.debug(f"get_placement_analysis_data: last_time={last_time}, initial tourney_date={tourney_date}")
 
             # Placement cache files are written using the tourney start date.
             # Pick the most recent cache file in the cache dir; the start date
@@ -229,17 +227,17 @@ def get_placement_analysis_data(league: str):
             sorted_caches = sorted(cache_dir.glob("*_placement_cache.json"), key=lambda p: p.name, reverse=True)
             cache_file = sorted_caches[0] if sorted_caches else None
             found_date = cache_file.name.replace("_placement_cache.json", "") if cache_file else None
-            logging.info(f"get_placement_analysis_data: selected cache_file={cache_file} (found_date={found_date})")
+            logging.debug(f"get_placement_analysis_data: selected cache_file={cache_file} (found_date={found_date})")
 
             if cache_file:
-                logging.info(f"get_placement_analysis_data: cache_file exists: {cache_file}")
+                logging.debug(f"get_placement_analysis_data: cache_file exists: {cache_file}")
                 try:
                     payload_text = cache_file.read_text(encoding="utf8")
-                    logging.info(f"get_placement_analysis_data: cache_file size={len(payload_text)} bytes")
+                    logging.debug(f"get_placement_analysis_data: cache_file size={len(payload_text)} bytes")
                     payload = json.loads(payload_text)
 
                     payload_include_shun = payload.get("include_shun")
-                    logging.info(f"get_placement_analysis_data: payload include_shun={payload_include_shun}, desired include_shun={include_shun}")
+                    logging.debug(f"get_placement_analysis_data: payload include_shun={payload_include_shun}, desired include_shun={include_shun}")
 
                     # only accept cache if include_shun matches what we're using
                     if payload_include_shun == include_shun:
@@ -258,7 +256,7 @@ def get_placement_analysis_data(league: str):
                             payload_snapshot_name = None
 
                         last_snapshot_name = last_file.name
-                        logging.info(
+                        logging.debug(
                             f"get_placement_analysis_data: payload snapshot name={payload_snapshot_name}, latest snapshot name={last_snapshot_name}"
                         )
 
@@ -271,42 +269,42 @@ def get_placement_analysis_data(league: str):
                         bracket_creation_times = {
                             br: (datetime.datetime.fromisoformat(ts) if isinstance(ts, str) else ts) for br, ts in raw_times.items()
                         }
-                        logging.info(f"get_placement_analysis_data: parsed {len(bracket_creation_times)} bracket_creation_times from cache")
+                        logging.debug(f"get_placement_analysis_data: parsed {len(bracket_creation_times)} bracket_creation_times from cache")
 
                         # Load only latest snapshot to build the live DataFrame for analysis
                         df_latest = get_latest_live_df(league, include_shun)
-                        logging.info(f"get_placement_analysis_data: df_latest.shape={getattr(df_latest, 'shape', None)}")
+                        logging.debug(f"get_placement_analysis_data: df_latest.shape={getattr(df_latest, 'shape', None)}")
 
                         # compute fullish brackets from latest snapshot
                         bracket_counts = dict(df_latest.groupby("bracket").player_id.unique().map(lambda player_ids: len(player_ids)))
                         fullish_brackets = [bracket for bracket, count in bracket_counts.items() if count >= 28]
-                        logging.info(f"get_placement_analysis_data: found {len(fullish_brackets)} fullish_brackets (>=28 players)")
+                        logging.debug(f"get_placement_analysis_data: found {len(fullish_brackets)} fullish_brackets (>=28 players)")
 
                         df = df_latest[df_latest.bracket.isin(fullish_brackets)].copy()
                         df["real_name"] = df["real_name"].astype("str")
                         latest_time = df["datetime"].max()
-                        logging.info(f"get_placement_analysis_data: filtered df.shape={getattr(df, 'shape', None)}, latest_time={latest_time}")
+                        logging.debug(f"get_placement_analysis_data: filtered df.shape={getattr(df, 'shape', None)}, latest_time={latest_time}")
 
-                        logging.info(f"Using placement cache for {league} {tourney_date}")
+                        logging.debug(f"Using placement cache for {league} {tourney_date}")
                         # Return the tourney start date (the cache is keyed by start date)
                         tourney_start_date = found_date or tourney_date
                         return df, latest_time, bracket_creation_times, tourney_start_date
                     else:
-                        logging.info("get_placement_analysis_data: cache include_shun mismatch; rejecting cache")
+                        logging.debug("get_placement_analysis_data: cache include_shun mismatch; rejecting cache")
                 except Exception:
                     logging.exception(f"Failed to read/parse placement cache {cache_file}; will fall back to raising ValueError")
             else:
-                logging.info(f"get_placement_analysis_data: cache_file does not exist: {cache_file}")
+                logging.debug(f"get_placement_analysis_data: cache_file does not exist: {cache_file}")
 
         else:
             # No staging snapshots — fall back to the most recent placement cache in cache_dir.
             # get_latest_live_df itself falls back to the archive when staging is empty.
-            logging.info(f"get_placement_analysis_data: no staging snapshots; searching for most recent cache in {cache_dir}")
+            logging.debug(f"get_placement_analysis_data: no staging snapshots; searching for most recent cache in {cache_dir}")
             cache_files = sorted(cache_dir.glob("*_placement_cache.json"), key=lambda p: p.name, reverse=True)
             if cache_files:
                 fallback_cache = cache_files[0]
                 found_date = fallback_cache.name.replace("_placement_cache.json", "")
-                logging.info(f"get_placement_analysis_data: archive fallback using cache {fallback_cache.name}")
+                logging.debug(f"get_placement_analysis_data: archive fallback using cache {fallback_cache.name}")
                 try:
                     payload = json.loads(fallback_cache.read_text(encoding="utf8"))
                     payload_include_shun = payload.get("include_shun")
@@ -321,14 +319,14 @@ def get_placement_analysis_data(league: str):
                         df = df_latest[df_latest.bracket.isin(fullish_brackets)].copy()
                         df["real_name"] = df["real_name"].astype("str")
                         latest_time = df["datetime"].max()
-                        logging.info(f"get_placement_analysis_data: archive fallback succeeded, df.shape={df.shape}")
+                        logging.debug(f"get_placement_analysis_data: archive fallback succeeded, df.shape={df.shape}")
                         return df, latest_time, bracket_creation_times, found_date
                     else:
-                        logging.info("get_placement_analysis_data: archive fallback cache include_shun mismatch")
+                        logging.debug("get_placement_analysis_data: archive fallback cache include_shun mismatch")
                 except Exception:
                     logging.exception("get_placement_analysis_data: archive fallback cache read failed")
             else:
-                logging.info(f"get_placement_analysis_data: no placement cache files found in {cache_dir}")
+                logging.debug(f"get_placement_analysis_data: no placement cache files found in {cache_dir}")
 
     except Exception:
         logging.exception("Failed to check placement cache path or list snapshots; will fall back to raising ValueError")
@@ -541,37 +539,37 @@ def get_quantile_analysis_data(league: str):
     # and placement cache files live in {league}_live/ (permanent location).
     try:
         csv_data = get_csv_data()
-        logging.info(f"get_quantile_analysis_data: CSV_DATA={csv_data!s}")
+        logging.debug(f"get_quantile_analysis_data: CSV_DATA={csv_data!s}")
         staging_path = Path(csv_data) / "current_tourney" / league
         cache_dir = Path(csv_data) / f"{league}_live"
-        logging.info(f"get_quantile_analysis_data: staging_path={staging_path}")
+        logging.debug(f"get_quantile_analysis_data: staging_path={staging_path}")
 
         all_files = sorted([p for p in staging_path.glob("*.csv.gz") if p.stat().st_size > 0], key=get_time)
-        logging.info(f"get_quantile_analysis_data: found {len(all_files)} non-empty CSV snapshots in {staging_path}")
+        logging.debug(f"get_quantile_analysis_data: found {len(all_files)} non-empty CSV snapshots in {staging_path}")
 
         if all_files:
             last_file = all_files[-1]
-            logging.info(f"get_quantile_analysis_data: last_file={last_file}")
+            logging.debug(f"get_quantile_analysis_data: last_file={last_file}")
             last_time = get_time(last_file)
             tourney_date = last_time.date().isoformat()
-            logging.info(f"get_quantile_analysis_data: last_time={last_time}, initial tourney_date={tourney_date}")
+            logging.debug(f"get_quantile_analysis_data: last_time={last_time}, initial tourney_date={tourney_date}")
 
             # Pick the most recent cache file in the cache dir; the start date
             # can be several days before the latest snapshot (tournaments run 4-5 days).
             sorted_caches = sorted(cache_dir.glob("*_placement_cache.json"), key=lambda p: p.name, reverse=True)
             cache_file = sorted_caches[0] if sorted_caches else None
             found_date = cache_file.name.replace("_placement_cache.json", "") if cache_file else None
-            logging.info(f"get_quantile_analysis_data: selected cache_file={cache_file} (found_date={found_date})")
+            logging.debug(f"get_quantile_analysis_data: selected cache_file={cache_file} (found_date={found_date})")
 
             if cache_file:
-                logging.info(f"get_quantile_analysis_data: cache_file exists: {cache_file}")
+                logging.debug(f"get_quantile_analysis_data: cache_file exists: {cache_file}")
                 try:
                     payload_text = cache_file.read_text(encoding="utf8")
-                    logging.info(f"get_quantile_analysis_data: cache_file size={len(payload_text)} bytes")
+                    logging.debug(f"get_quantile_analysis_data: cache_file size={len(payload_text)} bytes")
                     payload = json.loads(payload_text)
 
                     payload_include_shun = payload.get("include_shun")
-                    logging.info(f"get_quantile_analysis_data: payload include_shun={payload_include_shun}, desired include_shun={include_shun}")
+                    logging.debug(f"get_quantile_analysis_data: payload include_shun={payload_include_shun}, desired include_shun={include_shun}")
 
                     # Only accept cache if include_shun matches
                     if payload_include_shun == include_shun:
@@ -592,7 +590,7 @@ def get_quantile_analysis_data(league: str):
                             payload_snapshot_name = None
 
                         last_snapshot_name = last_file.name
-                        logging.info(
+                        logging.debug(
                             f"get_quantile_analysis_data: payload snapshot name={payload_snapshot_name}, latest snapshot name={last_snapshot_name}"
                         )
 
@@ -622,23 +620,23 @@ def get_quantile_analysis_data(league: str):
                         latest_time = df_latest["datetime"].max()
 
                         tourney_start_date = found_date or tourney_date
-                        logging.info(f"Using quantile cache for {league} {tourney_start_date}")
+                        logging.debug(f"Using quantile cache for {league} {tourney_start_date}")
                         return quantile_df, tourney_start_date, latest_time
                     else:
-                        logging.info("get_quantile_analysis_data: cache include_shun mismatch; rejecting cache")
+                        logging.debug("get_quantile_analysis_data: cache include_shun mismatch; rejecting cache")
                 except Exception:
                     logging.exception(f"Failed to read/parse quantile cache {cache_file}")
             else:
-                logging.info("get_quantile_analysis_data: cache_file does not exist")
+                logging.debug("get_quantile_analysis_data: cache_file does not exist")
 
         else:
             # No staging snapshots — fall back to the most recent placement cache in cache_dir.
-            logging.info(f"get_quantile_analysis_data: no staging snapshots; searching for most recent cache in {cache_dir}")
+            logging.debug(f"get_quantile_analysis_data: no staging snapshots; searching for most recent cache in {cache_dir}")
             cache_files = sorted(cache_dir.glob("*_placement_cache.json"), key=lambda p: p.name, reverse=True)
             if cache_files:
                 fallback_cache = cache_files[0]
                 found_date = fallback_cache.name.replace("_placement_cache.json", "")
-                logging.info(f"get_quantile_analysis_data: archive fallback using cache {fallback_cache.name}")
+                logging.debug(f"get_quantile_analysis_data: archive fallback using cache {fallback_cache.name}")
                 try:
                     payload = json.loads(fallback_cache.read_text(encoding="utf8"))
                     payload_include_shun = payload.get("include_shun")
@@ -659,16 +657,16 @@ def get_quantile_analysis_data(league: str):
                                 quantile_df = pd.DataFrame(results)
                                 df_latest = get_latest_live_df(league, include_shun)
                                 latest_time = df_latest["datetime"].max()
-                                logging.info(f"get_quantile_analysis_data: archive fallback succeeded for {found_date}")
+                                logging.debug(f"get_quantile_analysis_data: archive fallback succeeded for {found_date}")
                                 return quantile_df, found_date, latest_time
                             else:
                                 logging.warning("get_quantile_analysis_data: archive fallback cache has no valid results")
                     else:
-                        logging.info("get_quantile_analysis_data: archive fallback cache include_shun mismatch")
+                        logging.debug("get_quantile_analysis_data: archive fallback cache include_shun mismatch")
                 except Exception:
                     logging.exception("get_quantile_analysis_data: archive fallback cache read failed")
             else:
-                logging.info(f"get_quantile_analysis_data: no placement cache files found in {cache_dir}")
+                logging.debug(f"get_quantile_analysis_data: no placement cache files found in {cache_dir}")
 
     except Exception:
         logging.exception("Failed to check quantile cache path or list snapshots")

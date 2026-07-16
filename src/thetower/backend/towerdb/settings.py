@@ -182,7 +182,7 @@ LOGGING = {
     },
     "loggers": {
         "django.db.backends": {
-            "level": "DEBUG",
+            "level": "WARNING",
             "handlers": ["console"],
         },
     },
