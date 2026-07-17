@@ -16,10 +16,12 @@ class APIKeyPermission(permissions.BasePermission):
     def has_permission(self, request, view):
         api_key = request.headers.get("X-API-KEY")
         if not api_key:
+            log_api_request("[No API Key]", "-", "-", False, note="No X-API-KEY header")
             return False
         try:
             key_obj = ApiKey.objects.get(key=api_key, active=True)
         except ApiKey.DoesNotExist:
+            log_api_request("[Invalid Key]", "-", "-", False, note="API key not found or inactive")
             return False
         # Update last_used_at
         key_obj.last_used_at = datetime.now(timezone.utc)
@@ -27,6 +29,7 @@ class APIKeyPermission(permissions.BasePermission):
         user = key_obj.user
         # Check user permission for changing ModerationRecord
         if not user.has_perm("sus.add_moderationrecord"):
+            log_api_request(user, "-", "-", False, note="User lacks sus.add_moderationrecord permission")
             return False
         request.api_key_user = user
         request.api_key_obj = key_obj
@@ -52,12 +55,17 @@ class BanPlayerAPI(APIView):
     def post(self, request):
         serializer = BanPlayerSerializer(data=request.data)
         if not serializer.is_valid():
+            player_id_raw = request.data.get("player_id", "")
+            action_raw = request.data.get("action", "")
+            player_id_log = player_id_raw if player_id_raw else "[Missing Player ID]"
+            action_log = action_raw if action_raw else "[Unknown Action]"
+            error_parts = [f"{field}: {'; '.join(str(e) for e in errs)}" for field, errs in serializer.errors.items()]
             log_api_request(
                 getattr(request, "api_key_user", "UNKNOWN"),
-                request.data.get("player_id", ""),
-                request.data.get("action", ""),
+                player_id_log,
+                action_log,
                 False,
-                note="Invalid data",
+                note="; ".join(error_parts),
             )
             return Response({"detail": "Invalid data", "errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
