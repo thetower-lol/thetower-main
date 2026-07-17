@@ -28,6 +28,9 @@ class APIKeyPermission(permissions.BasePermission):
         key_obj.save(update_fields=["last_used_at"])
         user = key_obj.user
         # Check user permission for changing ModerationRecord
+        if not user.is_active:
+            log_api_request(user, "-", "-", False, note="User account is inactive")
+            return False
         if not user.has_perm("sus.add_moderationrecord"):
             log_api_request(user, "-", "-", False, note="User lacks sus.add_moderationrecord permission")
             return False
