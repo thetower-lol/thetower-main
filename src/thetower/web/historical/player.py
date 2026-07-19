@@ -356,30 +356,30 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
     )
 
     # Show live links only if player joined the recent tourney
+    button_style = "display: inline-block; padding: 8px 16px; background-color: #FF4B4B; color: white; text-align: center; text-decoration: none; border-radius: 4px; font-weight: 500;"
+    center_style = "text-align: center; margin-bottom: 1rem;"
+
     if check_all_live_entry(player_df.iloc[0].id):
         live_col1, live_col2, live_col3, live_col4 = info_tab.columns(4)
 
-        button_style = "display: inline-block; padding: 8px 16px; background-color: #FF4B4B; color: white; text-align: center; text-decoration: none; border-radius: 4px; font-weight: 500;"
-        center_style = "text-align: center; margin-bottom: 1rem;"
-
         live_col1.markdown(
-            f'<div style="{center_style}"><a href="{bracket_url}" style="{button_style}">Bracket View</a></div>', unsafe_allow_html=True
+            f'<div style="{center_style}"><a href="{bracket_url}" style="{button_style}">Live Bracket View</a></div>', unsafe_allow_html=True
         )
         live_col2.markdown(
-            f'<div style="{center_style}"><a href="{comparison_url}" style="{button_style}">Bracket Comparison</a></div>', unsafe_allow_html=True
+            f'<div style="{center_style}"><a href="{comparison_url}" style="{button_style}">Live Bracket Comparison</a></div>', unsafe_allow_html=True
         )
         live_col3.markdown(
-            f'<div style="{center_style}"><a href="{placement_url}" style="{button_style}">Placement Analysis</a></div>', unsafe_allow_html=True
+            f'<div style="{center_style}"><a href="{placement_url}" style="{button_style}">Live Placement Analysis</a></div>', unsafe_allow_html=True
         )
         live_col4.markdown(
-            f'<div style="{center_style}"><a href="{quantile_url}" style="{button_style}">Quantile Analysis</a></div>', unsafe_allow_html=True
+            f'<div style="{center_style}"><a href="{quantile_url}" style="{button_style}">Live Quantile Analysis</a></div>', unsafe_allow_html=True
         )
 
     # Proximal comparison — always available (uses most recent completed tournament)
-    _btn = "display: inline-block; padding: 8px 16px; background-color: #4B7BFF; color: white; text-align: center; text-decoration: none; border-radius: 4px; font-weight: 500;"
-    _ctr = "text-align: center; margin-bottom: 1rem;"
     prox_col, *_ = info_tab.columns([1, 3])
-    prox_col.markdown(f'<div style="{_ctr}"><a href="{proximal_url}" style="{_btn}">Proximal Comparison</a></div>', unsafe_allow_html=True)
+    prox_col.markdown(
+        f'<div style="{center_style}"><a href="{proximal_url}" style="{button_style}">Proximal Comparison</a></div>', unsafe_allow_html=True
+    )
 
 
 def write_for_each_patch(patch_tab, player_df):
