@@ -62,6 +62,7 @@ current_tournament_pages = [
     _page("live/live_progress.py", title="Live Progress", icon="⏱️", url_path="liveprogress"),
     _page("live/live_results.py", title="Live Results", icon="📋", url_path="liveresults"),
     _page("live/live_bracket.py", title="Live Bracket View", icon="🔠", url_path="livebracketview"),
+    _page("live/peer_watch.py", title="Peer Watch", icon="👥", url_path="peerwatch"),
 ]
 
 live_analytics_pages = [

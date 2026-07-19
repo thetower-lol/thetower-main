@@ -293,6 +293,7 @@ def render_player_action_links(container, player_id: str, joined_tourney: bool) 
 
     placements_url = f"https://{BASE_URL}/player?" + urlencode({"player": player_id}, doseq=True)
     proximal_url = f"https://{BASE_URL}/comparison?proximal_player={player_id}"
+    peerwatch_url = f"https://{BASE_URL}/peerwatch?player_id={player_id}"
     bracket_url = f"https://{BASE_URL}/livebracketview?" + urlencode({"player_id": player_id}, doseq=True)
     comparison_url = f"https://{BASE_URL}/comparison?bracket_player={player_id}"
     placement_url = f"https://{BASE_URL}/liveplacement?player_id={player_id}"
@@ -309,17 +310,18 @@ def render_player_action_links(container, player_id: str, joined_tourney: bool) 
 
     # Row 2: Live — only if player joined the recent tourney (blue)
     if joined_tourney:
-        live_col1, live_col2, live_col3, live_col4 = container.columns(4)
+        live_col1, live_col2, live_col3, live_col4, live_col5 = container.columns(5)
         live_col1.markdown(
             f'<div style="{center_style}"><a href="{bracket_url}" style="{live_style}">Live Bracket View</a></div>', unsafe_allow_html=True
         )
         live_col2.markdown(
             f'<div style="{center_style}"><a href="{comparison_url}" style="{live_style}">Live Bracket Comparison</a></div>', unsafe_allow_html=True
         )
-        live_col3.markdown(
+        live_col3.markdown(f'<div style="{center_style}"><a href="{peerwatch_url}" style="{live_style}">Peer Watch</a></div>', unsafe_allow_html=True)
+        live_col4.markdown(
             f'<div style="{center_style}"><a href="{placement_url}" style="{live_style}">Live Placement Analysis</a></div>', unsafe_allow_html=True
         )
-        live_col4.markdown(
+        live_col5.markdown(
             f'<div style="{center_style}"><a href="{quantile_url}" style="{live_style}">Live Quantile Analysis</a></div>', unsafe_allow_html=True
         )
 
