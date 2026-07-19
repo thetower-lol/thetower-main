@@ -693,7 +693,9 @@ def get_details(rows: QuerySet[TourneyRow]) -> pd.DataFrame:
     lookup = get_player_id_lookup()
     approved_lookup = get_player_id_approved_lookup()
 
-    conditions_mapping = {result.id: result.conditions.all() for result in TourneyResult.objects.filter(id__in=df.result_id.unique())}
+    conditions_mapping = {
+        result.id: BattleCondition.objects.filter(results__id=result.id) for result in TourneyResult.objects.filter(id__in=df.result_id.unique())
+    }
 
     patches = [get_patch_for_result(date) for date in df.date]
     bcs = [conditions_mapping.get(id_) for id_ in df.result_id]
