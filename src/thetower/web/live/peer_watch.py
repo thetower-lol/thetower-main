@@ -13,6 +13,7 @@ from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.historical.comparison import get_proximal_players
 from thetower.web.live.data_ops import (
     format_time_ago,
+    get_bracket_data,
     get_data_refresh_timestamp,
     get_live_data,
     process_display_names,
@@ -70,15 +71,19 @@ def _search_live_data_for_player(name: str = "", player_id: str = "") -> tuple[s
 
 
 def _load_combined_live_data() -> pd.DataFrame:
-    """Load live tournament data for all leagues and combine into one DataFrame."""
+    """Load current live tournament data for all leagues (bracket-filtered) and combine."""
     include_shun = include_shun_enabled_for("peer_watch")
     include_sus = include_sus_enabled_for("peer_watch")
     frames = []
     for lg in ALL_LEAGUES:
         try:
             df_tmp = get_live_data(lg, include_shun, include_sus)
+            if df_tmp.empty:
+                continue
+            # Apply same bracket filter as live_bracket.py to restrict to current tournament
+            _, fullish_brackets = get_bracket_data(df_tmp)
+            df_tmp = df_tmp[df_tmp.bracket.isin(fullish_brackets)].copy()
             if not df_tmp.empty:
-                df_tmp = df_tmp.copy()
                 df_tmp["league"] = lg
                 frames.append(df_tmp)
         except Exception:
