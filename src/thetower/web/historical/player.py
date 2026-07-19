@@ -292,6 +292,7 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
     comparison_url = f"https://{BASE_URL}/comparison?bracket_player={player_id}"
     placement_url = f"https://{BASE_URL}/liveplacement?player_id={player_id}"
     quantile_url = f"https://{BASE_URL}/livequantile?player_id={player_id}"
+    proximal_url = f"https://{BASE_URL}/comparison?proximal_player={player_id}"
 
     # Continue with the rest of the info tab content
     handle_sus_or_banned_ids(info_tab, player_id)
@@ -373,6 +374,12 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
         live_col4.markdown(
             f'<div style="{center_style}"><a href="{quantile_url}" style="{button_style}">Quantile Analysis</a></div>', unsafe_allow_html=True
         )
+
+    # Proximal comparison — always available (uses most recent completed tournament)
+    _btn = "display: inline-block; padding: 8px 16px; background-color: #4B7BFF; color: white; text-align: center; text-decoration: none; border-radius: 4px; font-weight: 500;"
+    _ctr = "text-align: center; margin-bottom: 1rem;"
+    prox_col, *_ = info_tab.columns([1, 3])
+    prox_col.markdown(f'<div style="{_ctr}"><a href="{proximal_url}" style="{_btn}">Proximal Comparison</a></div>', unsafe_allow_html=True)
 
 
 def write_for_each_patch(patch_tab, player_df):

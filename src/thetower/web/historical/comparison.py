@@ -30,6 +30,48 @@ sus_ids = get_sus_ids()
 hidden_features = os.environ.get("HIDDEN_FEATURES")
 
 
+def get_proximal_players(player_id: str, n: int) -> tuple[list[str], str | None, str | None, str | None]:
+    """
+    Get the n players above and below the given player in their most recent completed tournament.
+
+    Returns:
+        Tuple of (player_id_list, focal_player_name, league, date_str), or ([], None, None, None) if not found.
+    """
+    try:
+        focal_row = TourneyRow.objects.filter(player_id=player_id).select_related("result").order_by("-result__date").first()
+        if not focal_row:
+            return [], None, None, None
+
+        tr = focal_row.result
+        pos = focal_row.position
+
+        neighbor_ids = list(
+            TourneyRow.objects.filter(
+                result=tr,
+                position__gte=max(1, pos - n),
+                position__lte=pos + n,
+            )
+            .order_by("position")
+            .values_list("player_id", flat=True)
+        )
+
+        # Deduplicate while preserving position order
+        seen: set[str] = set()
+        player_ids: list[str] = []
+        for pid in neighbor_ids:
+            if pid not in seen:
+                seen.add(pid)
+                player_ids.append(pid)
+
+        focal_name = focal_row.nickname or player_id
+        date_str = tr.date.strftime("%Y-%m-%d") if tr.date else None
+        return player_ids, focal_name, tr.league, date_str
+
+    except Exception as e:
+        st.error(f"Error finding proximal players: {e}")
+        return [], None, None, None
+
+
 def compute_comparison(player_id=None, canvas=st):
     st.markdown("# Player Comparison")
     # Check if there's a bracket_player query param to load a full bracket for comparison
@@ -60,10 +102,14 @@ def compute_comparison(player_id=None, canvas=st):
             # Mark this bracket_player_id as processed so we don't overwrite state on re-renders
             st.session_state["_last_bracket_player"] = bracket_player_id
 
+    proximal_player_id = st.query_params.get("proximal_player")
+
     with st.sidebar:
         show_legend = st.checkbox("Show legend", key="show_legend", value=True)
         is_mobile = st.session_state.get("mobile_view", False)
         st.checkbox("Mobile view", value=is_mobile, key="mobile_view")
+        if proximal_player_id:
+            proximal_n = st.slider("Players above/below", min_value=1, max_value=25, value=10, key="proximal_n")
 
     css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
     with open(css_path, "r") as infile:
@@ -84,6 +130,7 @@ def compute_comparison(player_id=None, canvas=st):
         st.query_params.clear()
         st.session_state.pop("display_comparison", None)
         st.session_state.pop("_last_bracket_player", None)
+        st.session_state.pop("proximal_comparison", None)
         st.session_state.options.compare_players = []
         st.session_state.options.current_player = None
         st.session_state.options.current_player_id = None
@@ -99,6 +146,24 @@ def compute_comparison(player_id=None, canvas=st):
             pop_col.button("Remove", on_click=remove_from_comparison, args=(player,), key=f"{player}remove")
 
         canvas.button("Show comparison", on_click=display_comparison, key="show_comparison_top")
+
+    if proximal_player_id:
+        proximal_n = st.session_state.get("proximal_n", 10)
+        proximal_ids, proximal_focal_name, proximal_league, proximal_date = get_proximal_players(proximal_player_id, proximal_n)
+        if proximal_ids:
+            st.session_state.options.compare_players = proximal_ids
+            st.session_state.display_comparison = True
+            st.session_state.proximal_comparison = True
+            st.session_state.proximal_player_id = proximal_player_id
+            st.session_state.proximal_focal_name = proximal_focal_name
+            st.session_state.proximal_league = proximal_league
+            st.session_state.proximal_date = proximal_date
+            if proximal_league:
+                st.session_state.selected_league = proximal_league
+                st.session_state.pop("league_selector", None)
+        else:
+            st.error(f"Player ID `{proximal_player_id}` was not found in any recent tournament.")
+            st.stop()
 
     if not st.session_state.options.compare_players:
         st.session_state.options.compare_players = st.query_params.get_all("compare")
@@ -116,6 +181,14 @@ def compute_comparison(player_id=None, canvas=st):
         # Show a message if we're in bracket comparison mode
         if st.session_state.get("bracket_comparison"):
             canvas.info(f"Showing comparison for all players in the same live bracket as player ID: {st.session_state.bracket_player_id}")
+
+        # Show a message if we're in proximal comparison mode
+        if st.session_state.get("proximal_comparison"):
+            _name = st.session_state.get("proximal_focal_name", st.session_state.proximal_player_id)
+            _n = st.session_state.get("proximal_n", 10)
+            _league = st.session_state.get("proximal_league", "")
+            _date = st.session_state.get("proximal_date", "")
+            canvas.info(f"Showing {_n} players above/below **{_name}** — {_league} · {_date}")
 
         search_for_new = canvas.button("Search for another player?", on_click=search_for_new, key="comparison_search_for_new")
 
