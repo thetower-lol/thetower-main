@@ -285,14 +285,48 @@ def filter_lower_leagues(df):
     return df
 
 
-def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
-    # Generate URLs
-    player_url = f"https://{BASE_URL}/player?" + urlencode({"player": player_id}, doseq=True)
+def render_player_action_links(container, player_id: str, joined_tourney: bool) -> None:
+    """Render historical (red) and live (blue) action button rows for a player."""
+    historical_style = "display: inline-block; padding: 8px 16px; background-color: #FF4B4B; color: white; text-align: center; text-decoration: none; border-radius: 4px; font-weight: 500;"
+    live_style = "display: inline-block; padding: 8px 16px; background-color: #1F6FEB; color: white; text-align: center; text-decoration: none; border-radius: 4px; font-weight: 500;"
+    center_style = "text-align: center; margin-bottom: 1rem;"
+
+    placements_url = f"https://{BASE_URL}/player?" + urlencode({"player": player_id}, doseq=True)
+    proximal_url = f"https://{BASE_URL}/comparison?proximal_player={player_id}"
     bracket_url = f"https://{BASE_URL}/livebracketview?" + urlencode({"player_id": player_id}, doseq=True)
     comparison_url = f"https://{BASE_URL}/comparison?bracket_player={player_id}"
     placement_url = f"https://{BASE_URL}/liveplacement?player_id={player_id}"
     quantile_url = f"https://{BASE_URL}/livequantile?player_id={player_id}"
-    proximal_url = f"https://{BASE_URL}/comparison?proximal_player={player_id}"
+
+    # Row 1: Historical — always shown (red)
+    hist_col1, hist_col2, *_ = container.columns([1, 2, 1])
+    hist_col1.markdown(
+        f'<div style="{center_style}"><a href="{placements_url}" style="{historical_style}">Placements</a></div>', unsafe_allow_html=True
+    )
+    hist_col2.markdown(
+        f'<div style="{center_style}"><a href="{proximal_url}" style="{historical_style}">Proximal Comparison</a></div>', unsafe_allow_html=True
+    )
+
+    # Row 2: Live — only if player joined the recent tourney (blue)
+    if joined_tourney:
+        live_col1, live_col2, live_col3, live_col4 = container.columns(4)
+        live_col1.markdown(
+            f'<div style="{center_style}"><a href="{bracket_url}" style="{live_style}">Live Bracket View</a></div>', unsafe_allow_html=True
+        )
+        live_col2.markdown(
+            f'<div style="{center_style}"><a href="{comparison_url}" style="{live_style}">Live Bracket Comparison</a></div>', unsafe_allow_html=True
+        )
+        live_col3.markdown(
+            f'<div style="{center_style}"><a href="{placement_url}" style="{live_style}">Live Placement Analysis</a></div>', unsafe_allow_html=True
+        )
+        live_col4.markdown(
+            f'<div style="{center_style}"><a href="{quantile_url}" style="{live_style}">Live Quantile Analysis</a></div>', unsafe_allow_html=True
+        )
+
+
+def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
+    # Generate URLs
+    player_url = f"https://{BASE_URL}/player?" + urlencode({"player": player_id}, doseq=True)
 
     # Continue with the rest of the info tab content
     handle_sus_or_banned_ids(info_tab, player_id)
@@ -355,31 +389,7 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
         unsafe_allow_html=True,
     )
 
-    # Show live links only if player joined the recent tourney
-    button_style = "display: inline-block; padding: 8px 16px; background-color: #FF4B4B; color: white; text-align: center; text-decoration: none; border-radius: 4px; font-weight: 500;"
-    center_style = "text-align: center; margin-bottom: 1rem;"
-
-    if check_all_live_entry(player_df.iloc[0].id):
-        live_col1, live_col2, live_col3, live_col4 = info_tab.columns(4)
-
-        live_col1.markdown(
-            f'<div style="{center_style}"><a href="{bracket_url}" style="{button_style}">Live Bracket View</a></div>', unsafe_allow_html=True
-        )
-        live_col2.markdown(
-            f'<div style="{center_style}"><a href="{comparison_url}" style="{button_style}">Live Bracket Comparison</a></div>', unsafe_allow_html=True
-        )
-        live_col3.markdown(
-            f'<div style="{center_style}"><a href="{placement_url}" style="{button_style}">Live Placement Analysis</a></div>', unsafe_allow_html=True
-        )
-        live_col4.markdown(
-            f'<div style="{center_style}"><a href="{quantile_url}" style="{button_style}">Live Quantile Analysis</a></div>', unsafe_allow_html=True
-        )
-
-    # Proximal comparison — always available (uses most recent completed tournament)
-    prox_col, *_ = info_tab.columns([1, 3])
-    prox_col.markdown(
-        f'<div style="{center_style}"><a href="{proximal_url}" style="{button_style}">Proximal Comparison</a></div>', unsafe_allow_html=True
-    )
+    render_player_action_links(info_tab, player_id, bool(check_all_live_entry(player_df.iloc[0].id)))
 
 
 def write_for_each_patch(patch_tab, player_df):
