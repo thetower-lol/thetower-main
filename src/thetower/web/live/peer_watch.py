@@ -10,7 +10,7 @@ from thetower.backend.tourney_results.constants import leagues as ALL_LEAGUES
 from thetower.backend.tourney_results.formatting import make_player_url
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
-from thetower.web.historical.comparison import get_proximal_players
+from thetower.web.historical.proximal_utils import get_proximal_players
 from thetower.web.live.data_ops import (
     format_time_ago,
     get_bracket_data,
