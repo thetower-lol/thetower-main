@@ -110,7 +110,8 @@ def get_league_filter(league=None):
 
 def league_changed():
     """Callback for when league selection changes"""
-    st.session_state.selected_league = st.session_state.league_selector
+    if "league_selector" in st.session_state:
+        st.session_state.selected_league = st.session_state.league_selector
 
 
 def get_league_selection(options=None, patch=None):
