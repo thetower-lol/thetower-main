@@ -1,4 +1,5 @@
 import logging
+import os
 from time import perf_counter
 
 import pandas as pd
@@ -39,7 +40,8 @@ def bracket_analysis():
 
     # Get bracket statistics
     bracket_stats = get_bracket_stats(ldf)
-    st.write(f"Total closed brackets until now: {bracket_stats['total_brackets']}")
+    if os.environ.get("HIDDEN_FEATURES"):
+        st.write(f"Total closed brackets until now: {bracket_stats['total_brackets']}")
 
     # Calculate top positions for each bracket more efficiently
     def get_top_n(group, n):
