@@ -347,15 +347,18 @@ def reconstruct_all_snapshots(archive: pd.DataFrame, extra_timestamps=None) -> p
     # Melt back to long form
     long = pivot.reset_index().melt(id_vars=["snapshot_time"], var_name="player_id", value_name="wave")
     long = long.dropna(subset=["wave"])  # players not yet appeared at this time
-    long["wave"] = long["wave"].astype(int)
+    long["wave"] = pd.to_numeric(long["wave"], downcast="unsigned")
 
     # Join static columns (last known values per player — they never change anyway)
-    static_cols = ["name", "avatar", "relic", "bracket", "tourney_number"]
+    # avatar and relic are excluded: they are never displayed on any live page
+    static_cols = ["name", "bracket", "tourney_number"]
     static = archive.sort_values("snapshot_time").groupby("player_id").last()[static_cols]
     long = long.join(static, on="player_id")
 
     long = long.rename(columns={"snapshot_time": "datetime"})
     long = long.sort_values(["datetime", "wave"], ascending=[True, False]).reset_index(drop=True)
+    long["player_id"] = long["player_id"].astype("category")
+    long["bracket"] = long["bracket"].astype("category")
     return long
 
 
@@ -509,8 +512,8 @@ def bundle_tourney_to_raw(group: list[Path], raw_path: Path) -> Path:
 
 def _atomic_write(df: pd.DataFrame, path: Path) -> None:
     """Write df to path as gzip CSV, using a sibling temp file for atomicity."""
-    import tempfile
     import shutil
+    import tempfile
 
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".csv.gz.tmp")
