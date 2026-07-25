@@ -156,6 +156,33 @@ def get_service_start_time(service_name: str) -> Optional[str]:
         return "Unavailable"
 
 
+def get_service_restart_count(service_name: str) -> Optional[int]:
+    """
+    Get how many times systemd has automatically restarted a service.
+
+    A climbing count means the service is crashing and being restarted. That is
+    otherwise invisible here, because the current state reads as healthy.
+
+    Returns:
+        int: restart count, or None if unavailable.
+    """
+    if is_windows():
+        return None
+
+    try:
+        result = subprocess.run(
+            ["systemctl", "show", service_name, "--property=NRestarts", "--value"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        value = result.stdout.strip()
+        return int(value) if value.isdigit() else None
+
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        return None
+
+
 def get_service_logs(service_name: str, lines: int = 8) -> str:
     """
     Get the last `lines` of console output for a service from journalctl.
@@ -400,6 +427,7 @@ def service_status_page():
             load_state, active_state, sub_state = get_service_status(config["service"])
             status_emoji = get_status_emoji(active_state, sub_state, load_state)
             start_time = get_service_start_time(config["service"])
+            restart_count = get_service_restart_count(config["service"])
 
             with col1:
                 st.markdown(f"**{status_emoji} {config['name']}**")
@@ -447,6 +475,13 @@ def service_status_page():
                             st.markdown(f"🕐 {start_time}")
                 else:
                     st.markdown("❓ *Unknown*")
+
+                # Only shown when non-zero — a zero count is noise, a rising one is the signal
+                if restart_count:
+                    if restart_count >= 5:
+                        st.markdown(f"🔁 **{restart_count} restarts**")
+                    else:
+                        st.caption(f"🔁 {restart_count} restart{'s' if restart_count != 1 else ''}")
 
             with col4:
                 # Action button logic
