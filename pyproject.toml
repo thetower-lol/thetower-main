@@ -35,6 +35,10 @@ web = [
     "streamlit-js-eval==1.0.0",
     "tzdata==2026.1",
     "plotly==6.5.2",
+    # Required by plotly express trendlines (live_placement_analysis uses trendline="lowess").
+    # plotly imports it lazily at render time and does not declare it, so a missing statsmodels
+    # only surfaces as ModuleNotFoundError when that page is opened. Pulls scipy transitively.
+    "statsmodels==0.14.6",
     "pandas==2.3.3",
     # Pinned deliberately: pyarrow 25.0.0 segfaults inside libarrow (null deref) during
     # Streamlit's Arrow serialization on Python 3.14 — survives the first render, crashes on a
