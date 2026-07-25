@@ -36,6 +36,11 @@ web = [
     "tzdata==2026.1",
     "plotly==6.5.2",
     "pandas==2.3.3",
+    # Pinned deliberately: pyarrow 25.0.0 segfaults inside libarrow (null deref) during
+    # Streamlit's Arrow serialization on Python 3.14 — survives the first render, crashes on a
+    # repeat one. 24.0.0 is the newest version verified stable there. Arrives transitively via
+    # streamlit, so without this pin the version is whatever pip happens to resolve.
+    "pyarrow==24.0.0",
     # Backend / admin plugins and utilities (kept in web so prod installs web+bot include them)
     "requests==2.32.5",
     "django-extensions==4.1",
