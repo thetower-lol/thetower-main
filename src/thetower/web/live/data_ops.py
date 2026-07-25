@@ -110,7 +110,7 @@ def get_processed_data(league: str, shun: bool = False, sus: bool = False):
     df = get_live_data(league, shun, sus)
 
     # Common data processing
-    group_by_id = df.groupby("player_id")
+    group_by_id = df.groupby("player_id", observed=True)
     top_25 = group_by_id.wave.max().sort_values(ascending=False).index[:25]
     tdf = df[df.player_id.isin(top_25)]
 
@@ -283,7 +283,7 @@ def get_placement_analysis_data(league: str):
                         logging.debug(f"get_placement_analysis_data: df_latest.shape={getattr(df_latest, 'shape', None)}")
 
                         # compute fullish brackets from latest snapshot
-                        bracket_counts = dict(df_latest.groupby("bracket").player_id.unique().map(lambda player_ids: len(player_ids)))
+                        bracket_counts = dict(df_latest.groupby("bracket", observed=True).player_id.unique().map(lambda ids: len(ids)))
                         fullish_brackets = [bracket for bracket, count in bracket_counts.items() if count >= 28]
                         logging.debug(f"get_placement_analysis_data: found {len(fullish_brackets)} fullish_brackets (>=28 players)")
 
@@ -322,7 +322,7 @@ def get_placement_analysis_data(league: str):
                             br: (datetime.datetime.fromisoformat(ts) if isinstance(ts, str) else ts) for br, ts in raw_times.items()
                         }
                         df_latest = get_latest_live_df(league, include_shun, include_sus)
-                        bracket_counts = dict(df_latest.groupby("bracket").player_id.unique().map(lambda player_ids: len(player_ids)))
+                        bracket_counts = dict(df_latest.groupby("bracket", observed=True).player_id.unique().map(lambda ids: len(ids)))
                         fullish_brackets = [bracket for bracket, count in bracket_counts.items() if count >= 28]
                         df = df_latest[df_latest.bracket.isin(fullish_brackets)].copy()
                         df["real_name"] = df["real_name"].astype("str")
@@ -492,13 +492,13 @@ def get_bracket_stats(df):
                 return wave
         return None
 
-    group_by_bracket = df.groupby("bracket").wave
+    group_by_bracket = df.groupby("bracket", observed=True).wave
 
     fourth_place = group_by_bracket.apply(lambda x: _promotion_cutoff_wave(x, 4)).dropna()
     twenty_fifth_place = group_by_bracket.apply(lambda x: _relegation_cutoff_wave(x, 25)).dropna()
 
     stats = {
-        "total_brackets": df.groupby("bracket").ngroups,
+        "total_brackets": df.groupby("bracket", observed=True).ngroups,
         "highest_total": group_by_bracket.sum().sort_values(ascending=False).index[0],
         "highest_median": group_by_bracket.median().sort_values(ascending=False).index[0],
         "lowest_total": group_by_bracket.sum().sort_values(ascending=True).index[0],

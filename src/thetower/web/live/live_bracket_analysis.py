@@ -35,7 +35,7 @@ def bracket_analysis():
     # Sidebar option to include single-player brackets
     show_singles = st.sidebar.checkbox("Show full fidelity", value=False)
     if not show_singles:
-        bracket_sizes = ldf.groupby("bracket")["wave"].transform("count")
+        bracket_sizes = ldf.groupby("bracket", observed=True)["wave"].transform("count")
         ldf = ldf[bracket_sizes > 1]
 
     # Get bracket statistics
@@ -47,7 +47,7 @@ def bracket_analysis():
     def get_top_n(group, n):
         return group.nlargest(n).iloc[-1] if len(group) >= n else None
 
-    group_by_bracket = ldf.groupby("bracket").wave
+    group_by_bracket = ldf.groupby("bracket", observed=True).wave
     stats_dict = {f"Top {n}": group_by_bracket.apply(lambda x: get_top_n(x, n)) for n in [1, 4, 10, 15]}
 
     # Create stats dataframe with proper column names

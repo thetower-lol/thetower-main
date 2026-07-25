@@ -358,10 +358,10 @@ def get_full_brackets(df: pd.DataFrame, anti_snipe: bool = True) -> tuple[list[s
         - fullish_brackets: List of brackets (filtered by anti_snipe if enabled)
     """
     df["datetime"] = pd.to_datetime(df["datetime"])
-    bracket_order = df.groupby("bracket")["datetime"].min().sort_values().index.tolist()
+    bracket_order = df.groupby("bracket", observed=True)["datetime"].min().sort_values().index.tolist()
 
     if anti_snipe:
-        bracket_counts = dict(df.groupby("bracket").player_id.unique().map(lambda player_ids: len(player_ids)))
+        bracket_counts = dict(df.groupby("bracket", observed=True).player_id.unique().map(lambda ids: len(ids)))
         fullish_brackets = [bracket for bracket, count in bracket_counts.items() if count >= 28]
     else:
         fullish_brackets = bracket_order  # All brackets
