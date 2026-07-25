@@ -16,6 +16,7 @@ from thetower.web.live.data_ops import (
     get_bracket_data,
     get_data_refresh_timestamp,
     get_live_data,
+    get_processed_data,
     initialize_bracket_state,
     process_bracket_selection,
     process_display_names,
@@ -335,7 +336,8 @@ def live_bracket():
     # Use loc for datetime conversion
     tdf.loc[:, "datetime"] = pd.to_datetime(tdf["datetime"])
     bracket_start_time = tdf["datetime"].min()
-    st.info(f"Bracket started at approx.: {fmt_dt(bracket_start_time)}")
+    last_moment = tdf["datetime"].max()
+    st.info(f"Bracket started at approx.: {fmt_dt(bracket_start_time)}  \nScores below as of: {fmt_dt(last_moment)}")
 
     # Process display names and create visualization
     tdf = process_display_names(tdf)
@@ -346,7 +348,6 @@ def live_bracket():
     st.plotly_chart(fig, width="stretch")
 
     # Process and display latest data
-    last_moment = tdf.datetime.max()
     # Create a copy and use loc for setting index
     ldf = tdf[tdf.datetime == last_moment].copy()
     ldf.loc[:, "datetime"] = pd.to_datetime(ldf["datetime"])
@@ -354,8 +355,13 @@ def live_bracket():
     ldf.index = pd.RangeIndex(start=1, stop=len(ldf) + 1)
     ldf = process_display_names(ldf)
 
+    # League-wide ranking at the latest snapshot, tie-aware (same positions as Live Results)
+    _, _, global_ldf, _, _ = get_processed_data(league, include_shun, include_sus)
+    global_ranks = dict(zip(global_ldf.player_id, global_ldf.index))
+    ldf.loc[:, "global_rank"] = [f"{global_ranks[pid]:,}" if pid in global_ranks else "-" for pid in ldf["player_id"]]
+
     # Use loc for safer column selection
-    display_df = ldf.loc[:, ["player_id", "name", "real_name", "wave", "datetime"]]
+    display_df = ldf.loc[:, ["player_id", "name", "real_name", "wave", "global_rank"]]
 
     # Create table HTML
     st.write(display_df.style.format(make_player_url, subset=["player_id"]).to_html(escape=False), unsafe_allow_html=True)
