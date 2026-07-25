@@ -12,7 +12,7 @@ Environment variables required:
     R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY   (Edit+Read key for backup service)
     DJANGO_DATA     (path to /data/django — contains tower.sqlite3)
     CSV_DATA        (path to /data/results_cache — contains {league}_raw/)
-    DISCORD_BOT_CONFIG  (optional — path to /data — contains bot-config.sqlite3)
+    DISCORD_BOT_CONFIG  (optional — path to /data/discord — contains bot-config.sqlite3)
 
 Usage:
     python -m thetower.backend.backup.service
