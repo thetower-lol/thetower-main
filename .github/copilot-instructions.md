@@ -28,10 +28,7 @@ When writing or modifying code, follow these steps automatically:
     - Ensure no blank lines contain whitespace
     - Fix any linting errors shown in Problems panel
 4. **Verify** the code adheres to project standards (150-char line length, type hints, etc.)
-5. **BLOCKING REQUIREMENT — Pause with `vscode_askQuestions`** — ALWAYS call the tool, never skip:
-    - Ask "Ready to commit?" with options: **Yes — commit now** / **No — keep working** / freeform (for instructions or feedback)
-    - The user may run their linter while this question is pending, then click when ready
-    - This step is **mandatory** even for single-file changes and even when the task seems obviously complete
+5. **Pause before committing** — do not commit unprompted. Report what changed and let the user decide when to commit, so they can run their linter and review first.
 
 > **Staging discipline**: Before committing, check `git status` for untracked files (`??`) unrelated to the current change (loose docs, plans, skill files, etc.). If any exist, stage only the relevant paths — do **not** use `git add -A` blindly.
 
@@ -45,7 +42,7 @@ When implementing features, maintain discipline to avoid scope creep:
 
 1. **Implement what was requested** - Focus on the user's actual ask, not theoretical improvements
 2. **Match existing code patterns** - New code should match the rigor/safety level of surrounding code, not exceed it
-3. **Pause before improvements** - After core functionality works, use `vscode_askQuestions` to ask before adding:
+3. **Pause before improvements** - After core functionality works, ask before adding:
     - Extra error handling beyond existing code patterns
     - Performance optimizations not requested
     - Additional safety checks beyond codebase norms
@@ -76,21 +73,6 @@ When code review subagents find issues, distinguish between:
 - **Suggestions**: Improvements beyond original scope
 
 Only **Blocking** and **Critical** issues require fixes before completion. **Suggestions** should be noted but not automatically implemented unless explicitly requested.
-
-## Interactive Questions
-
-> **BLOCKING REQUIREMENT**: NEVER ask a question as plain text. ALWAYS use the `vscode_askQuestions` tool. This applies to every question without exception — including clarifications, design decisions, and the mandatory end-of-task pause.
-
-Use `vscode_askQuestions` for ALL of the following:
-
-- Design decisions that affect implementation
-- Clarification of requirements
-- Configuration preferences
-- Testing approach
-- **The mandatory "Ready to commit?" pause after every task** (no exceptions)
-- Asking what to work on next when the current task is done
-
-Asking in plain text instead of using the tool is a violation of these instructions.
 
 ## Testing Policy
 
@@ -223,6 +205,12 @@ Env vars: `DJANGO_SETTINGS_MODULE=thetower.backend.towerdb.settings`, `HIDDEN_FE
 
 - Streamlit pages import Django: same `django.setup()` pattern
 - No direct database writes from Streamlit in production
+
+### Streamlit Page Module Rules
+
+- **Never call page-rendering functions at module level.** Any bare call to a page function (e.g. `compute_comparison()` at the bottom of `comparison.py`) executes when another module imports _anything_ from that file, rendering the wrong page's UI as a side effect.
+- Utility functions needed by multiple pages (e.g. `get_proximal_players`) must live in a dedicated utility module (e.g. `proximal_utils.py`) — not inside a page module — so importing them is always safe.
+- Page entry points are called only by the router in `pages.py`, never by other page modules.
 
 ## Key Files
 
