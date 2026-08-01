@@ -12,6 +12,7 @@ import schedule
 
 from thetower.backend.env_config import get_csv_data
 
+from .archive_utils import STRING_COLUMN_DTYPES
 from .constants import leagues
 
 # Constants
@@ -66,7 +67,7 @@ def make_request(league):
     header = "player_id,name,avatar,relic,wave,bracket,tourney_number\n"
 
     csv_contents = header + csv_contents
-    df = pd.read_csv(io.StringIO(csv_contents.strip()), on_bad_lines="warn")
+    df = pd.read_csv(io.StringIO(csv_contents.strip()), on_bad_lines="warn", dtype=STRING_COLUMN_DTYPES)
     df["wave"] = df["wave"].astype(int)
     df = df.sort_values("wave", ascending=False)
     df["name"] = df["name"].map(lambda x: x.strip())

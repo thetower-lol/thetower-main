@@ -19,6 +19,7 @@ from cachetools.func import ttl_cache
 from django.db.models import Q, QuerySet
 
 from ..sus.models import ModerationRecord, PlayerId
+from .archive_utils import STRING_COLUMN_DTYPES
 from .constants import (
     champ,
     data_folder_name_mapping,
@@ -192,7 +193,7 @@ def _load_tourney_results(
             continue
 
         # Pandas automatically handles .csv.gz files
-        df = pd.read_csv(result_file, header=None)
+        df = pd.read_csv(result_file, header=None, dtype=STRING_COLUMN_DTYPES)
 
         cutoff = handle_result_cutoff(hidden_features, league, result_cutoff)
 

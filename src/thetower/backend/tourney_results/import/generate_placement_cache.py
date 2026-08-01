@@ -30,6 +30,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "thetower.backend.towerdb.settin
 django.setup()
 
 from thetower.backend.env_config import get_csv_data
+from thetower.backend.tourney_results.archive_utils import STRING_COLUMN_DTYPES
 from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.data import get_player_id_lookup
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
@@ -314,7 +315,7 @@ def process_tourney_group(league: str, group: list[Path], include_shun: bool = F
     for snap in to_process:
         try:
             # Read only this snapshot
-            df = pd.read_csv(snap)
+            df = pd.read_csv(snap, dtype=STRING_COLUMN_DTYPES)
             # store full snapshot path so resume logic is robust
             snap_iso = str(snap.resolve())
             snap_time = get_time(snap).isoformat()
@@ -357,7 +358,7 @@ def process_tourney_group(league: str, group: list[Path], include_shun: bool = F
         df_latest = None
         for snap in reversed(group):
             try:
-                cand = pd.read_csv(snap)
+                cand = pd.read_csv(snap, dtype=STRING_COLUMN_DTYPES)
                 if cand is not None and not cand.empty and "player_id" in cand.columns:
                     df_latest = cand
                     break

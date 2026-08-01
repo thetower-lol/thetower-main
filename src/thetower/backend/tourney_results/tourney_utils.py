@@ -17,7 +17,7 @@ from django.apps import apps
 from thetower.backend.env_config import get_csv_data
 
 # Local imports
-from .archive_utils import list_archives, read_archive, reconstruct_at
+from .archive_utils import STRING_COLUMN_DTYPES, list_archives, read_archive, reconstruct_at
 from .constants import leagues, legend
 from .data import get_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_ids, get_tourneys
 from .models import PromptTemplate, TourneyResult, TourneyRow
@@ -111,12 +111,12 @@ def create_tourney_rows(tourney_result: TourneyResult) -> None:
     csv_path = tourney_result.result_file.path
 
     try:
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(csv_path, dtype=STRING_COLUMN_DTYPES)
     except FileNotFoundError:
         # try other path
         csv_path = csv_path.replace("uploads", "src/thetower/backend/uploads")
 
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(csv_path, dtype=STRING_COLUMN_DTYPES)
 
     if df.empty:
         logging.error(f"Empty csv file: {csv_path}")
@@ -428,7 +428,7 @@ def get_latest_live_df(league: str, shun: bool = False, sus: bool = False) -> pd
     last_date = get_time(last_file)
 
     try:
-        df = pd.read_csv(last_file)
+        df = pd.read_csv(last_file, dtype=STRING_COLUMN_DTYPES)
     except Exception as e:
         logging.warning(f"Failed to read latest live file {last_file}: {e}")
         raise ValueError("No current data, wait until the tourney day")
@@ -501,7 +501,7 @@ def check_live_entry(league: str, player_id: str, fast: bool = False) -> bool:
             t_glob = perf_counter()
             last_date = get_time(last_file)
             try:
-                df = pd.read_csv(last_file, usecols=["player_id", "bracket"])
+                df = pd.read_csv(last_file, usecols=["player_id", "bracket"], dtype=STRING_COLUMN_DTYPES)
             except Exception as e:
                 logging.warning(f"Failed to read latest live file {last_file}: {e}")
                 raise ValueError("No current data, wait until the tourney day")

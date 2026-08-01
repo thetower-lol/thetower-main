@@ -37,6 +37,13 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# Force string dtype for columns holding arbitrary hex/user strings so pandas never
+# runs numeric inference on them: a player_id like "9E7816514276BF83" is otherwise
+# parsed as 9e7816514276, whose exponent overflows and segfaults the interpreter in
+# the cp314 Linux builds of pandas 2.3.3.  The integer keys cover header-less legacy
+# result files (0=id, 1=tourney_name); pandas ignores dtype keys for absent columns.
+STRING_COLUMN_DTYPES = {"player_id": str, "name": str, "bracket": str, 0: str, 1: str}
+
 # Matches both zero-padded (08_30) and unpadded (8_30) snapshot filenames.
 _SNAP_STEM_RE = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})__(?P<h>\d{1,2})_(?P<m>\d{1,2})")
 
@@ -82,7 +89,7 @@ def _read_tourney_number(path: Path) -> Optional[int]:
     Returns None if the file cannot be read or is missing the column.
     """
     try:
-        row = pd.read_csv(path, nrows=1)
+        row = pd.read_csv(path, nrows=1, dtype=STRING_COLUMN_DTYPES)
         if "tourney_number" in row.columns and not row.empty:
             return int(row["tourney_number"].iloc[0])
     except Exception:
@@ -188,7 +195,7 @@ def build_tourney_archive(snapshots: list[Path], write_path: Optional[Path] = No
             logger.warning(f"Could not parse timestamp from {snap.name}; skipping")
             continue
         try:
-            df = pd.read_csv(snap)
+            df = pd.read_csv(snap, dtype=STRING_COLUMN_DTYPES)
         except Exception as exc:
             logger.warning(f"Failed to read {snap}: {exc}; skipping")
             continue
@@ -284,7 +291,7 @@ def build_all_archives(live_path: Path, force: bool = False) -> list[Path]:
 
 def read_archive(path: Path) -> pd.DataFrame:
     """Read a ``{date}_archive.csv.gz`` file and parse snapshot_time as datetime."""
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, dtype=STRING_COLUMN_DTYPES)
     df["snapshot_time"] = pd.to_datetime(df["snapshot_time"], format="ISO8601")
     return df
 
@@ -400,7 +407,7 @@ def append_snapshot_to_archive(snapshot_path: Path, archive_path: Path) -> int:
         raise
 
     try:
-        snap_df = pd.read_csv(snapshot_path)
+        snap_df = pd.read_csv(snapshot_path, dtype=STRING_COLUMN_DTYPES)
     except Exception as exc:
         raise RuntimeError(f"Failed to read snapshot {snapshot_path}: {exc}") from exc
 
@@ -579,7 +586,7 @@ def verify_archive_fidelity(snapshots: list[Path], archive_path: Path) -> tuple[
             continue
 
         try:
-            snap_df = pd.read_csv(snap)
+            snap_df = pd.read_csv(snap, dtype=STRING_COLUMN_DTYPES)
         except Exception as exc:
             errors.append(f"Cannot read {snap.name}: {exc}")
             continue
