@@ -237,6 +237,97 @@ def _render_backup_coverage(all_r2_stats: dict[str, dict]) -> None:
             st.markdown("")
 
 
+_LOCAL_TAR_WARN_HOURS = 48
+_LOCAL_TMP_WARN_HOURS = 6
+_LOCAL_PENDING_WARN_HOURS = 24
+
+
+def _scan_local_cleanup() -> dict:
+    """Scan local disk for backup artifacts that should drain on their own.
+
+    Returns {"tars": [...], "tmp_dirs": [...], "pending": [...], "errors": [...]}
+    where each item is {"label", "size", "mtime"}.
+    """
+    from pathlib import Path
+
+    from thetower.backend.env_config import get_django_data
+
+    result: dict = {"tars": [], "tmp_dirs": [], "pending": [], "errors": []}
+
+    csv_data = os.getenv("CSV_DATA")
+    if csv_data and Path(csv_data).exists():
+        for tar_path in sorted(Path(csv_data).glob("*_raw/*.tar")):
+            stat = tar_path.stat()
+            result["tars"].append({"label": f"{tar_path.parent.name}/{tar_path.name}", "size": stat.st_size, "mtime": stat.st_mtime})
+    else:
+        result["errors"].append("CSV_DATA not set or missing — cannot scan for local tars")
+
+    try:
+        django_data = get_django_data()
+    except RuntimeError as exc:
+        result["errors"].append(f"DJANGO_DATA not set — cannot scan temp/pending dirs ({exc})")
+        return result
+
+    for tmp_dir in sorted(django_data.glob("tower_dbbackup_*")):
+        if not tmp_dir.is_dir():
+            continue
+        size = sum(f.stat().st_size for f in tmp_dir.rglob("*") if f.is_file())
+        result["tmp_dirs"].append({"label": tmp_dir.name, "size": size, "mtime": tmp_dir.stat().st_mtime})
+
+    pending_dir = django_data / "db_backup_pending"
+    if pending_dir.exists():
+        for gz in sorted(pending_dir.glob("*.db.gz")):
+            stat = gz.stat()
+            result["pending"].append({"label": gz.name, "size": stat.st_size, "mtime": stat.st_mtime})
+
+    return result
+
+
+def _render_local_cleanup() -> None:
+    """Render local backup artifacts with staleness warnings.
+
+    Each artifact type drains on its own in normal operation, so anything
+    older than its threshold means the backup service is not converging.
+    """
+    scan = _scan_local_cleanup()
+    now = datetime.now(timezone.utc).timestamp()
+
+    groups = [
+        ("📦 Local tars awaiting upload", scan["tars"], _LOCAL_TAR_WARN_HOURS, "uploaded and removed by the daily backup run"),
+        ("🗑️ DB backup temp dirs", scan["tmp_dirs"], _LOCAL_TMP_WARN_HOURS, "swept automatically at the next backup run"),
+        ("⏳ Pending DB uploads", scan["pending"], _LOCAL_PENDING_WARN_HOURS, "retried hourly at :15"),
+    ]
+
+    for title, items, warn_hours, drain_note in groups:
+        if not items:
+            st.markdown(f"**✅ {title}** — none on disk")
+            continue
+
+        items = sorted(items, key=lambda i: i["mtime"])
+        stale = [i for i in items if (now - i["mtime"]) / 3600 > warn_hours]
+        total = sum(i["size"] for i in items)
+        icon = "⚠️" if stale else "✅"
+        st.markdown(f"**{icon} {title}** — {len(items)} item(s), {_fmt_bytes(total)}")
+        if stale:
+            st.caption(f"{len(stale)} older than {warn_hours}h — should have been {drain_note}; check the backup service log")
+        else:
+            st.caption(f"All younger than {warn_hours}h — will be {drain_note}")
+
+        rows = [
+            {
+                "Item": i["label"],
+                "Size": _fmt_bytes(i["size"]),
+                "Age": _time_ago(datetime.fromtimestamp(i["mtime"], tz=timezone.utc)),
+                "Status": "⚠️ stale" if (now - i["mtime"]) / 3600 > warn_hours else "ok",
+            }
+            for i in items
+        ]
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    for err in scan["errors"]:
+        st.caption(f"⚠️ {err}")
+
+
 def backup_status_page() -> None:
     st.title("☁️ Backup Status")
 
@@ -316,6 +407,11 @@ def backup_status_page() -> None:
     st.markdown("---")
     st.subheader("🔍 Backup Coverage")
     _render_backup_coverage(all_stats)
+
+    # Local cleanup section — artifacts on local disk that should drain on their own
+    st.markdown("---")
+    st.subheader("🧹 Local Cleanup State")
+    _render_local_cleanup()
 
     # Activity log section — always shown, no R2 credentials needed
     st.markdown("---")
