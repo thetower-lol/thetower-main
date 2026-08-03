@@ -27,6 +27,7 @@ import logging
 import shutil
 import sqlite3
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -67,6 +68,29 @@ def _object_exists(client, bucket: str, key: str) -> bool:
         if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
             return False
         raise
+
+
+_TMP_DIR_PREFIX = "tower_dbbackup_"
+_TMP_DIR_MAX_AGE_HOURS = 6
+
+
+def _sweep_stale_tmp_dirs(parent: Path, max_age_hours: int = _TMP_DIR_MAX_AGE_HOURS) -> None:
+    """Remove tower_dbbackup_* temp dirs left behind by interrupted runs.
+
+    A temp dir is only in use for the few minutes a single backup_database call
+    takes (the service runs backups sequentially), so anything older than
+    max_age_hours is an orphan from a crash — e.g. the service killed mid-VACUUM.
+    """
+    now = time.time()
+    for stale in parent.glob(f"{_TMP_DIR_PREFIX}*"):
+        try:
+            if not stale.is_dir() or now - stale.stat().st_mtime < max_age_hours * 3600:
+                continue
+            size = sum(f.stat().st_size for f in stale.rglob("*") if f.is_file())
+            shutil.rmtree(stale, ignore_errors=True)
+            logger.warning(f"Removed stale DB backup temp dir {stale} ({size:,} bytes) — leftover from an interrupted run")
+        except OSError:
+            logger.exception(f"Failed to sweep stale temp dir {stale}")
 
 
 def _get_pending_dir(override: Path | None = None) -> Path:
@@ -206,6 +230,10 @@ def backup_database(
         db_path = get_django_data() / "tower.sqlite3"
     resolved_pending_dir = _get_pending_dir(pending_dir)
     pending_path = _pending_path_for_date(now, resolved_pending_dir, filename_prefix)
+
+    # Reclaim disk from temp dirs orphaned by interrupted runs, even when the
+    # rest of this run short-circuits (pending file exists / already in R2).
+    _sweep_stale_tmp_dirs(db_path.parent)
 
     # If a pending file already exists for today, upload it directly (avoids re-vacuuming)
     if pending_path.exists():

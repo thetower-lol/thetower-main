@@ -14,19 +14,21 @@ After the tourney window closes, for each league still holding staging snapshots
   - Archive fidelity is verified (row-for-row reconstruction check).
   - Snapshots are bundled into a raw tar in {league}_raw/.
   - Tar contents are verified (byte-for-byte).
-  - Only after both verifications pass are the staging snapshots deleted.
   - Streamlit cache is cleared.
+
+Staging snapshots are NOT deleted here.  The backup service deletes them
+(together with the tar) only after the tar is verified uploaded to R2, so a
+crash, failed upload, or full disk can never destroy the only copy.
 """
 import datetime
 import logging
+import os
 import time
 from pathlib import Path
 
 import django
 import pandas as pd
 import schedule
-
-import os
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "thetower.backend.towerdb.settings")
 django.setup()
@@ -75,8 +77,17 @@ def _in_tourney_window() -> bool:
 
 
 def _cleanup_completed_tourney(group: list[Path], archive_path: Path, raw_dir: Path, league: str, tourney_date: str) -> None:
-    """Bundle, verify, and delete staging snapshots for a completed tourney."""
-    logging.info(f"Starting post-tourney cleanup for {league} {tourney_date} ({len(group)} snapshots)")
+    """Bundle a completed tourney's staging snapshots into a verified raw tar.
+
+    The staging snapshots are left in place: the backup service deletes them
+    (and the tar) only once the tar is verified uploaded to R2.
+    """
+    tar_path = raw_dir / f"{tourney_date}_raw.tar"
+    if tar_path.exists():
+        # Already bundled and verified; awaiting R2 upload + cleanup by the backup service.
+        return
+
+    logging.info(f"Starting post-tourney bundling for {league} {tourney_date} ({len(group)} snapshots)")
 
     # Step 1: verify archive fidelity before touching anything
     logging.info(f"Verifying archive fidelity for {league} {tourney_date}...")
@@ -84,7 +95,7 @@ def _cleanup_completed_tourney(group: list[Path], archive_path: Path, raw_dir: P
     if not ok:
         for err in errors:
             logging.error(f"Archive fidelity [{league} {tourney_date}]: {err}")
-        logging.error(f"Aborting cleanup for {league} {tourney_date} — archive verification failed")
+        logging.error(f"Aborting bundling for {league} {tourney_date} — archive verification failed")
         return
     logging.info(f"Archive fidelity OK for {league} {tourney_date}")
 
@@ -92,33 +103,22 @@ def _cleanup_completed_tourney(group: list[Path], archive_path: Path, raw_dir: P
     try:
         tar_path = bundle_tourney_to_raw(group, raw_dir)
     except Exception:
-        logging.exception(f"Failed to bundle {league} {tourney_date} to raw tar; aborting cleanup")
+        logging.exception(f"Failed to bundle {league} {tourney_date} to raw tar; aborting bundling")
         return
 
-    # Step 3: verify tar contents
+    # Step 3: verify tar contents; a bad tar is removed so the next run rebundles it
     logging.info(f"Verifying tar contents for {league} {tourney_date}...")
     ok, errors = verify_tar_contents(tar_path, group)
     if not ok:
         for err in errors:
             logging.error(f"Tar verification [{league} {tourney_date}]: {err}")
-        logging.error(f"Aborting snapshot deletion for {league} {tourney_date} — tar verification failed (tar left in place)")
-        return
-    logging.info(f"Tar contents verified for {league} {tourney_date}")
-
-    # Step 4: delete staging snapshots (skipped when NO_DELETE env var is set)
-    if os.environ.get("NO_DELETE"):
-        logging.info(f"NO_DELETE is set — skipping deletion of {len(group)} snapshots for {league} {tourney_date}")
-        return
-
-    deleted = 0
-    for snap in group:
+        logging.error(f"Tar verification failed for {league} {tourney_date} — removing bad tar; will rebundle next run")
         try:
-            snap.unlink()
-            deleted += 1
-        except Exception as exc:
-            logging.error(f"Failed to delete staging snapshot {snap}: {exc}")
-
-    logging.info(f"Deleted {deleted}/{len(group)} staging snapshots for {league} {tourney_date}")
+            tar_path.unlink()
+        except OSError:
+            logging.exception(f"Failed to remove bad tar {tar_path}")
+        return
+    logging.info(f"Tar contents verified for {league} {tourney_date}; snapshots will be removed after R2 upload")
 
 
 def process_league(league: str, in_window: bool) -> bool:

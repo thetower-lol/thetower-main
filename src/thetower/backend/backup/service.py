@@ -1,7 +1,8 @@
 """Backup service entry point.
 
 Runs as a persistent background service:
-  - Tar backup:   on startup and daily at 08:00 UTC (uploads new tars to R2, deletes local copies)
+  - Tar backup:   on startup and daily at 08:00 UTC (uploads new tars to R2; deletes local
+                  tars and their staging snapshots only after the R2 copy is verified)
   - DB backup:    on startup and daily at 08:00 UTC (VACUUM INTO → gzip → R2)
                   DB backup is idempotent: skips if today's R2 key already exists.
   - Bot DB backup: on startup and daily at 08:00 UTC (bot-config.sqlite3 → R2 under db/ with bot-config_ prefix)

@@ -4,11 +4,12 @@ Appends one JSON object per line to DJANGO_DATA/backup_log.jsonl.
 Rotates (truncates oldest entries) when the file exceeds MAX_LINES.
 
 Event types:
-    tar_upload   — successful tar upload + delete
-    tar_error    — failed tar upload
-    db_upload    — successful DB generational key upload
-    db_error     — failed DB upload
-    run_summary  — end-of-run totals (one per backup_new_tars / backup_database call)
+    tar_upload           — successful tar upload (local cleanup is logged separately)
+    tar_error            — failed tar upload or failed local cleanup
+    tar_delete_skipped   — tar is safe in R2 but local cleanup was skipped (e.g. archive missing)
+    db_upload            — successful DB generational key upload
+    db_error             — failed DB upload
+    run_summary          — end-of-run totals (one per backup_new_tars / backup_database call)
 """
 
 import json
@@ -53,6 +54,10 @@ def log_tar_upload(league: str, filename: str, size_bytes: int, sha256: str) -> 
 
 def log_tar_error(league: str, filename: str, error: str) -> None:
     _write_event({"type": "tar_error", "league": league, "file": filename, "error": error})
+
+
+def log_tar_delete_skipped(league: str, filename: str, reason: str) -> None:
+    _write_event({"type": "tar_delete_skipped", "league": league, "file": filename, "reason": reason})
 
 
 def log_db_upload(key: str, compressed_size: int, sha256: str) -> None:

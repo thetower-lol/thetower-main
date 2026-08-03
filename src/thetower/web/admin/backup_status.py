@@ -365,7 +365,9 @@ def _render_activity_log() -> None:
 
     # Recent events table
     with st.expander("Recent Events", expanded=True):
-        type_filter = st.selectbox("Filter by type", ["all", "tar_upload", "db_upload", "tar_error", "db_error", "run_summary"], key="log_filter")
+        type_filter = st.selectbox(
+            "Filter by type", ["all", "tar_upload", "db_upload", "tar_error", "db_error", "tar_delete_skipped", "run_summary"], key="log_filter"
+        )
         filtered = events if type_filter == "all" else [e for e in events if e.get("type") == type_filter]
 
         rows = []
@@ -383,6 +385,8 @@ def _render_activity_log() -> None:
                 detail = f"{e.get('key')} ({_fmt_bytes(e.get('size', 0))})"
             elif etype in ("tar_error", "db_error"):
                 detail = f"{e.get('league', '')}{e.get('key', '')} — {e.get('error', '')}"
+            elif etype == "tar_delete_skipped":
+                detail = f"{e.get('league')}/{e.get('file')} — {e.get('reason', '')}"
             elif etype == "run_summary":
                 detail = " · ".join(f"{k}={v}" for k, v in e.items() if k not in ("type", "ts", "run"))
             else:
