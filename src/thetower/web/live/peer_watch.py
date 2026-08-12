@@ -12,6 +12,8 @@ from thetower.backend.tourney_results.shun_config import include_shun_enabled_fo
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.historical.proximal_utils import get_proximal_players
 from thetower.web.live.data_ops import (
+    CACHE_TTL_SECONDS,
+    cache_data_if_enabled,
     format_time_ago,
     get_bracket_data,
     get_data_refresh_timestamp,
@@ -70,10 +72,9 @@ def _search_live_data_for_player(name: str = "", player_id: str = "") -> tuple[s
     return None, None
 
 
-def _load_combined_live_data() -> pd.DataFrame:
+@cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
+def _load_combined_live_data(include_shun: bool, include_sus: bool) -> pd.DataFrame:
     """Load current live tournament data for all leagues (bracket-filtered) and combine."""
-    include_shun = include_shun_enabled_for("peer_watch")
-    include_sus = include_sus_enabled_for("peer_watch")
     frames = []
     for lg in ALL_LEAGUES:
         try:
@@ -171,7 +172,7 @@ def peer_watch():
     st.caption(f"Showing {peer_n} peers above/below **{focal_name}** — {focal_league} · {focal_date} (last completed tournament)")
 
     # --- Load combined live data and filter to peer group ---
-    all_live_df = _load_combined_live_data()
+    all_live_df = _load_combined_live_data(include_shun_enabled_for("peer_watch"), include_sus_enabled_for("peer_watch"))
 
     if all_live_df.empty:
         st.error("No live tournament data available.")

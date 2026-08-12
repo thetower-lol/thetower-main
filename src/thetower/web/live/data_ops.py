@@ -82,7 +82,7 @@ def get_live_data(league: str, shun: bool = False, sus: bool = False) -> pd.Data
 
     lookup = get_player_id_lookup()
     df["real_name"] = [lookup.get(pid, name) for pid, name in zip(df["player_id"], df["name"])]
-    df["real_name"] = df["real_name"].astype(str)
+    df["real_name"] = df["real_name"].astype(str).astype("category")
 
     df = df.sort_values(["datetime", "wave"], ascending=False).reset_index(drop=True)
     logger.info(f"get_live_data({league}) took {perf_counter() - t0:.3f}s — {len(df):,} rows")
@@ -175,16 +175,17 @@ def process_display_names(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
 
     # Calculate name duplicates
-    name_counts = result.groupby("real_name")["player_id"].nunique()
+    name_counts = result.groupby("real_name", observed=True)["player_id"].nunique()
     duplicate_names = name_counts[name_counts > 1].index
 
-    # Create display_name column using loc
-    result.loc[:, "display_name"] = result["real_name"]
+    # Create display_name column using loc (as str: real_name may be categorical,
+    # which doesn't support concatenation or adding unseen values)
+    result.loc[:, "display_name"] = result["real_name"].astype(str)
 
     if len(duplicate_names) > 0:
         # Add player_id to duplicated names
         mask = result["real_name"].isin(duplicate_names)
-        result.loc[mask, "display_name"] = result.loc[mask, "real_name"] + " (" + result.loc[mask, "player_id"].astype(str) + ")"
+        result.loc[mask, "display_name"] = result.loc[mask, "display_name"] + " (" + result.loc[mask, "player_id"].astype(str) + ")"
 
     return result
 

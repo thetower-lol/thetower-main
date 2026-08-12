@@ -366,6 +366,10 @@ def reconstruct_all_snapshots(archive: pd.DataFrame, extra_timestamps=None) -> p
     long = long.sort_values(["datetime", "wave"], ascending=[True, False]).reset_index(drop=True)
     long["player_id"] = long["player_id"].astype("category")
     long["bracket"] = long["bracket"].astype("category")
+    # name/tourney_number repeat once per snapshot timestamp per player, so
+    # category dtype shrinks the frame (and its st.cache_data pickles) substantially
+    long["name"] = long["name"].astype("category")
+    long["tourney_number"] = long["tourney_number"].astype("category")
     return long
 
 
