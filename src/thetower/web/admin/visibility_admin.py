@@ -32,6 +32,7 @@ PAGE_KEYS = [
     "overview_cache",
     "player",
     "reposition",
+    "search",
     "tourney_results",
 ]
 
@@ -110,6 +111,8 @@ def main() -> None:
 
         Notes:
         - `live_placement_cache` controls both "Live Placement Analysis" and "Live Quantile Analysis".
+        - The player search box follows the page it is embedded on (`player`, `comparison`);
+          `search` covers the standalone search page.
         - For `tourney_results`, `include_sus` only affects players re-ranked via a reposition run
           with sus enabled.
         """)

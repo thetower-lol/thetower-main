@@ -17,6 +17,7 @@ from django.db.models import Q
 from thetower.backend.sus.models import ModerationRecord, PlayerId
 from thetower.backend.tourney_results.constants import how_many_results_public_site
 from thetower.backend.tourney_results.models import TourneyRow
+from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.util import add_player_id, add_to_comparison
 
 
@@ -25,15 +26,16 @@ def _next_prefix(s: str) -> str:
     return s[:-1] + chr(ord(s[-1]) + 1)
 
 
-def _get_excluded_from_results(player_ids: list[str]) -> set[str]:
+def _get_excluded_from_results(player_ids: list[str], include_sus: bool = False) -> set[str]:
     """Check only the given player IDs against moderation records (sus/ban/soft-ban)."""
     if not player_ids:
         return set()
     banned_types = [
-        ModerationRecord.ModerationType.SUS,
         ModerationRecord.ModerationType.BAN,
         ModerationRecord.ModerationType.SOFT_BAN,
     ]
+    if not include_sus:
+        banned_types.append(ModerationRecord.ModerationType.SUS)
     # Standalone records (not yet linked to a GameInstance)
     standalone = set(
         ModerationRecord.objects.filter(
@@ -338,8 +340,9 @@ def compute_search(player=False, comparison=False):
         nickname_ids = search_players_optimized(search_term, page, advanced_search=advanced_search)
         if not hidden_features:
             t_excl = time.perf_counter()
+            page_key = "player" if player else "comparison" if comparison else "search"
             result_ids = [pid for pid, _, _ in nickname_ids]
-            excluded = _get_excluded_from_results(result_ids)
+            excluded = _get_excluded_from_results(result_ids, include_sus=include_sus_enabled_for(page_key))
             print(f"[search] exclusion check: {time.perf_counter() - t_excl:.3f}s")
             nickname_ids = [(pid, name, lg) for pid, name, lg in nickname_ids if pid not in excluded]
         print(f"[search] compute_search total: {time.perf_counter() - t_search:.3f}s")
