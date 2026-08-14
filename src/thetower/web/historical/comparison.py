@@ -12,7 +12,6 @@ from thetower.backend.sus.models import PlayerId
 from thetower.backend.tourney_results.constants import (
     Graph,
     champ,
-    how_many_results_public_site,
     leagues,
 )
 from thetower.backend.tourney_results.data import get_details, get_patches, get_sus_ids
@@ -20,6 +19,7 @@ from thetower.backend.tourney_results.formatting import BASE_URL, make_player_ur
 from thetower.backend.tourney_results.models import BattleCondition
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
+from thetower.backend.tourney_results.results_config import get_max_results_limit
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import get_latest_live_df
@@ -163,7 +163,8 @@ def compute_comparison(player_id=None, canvas=st):
     # Get all PlayerIds across all game instances for these players
     all_player_ids = set(PlayerId.objects.filter(game_instance__player__in=known_players).values_list("id", flat=True)) | set(users)
 
-    hidden_query = {} if hidden_features else {"result__public": True, "position__lt": how_many_results_public_site}
+    # Cross-league query: uses the highest per-league cap rather than per-league bounds.
+    hidden_query = {} if hidden_features else {"result__public": True, "position__lt": get_max_results_limit()}
     rows = TourneyRow.objects.filter(player_id__in=all_player_ids, **hidden_query)
 
     player_df = get_details(rows)

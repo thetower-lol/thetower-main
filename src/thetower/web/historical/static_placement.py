@@ -7,7 +7,6 @@ from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 from thetower.backend.tourney_results.tourney_utils import get_tourney_state
 
-
 _DEFAULT_LEAGUES = ["Legend", "Champion", "Platinum", "Gold"]
 _PLACES = list(range(1, 31))
 
@@ -110,16 +109,17 @@ def compute_static_placement():
             cohort_stats[league] = [None] * 30
             continue
 
-        stats_per_place, n_brackets, global_med, global_mean = _compute_cohort_stats(result)
+        stats_per_place, _n_brackets, global_med, global_mean = _compute_cohort_stats(result)
         cohort_stats[league] = stats_per_place
 
         bcs = result.conditions.all()
         bc_str = " / ".join(bc.shortcut for bc in bcs) if bcs else "–"
         with summary_cols[i]:
+            # Never show the bracket count here — it reveals total participation (brackets x 30)
             st.metric(
                 league,
                 f"Median: {global_med:.0f}",
-                help=f"BCs: {bc_str} · {n_brackets} hypothetical brackets · Mean: {global_mean:.0f}",
+                help=f"BCs: {bc_str} · Mean: {global_mean:.0f}",
             )
 
     # Build placement table

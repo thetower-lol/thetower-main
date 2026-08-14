@@ -16,7 +16,6 @@ from thetower.web.live.data_ops import (
     get_bracket_data,
     get_data_refresh_timestamp,
     get_live_data,
-    get_processed_data,
     initialize_bracket_state,
     process_bracket_selection,
     process_display_names,
@@ -355,13 +354,8 @@ def live_bracket():
     ldf.index = pd.RangeIndex(start=1, stop=len(ldf) + 1)
     ldf = process_display_names(ldf)
 
-    # League-wide ranking at the latest snapshot, tie-aware (same positions as Live Results)
-    _, _, global_ldf, _, _ = get_processed_data(league, include_shun, include_sus)
-    global_ranks = dict(zip(global_ldf.player_id, global_ldf.index))
-    ldf.loc[:, "global_rank"] = [f"{global_ranks[pid]:,}" if pid in global_ranks else "-" for pid in ldf["player_id"]]
-
     # Use loc for safer column selection
-    display_df = ldf.loc[:, ["player_id", "name", "real_name", "wave", "global_rank"]]
+    display_df = ldf.loc[:, ["player_id", "name", "real_name", "wave"]]
 
     # Create table HTML
     st.write(display_df.style.format(make_player_url, subset=["player_id"]).to_html(escape=False), unsafe_allow_html=True)

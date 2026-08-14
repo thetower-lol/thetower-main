@@ -56,17 +56,22 @@ def bracket_analysis():
 
     # Create histogram using cached plot data
     plot_data = get_cached_plot_data(stats_df_melted)
+    # Percent-normalized with a %-only hover: raw per-bin counts would sum to the total
+    # bracket count, which the public site must not reveal
     fig1 = px.histogram(
         plot_data,
         x="Waves",
         color="Position",
         barmode="overlay",
         opacity=0.7,
+        histnorm="percent",
         title="Distribution of Top Positions per Bracket",
-        labels={"Waves": "Wave Reached", "count": "Number of Brackets", "Position": "Position"},
+        labels={"Waves": "Wave Reached", "Position": "Position"},
         height=300,
     )
 
+    fig1.update_yaxes(title_text="% of brackets")
+    fig1.update_traces(hovertemplate="%{x}: %{y:.1f}%")
     fig1.update_layout(margin=dict(l=20, r=20, t=40, b=20), legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99))
     st.plotly_chart(fig1, width="stretch")
 

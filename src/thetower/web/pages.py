@@ -110,6 +110,7 @@ if hidden_features:
         st.Page("admin/codebase_status.py", title="Codebase Status", icon="📦", url_path="codebase"),
         st.Page("admin/migrations.py", title="Migrations", icon="🔄", url_path="migrations"),
         st.Page("admin/site_settings.py", title="Site Settings", icon="⚙️", url_path="sitesettings"),
+        st.Page("admin/results_limits.py", title="Results Limits", icon="🔢", url_path="resultslimits"),
         st.Page("admin/access_log.py", title="Access Log Viewer", icon="🌐", url_path="accesslog"),
         st.Page("admin/access_log_stats.py", title="Access Log Stats", icon="📊", url_path="accesslogstats"),
         st.Page("admin/api_log.py", title="API Request Log", icon="🔑", url_path="apilog"),

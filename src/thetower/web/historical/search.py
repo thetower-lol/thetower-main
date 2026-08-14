@@ -15,8 +15,11 @@ from django.db import connection
 from django.db.models import Q
 
 from thetower.backend.sus.models import ModerationRecord, PlayerId
-from thetower.backend.tourney_results.constants import how_many_results_public_site
 from thetower.backend.tourney_results.models import TourneyRow
+
+# Cross-league queries (including raw SQL) can't cheaply apply per-league caps, so search
+# filters on the highest cap configured across leagues.
+from thetower.backend.tourney_results.results_config import get_max_results_limit
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.util import add_player_id, add_to_comparison
 
@@ -97,7 +100,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
         pid_results = list(
             TourneyRow.objects.filter(
                 player_id__istartswith=search_term,
-                position__lte=how_many_results_public_site,
+                position__lte=get_max_results_limit(),
             )
             .values_list("player_id", "nickname")
             .order_by("player_id")
@@ -117,7 +120,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
             contains_results = list(
                 TourneyRow.objects.filter(
                     player_id__icontains=search_term,
-                    position__lte=how_many_results_public_site,
+                    position__lte=get_max_results_limit(),
                 )
                 .exclude(player_id__istartswith=search_term)
                 .values_list("player_id", "nickname")
@@ -136,7 +139,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
         ids = [pid for pid, _ in unique_pids]
         t1b = time.perf_counter()
         league_rows = (
-            TourneyRow.objects.filter(player_id__in=ids, position__lte=how_many_results_public_site)
+            TourneyRow.objects.filter(player_id__in=ids, position__lte=get_max_results_limit())
             .values_list("player_id", "result__league")
             .distinct()
         )
@@ -174,7 +177,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
             p1_ids = [pid for pid, _ in priority1_results]
             t2 = time.perf_counter()
             p1_league_rows = (
-                TourneyRow.objects.filter(player_id__in=p1_ids, position__lte=how_many_results_public_site)
+                TourneyRow.objects.filter(player_id__in=p1_ids, position__lte=get_max_results_limit())
                 .values_list("player_id", "result__league")
                 .distinct()
             )
@@ -198,7 +201,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                     "SELECT player_id, nickname FROM tourney_results_tourneyrow "
                     "WHERE UPPER(nickname) >= %s AND UPPER(nickname) < %s "
                     "AND position <= %s LIMIT %s",
-                    [lo, hi, how_many_results_public_site, limit * 20],
+                    [lo, hi, get_max_results_limit(), limit * 20],
                 )
                 raw = cursor.fetchall()
 
@@ -215,7 +218,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
             p2_ids = [pid for pid, _ in priority2_results]
             t2b = time.perf_counter()
             p2_league_rows = (
-                TourneyRow.objects.filter(player_id__in=p2_ids, position__lte=how_many_results_public_site)
+                TourneyRow.objects.filter(player_id__in=p2_ids, position__lte=get_max_results_limit())
                 .values_list("player_id", "result__league")
                 .distinct()
             )
@@ -245,7 +248,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                 p3_ids = [pid for pid, _ in priority3_results]
                 t3b = time.perf_counter()
                 p3_league_rows = (
-                    TourneyRow.objects.filter(player_id__in=p3_ids, position__lte=how_many_results_public_site)
+                    TourneyRow.objects.filter(player_id__in=p3_ids, position__lte=get_max_results_limit())
                     .values_list("player_id", "result__league")
                     .distinct()
                 )
@@ -261,7 +264,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
             if len(all_results) < page and fragments:
                 limit = page - len(all_results)
                 conditions = " AND ".join(["UPPER(nickname) LIKE %s"] * len(fragments))
-                params: list = [f"%{frag.upper()}%" for frag in fragments] + [how_many_results_public_site, limit * 20]
+                params: list = [f"%{frag.upper()}%" for frag in fragments] + [get_max_results_limit(), limit * 20]
                 sql = f"SELECT player_id, nickname FROM tourney_results_tourneyrow WHERE {conditions} AND position <= %s LIMIT %s"
 
                 t4 = time.perf_counter()
@@ -281,7 +284,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                 p4_ids = [pid for pid, _ in priority4_results]
                 t4b = time.perf_counter()
                 p4_league_rows = (
-                    TourneyRow.objects.filter(player_id__in=p4_ids, position__lte=how_many_results_public_site)
+                    TourneyRow.objects.filter(player_id__in=p4_ids, position__lte=get_max_results_limit())
                     .values_list("player_id", "result__league")
                     .distinct()
                 )

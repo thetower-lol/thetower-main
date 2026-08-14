@@ -31,6 +31,7 @@ from .formatting import color_position_barebones
 from .models import BattleCondition
 from .models import PatchNew as Patch
 from .models import Role, TourneyResult, TourneyRow
+from .results_config import get_results_limit
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "thetower.backend.towerdb.settings")
 django.setup()
@@ -658,7 +659,9 @@ def get_tourneys(
     upper_limit = offset + limit
 
     if not hidden_features:
-        upper_limit = min(upper_limit, how_many_results_public_site)
+        result_leagues = {result.league for result in tourney_results}
+        cutoff = max(get_results_limit(league) for league in result_leagues) if result_leagues else how_many_results_public_site
+        upper_limit = min(upper_limit, cutoff)
 
     id_filtering = {"player_id__in": ids} if ids else {}
 

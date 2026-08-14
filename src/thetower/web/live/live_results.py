@@ -4,9 +4,10 @@ from time import perf_counter
 
 import streamlit as st
 
-from thetower.backend.tourney_results.constants import champ, how_many_results_public_site
+from thetower.backend.tourney_results.constants import champ
 from thetower.backend.tourney_results.data import get_tourneys
 from thetower.backend.tourney_results.models import TourneyResult
+from thetower.backend.tourney_results.results_config import get_results_limit
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import get_tourney_state
@@ -112,8 +113,11 @@ def live_results():
     with cols[0]:
         st.write("Current result (ordered)")
         display_cols = ["#", "name", "real_name", "wave"]
+        # TODO: ?results=full is an unpublished workaround for authorized users to see the complete
+        # table. A guessable query param leaks total participation — replace with something more
+        # secure (e.g. gate behind HIDDEN_FEATURES or real auth).
         results_full = st.query_params.get("results") == "full"
-        row_limit = None if results_full else min(how_many_results_public_site, 5000)
+        row_limit = None if results_full else min(get_results_limit(league), 5000)
         display_df = ldf_display[display_cols][:row_limit]
         if tourney_active:
             display_df = display_df.style.map(

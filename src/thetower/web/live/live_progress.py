@@ -72,7 +72,9 @@ def live_progress():
     tourney = qs[0]
     pdf = get_tourneys([tourney])
 
-    # Fill up progress calculation
+    # Fill up progress calculation, as a percentage of last tournament's players
+    # (absolute counts would leak total participation)
+    reference_total = len(pdf.id)
     fill_ups = []
     for dt, sdf in df.groupby("datetime"):
         joined_ids = set(sdf.player_id.unique())
@@ -80,7 +82,8 @@ def live_progress():
         dt_aware = dt if dt.tzinfo is not None else dt.replace(tzinfo=datetime.timezone.utc)
         dt_local = dt_aware.astimezone(user_tz).replace(tzinfo=None)
         fillup = sum([player_id in joined_ids for player_id in pdf.id])
-        fill_ups.append((dt_local, fillup))
+        fillup_pct = round(fillup / reference_total * 100, 1) if reference_total else 0.0
+        fill_ups.append((dt_local, fillup_pct))
 
     # Create fill up progress plot
     fill_ups = pd.DataFrame(sorted(fill_ups), columns=["time", "fillup"])
@@ -88,11 +91,12 @@ def live_progress():
     fig.update_traces(mode="lines+markers", fill="tozeroy")
     fig.update_layout(
         xaxis_title="Time",
-        yaxis_title="Fill up [players]",
+        yaxis_title="Fill up [% of last tournament's players]",
         hovermode="closest",
         height=400,
         margin=dict(l=20, r=20, t=40, b=20),
         xaxis_tickformat=time_fmt,
+        yaxis_ticksuffix="%",
     )
     st.plotly_chart(fig, width="stretch")
 

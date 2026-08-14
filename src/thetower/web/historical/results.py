@@ -11,13 +11,13 @@ from thetower.backend.tourney_results.constants import (
     Options,
     all_relics,
     how_many_results_hidden_site,
-    how_many_results_public_site,
     sus_person,
 )
 from thetower.backend.tourney_results.data import get_results_for_patch, get_sus_ids, get_tourneys
 from thetower.backend.tourney_results.formatting import am_i_sus, color_position__top, make_player_url, strike
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyResult
+from thetower.backend.tourney_results.results_config import get_results_limit
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.util import escape_df_html, get_league_selection, get_options
 
@@ -234,7 +234,7 @@ class Results:
         date = self.top_of_results()
 
         step = 100
-        total_results = how_many_results_hidden_site if self.hidden_features else how_many_results_public_site
+        total_results = how_many_results_hidden_site if self.hidden_features else get_results_limit(self.league)
 
         step = self.results_col_page.number_input("Results per page", min_value=100, max_value=max(total_results, 100), step=100)
         total_pages = total_results // step if total_results // step == total_results / step else total_results // step + 1

@@ -1,8 +1,11 @@
+import os
+
 import pandas as pd
 import streamlit as st
 
 from thetower.backend.tourney_results.data import date_to_patch
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
+from thetower.backend.tourney_results.results_config import get_results_limit
 from thetower.web.util import get_league_selection, get_options
 
 
@@ -30,6 +33,15 @@ def compute_counts():
         "Top 10000": {"counts": [1, 100, 500, 1000, 2000, 5000, 7500, 10000], "limit": 10100},
         "Top 25000": {"counts": [1, 100, 500, 1000, 5000, 10000, 15000, 20000, 25000], "limit": 25100},
     }
+
+    # Public site: only offer ranges fully inside the league's results cap, so zero cells
+    # never reveal where participation ends
+    if not os.environ.get("HIDDEN_FEATURES"):
+        cap = get_results_limit(league)
+        cutoff_ranges = {name: cfg for name, cfg in cutoff_ranges.items() if max(cfg["counts"]) <= cap}
+        if not cutoff_ranges:
+            counts = [c for c in [1, 10, 25, 50, 100, 200, 400, 600, 800, 1000] if c <= cap]
+            cutoff_ranges = {f"Top {counts[-1]}": {"counts": counts, "limit": counts[-1] + 100}}
 
     # Create columns for controls
     range_col, bc_col, slid_col, transpose_col = st.columns([1, 1, 2, 2])
