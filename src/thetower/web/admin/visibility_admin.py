@@ -63,13 +63,19 @@ def _render_config_section(
 
     with st.form(key=f"form_{rerun_key}"):
         new_default = st.checkbox("Default (apply to pages not listed below)", value=default_on_disk, key=f"default_{rerun_key}")
-        st.markdown("Per-page overrides:")
+        st.markdown("Per-page overrides ('(not set)' inherits the default; Save writes only explicit true/false entries):")
         # Show all known keys; also show any extra keys present in the file
         all_keys = sorted(set(PAGE_KEYS) | set(pages_on_disk.keys()))
+        options = ["(not set)", "true", "false"]
         new_pages: Dict[str, bool] = {}
         for page in all_keys:
-            current = bool(pages_on_disk.get(page, default_on_disk))
-            new_pages[page] = st.checkbox(page, value=current, key=f"{rerun_key}_{page}")
+            if page in pages_on_disk:
+                current = "true" if pages_on_disk[page] else "false"
+            else:
+                current = "(not set)"
+            choice = st.selectbox(page, options=options, index=options.index(current), key=f"{rerun_key}_{page}")
+            if choice != "(not set)":
+                new_pages[page] = choice == "true"
 
         if st.form_submit_button("Save"):
             new_mapping = {"default": new_default, "pages": new_pages}
@@ -98,7 +104,12 @@ def _render_config_section(
     st.markdown("**Resolved values (from cache / disk)**")
     rows = []
     for p in sorted(set(PAGE_KEYS) | set(pages_on_disk.keys())):
-        rows.append({"page": p, "resolved": resolve_fn(p)})
+        on_disk = pages_on_disk.get(p)
+        rows.append({
+            "page": p,
+            "in file": "(not set)" if on_disk is None else str(bool(on_disk)).lower(),
+            "resolved": resolve_fn(p),
+        })
     st.table(rows)
 
 
