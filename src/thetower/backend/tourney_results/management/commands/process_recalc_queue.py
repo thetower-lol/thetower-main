@@ -78,7 +78,7 @@ class Command(BaseCommand):
                         "league_priority": """
                         CASE league
                             WHEN 'Legend' THEN 1
-                            WHEN 'Champions' THEN 2
+                            WHEN 'Champion' THEN 2
                             WHEN 'Platinum' THEN 3
                             WHEN 'Gold' THEN 4
                             WHEN 'Silver' THEN 5
