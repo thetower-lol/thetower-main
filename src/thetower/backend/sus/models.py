@@ -124,7 +124,7 @@ class LinkedAccount(models.Model):
     platform = models.CharField(max_length=20, choices=Platform.choices, help_text="Social media platform")
     account_id = models.CharField(max_length=100, help_text="Platform-specific account ID or username")
     display_name = models.CharField(max_length=100, blank=True, null=True, help_text="Display name on this platform (optional)")
-    verified = models.BooleanField(default=False, help_text="Has this account link been verified?")
+    verified = models.BooleanField(default=True, help_text="DEPRECATED: always True; an active link is what makes an account verified (use 'active' instead)")
     verified_at = models.DateTimeField(null=True, blank=True, default=timezone.now, help_text="When this account was verified")
     primary = models.BooleanField(default=False, help_text="Is this the primary account for this platform? (only one per player per platform)")
     active = models.BooleanField(
