@@ -110,6 +110,7 @@ def execute(league):
         logging.error(f"All 3 attempts returned empty data for {league}, not saving file.")
         return
 
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)  # a new league has no folder yet
     df.to_csv(file_path, index=False, compression="gzip")
     logging.info(f"Successfully stored file {file_path}")
 
