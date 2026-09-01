@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from django.db.models import Q
 
-from thetower.backend.tourney_results.constants import champ, legend, leagues
+from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.data import get_patches
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 
@@ -29,7 +29,7 @@ _STAT_COLORS = {
 }
 
 # One colour per league (cycling for overflow)
-_LEAGUE_COLORS = ["#9b59b6", "#e67e22", "#1abc9c", "#f39c12", "#2980b9", "#c0392b"]
+_LEAGUE_COLORS = ["#9b59b6", "#e67e22", "#1abc9c", "#f39c12", "#2980b9", "#c0392b", "#e84393"]
 
 
 def _compute_stats(waves: list[int]) -> tuple[int | None, float | None, float | None]:
@@ -64,7 +64,7 @@ def compute_league_stats() -> None:
     selected_leagues = filter_col2.multiselect(
         "Leagues",
         options=leagues,
-        default=[legend, champ],
+        default=leagues[:2],
         help="Select one or more leagues to display.",
     )
 

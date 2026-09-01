@@ -7,7 +7,7 @@ from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 from thetower.backend.tourney_results.tourney_utils import get_tourney_state
 
-_DEFAULT_LEAGUES = ["Legend", "Champion", "Platinum", "Gold"]
+_DEFAULT_LEAGUES = leagues[:4]
 _PLACES = list(range(1, 31))
 
 
@@ -151,8 +151,7 @@ def compute_static_placement():
     st.dataframe(styled, hide_index=True, width="stretch", height=row_height, column_config=col_config)
 
     with st.expander("How to read this table"):
-        st.markdown(
-            """
+        st.markdown("""
 **Methodology** — players in the league are sorted by wave (highest first) and divided into
 groups of *n* (where *n* = total players ÷ 30). The first group of *n* players would all be
 1st-place finishers in a perfect draw; the next *n* would be 2nd-place finishers, and so on.
@@ -166,8 +165,7 @@ above this wave, half below.
 **Why it differs from your actual result** — bracket assignment is random. You might land in a
 bracket where your wave earns you 10th instead of 15th — or 20th. The static table shows what
 a fair draw would expect.
-"""
-        )
+""")
 
 
 compute_static_placement()

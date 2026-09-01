@@ -73,7 +73,7 @@ def compute_median_history():
     selected_leagues = st.multiselect(
         "Leagues",
         leagues,
-        default=["Legend", "Champion", "Platinum", "Gold"],
+        default=leagues[:4],
         help="Select leagues to display",
     )
 

@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 import pandas as pd
 import streamlit as st
 
-from thetower.backend.tourney_results.constants import leagues
+from thetower.backend.tourney_results.constants import leagues, top_league
 from thetower.backend.tourney_results.formatting import BASE_URL
 from thetower.backend.tourney_results.models import TourneyRow
 
@@ -12,12 +12,10 @@ from thetower.backend.tourney_results.models import TourneyRow
 def main():
     st.title("League Progression Analysis — Admin")
 
-    st.markdown(
-        """
+    st.markdown("""
     This page shows player IDs that have no participation in the league preceding the selected league.
     Useful for identifying players who reached a league without participating in the previous tier.
-    """
-    )
+    """)
 
     # League selector and controls in one row
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -25,7 +23,7 @@ def main():
         selected_league = st.selectbox(
             "Select League to Analyze",
             options=leagues,
-            index=leagues.index("Legend"),  # Default to Legend
+            index=leagues.index(top_league),
             help="Choose the league to analyze progression for",
             label_visibility="collapsed",
         )
@@ -41,7 +39,7 @@ def main():
         page = st.number_input("Page", min_value=1, value=1, step=1, help="Page number to display", label_visibility="collapsed")
 
     # Define league hierarchy (from lowest to highest)
-    league_hierarchy = ["Copper", "Silver", "Gold", "Platinum", "Champion", "Legend"]
+    league_hierarchy = leagues[::-1]
 
     try:
         # Find the league that precedes the selected one

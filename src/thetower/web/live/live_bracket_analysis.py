@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from thetower.backend.tourney_results.league_rules import get_league_rules
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
@@ -24,6 +25,7 @@ def bracket_analysis():
     t2_start = perf_counter()
 
     options, league, is_mobile = setup_common_ui()
+    rules = get_league_rules(league)
 
     render_data_status(league, "live_bracket_analysis")
 
@@ -100,8 +102,8 @@ def bracket_analysis():
     salt_cols = st.columns(2 if not is_mobile else 1)
 
     with salt_cols[0]:
-        if league == "Legend":
-            st.info("Legend is the top tier — players cannot be promoted further.")
+        if rules.promote_cutoff is None:
+            st.info(f"{league} is the top tier — players cannot be promoted further.")
         elif bracket_stats["hardest_promotion"] is not None:
             bracket_id = bracket_stats["hardest_promotion"]
             wave = bracket_stats["hardest_promotion_wave"]
@@ -112,7 +114,7 @@ def bracket_analysis():
             st.info("Not enough data for promotion bracket (need at least 4 players per bracket).")
 
     with salt_cols[1] if not is_mobile else salt_cols[0]:
-        if league in ("Copper", "Silver", "Gold"):
+        if rules.relegate_cutoff is None:
             st.info(f"{league} is a protected tier — players cannot be demoted from it.")
         elif bracket_stats["hardest_relegation"] is not None:
             bracket_id = bracket_stats["hardest_relegation"]
@@ -131,8 +133,8 @@ def bracket_analysis():
     spoon_cols = st.columns(2 if not is_mobile else 1)
 
     with spoon_cols[0]:
-        if league == "Legend":
-            st.info("Legend is the top tier — players cannot be promoted further.")
+        if rules.promote_cutoff is None:
+            st.info(f"{league} is the top tier — players cannot be promoted further.")
         elif bracket_stats["easiest_promotion"] is not None:
             bracket_id = bracket_stats["easiest_promotion"]
             wave = bracket_stats["easiest_promotion_wave"]
@@ -143,7 +145,7 @@ def bracket_analysis():
             st.info("Not enough data for promotion bracket (need at least 4 players per bracket).")
 
     with spoon_cols[1] if not is_mobile else spoon_cols[0]:
-        if league in ("Copper", "Silver", "Gold"):
+        if rules.relegate_cutoff is None:
             st.info(f"{league} is a protected tier — players cannot be demoted from it.")
         elif bracket_stats["easiest_relegation"] is not None:
             bracket_id = bracket_stats["easiest_relegation"]

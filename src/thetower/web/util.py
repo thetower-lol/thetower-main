@@ -7,7 +7,7 @@ import plotly.express as px
 import streamlit as st
 from streamlit_extras.let_it_rain import rain
 
-from thetower.backend.tourney_results.constants import Graph, Options, leagues
+from thetower.backend.tourney_results.constants import Graph, Options, league_min_patch, leagues
 
 
 def get_user_tz() -> zoneinfo.ZoneInfo:
@@ -137,17 +137,15 @@ def get_league_selection(options=None, patch=None):
         league_index = leagues.index(st.session_state.selected_league)
         league = st.radio("League", leagues, league_index, key="league_selector", on_change=league_changed)
 
-        # Force Champion league for historical patches if Legend is selected
-        if (
-            patch
-            and league == "Legend"
-            and hasattr(patch, "version_minor")
-            and isinstance(patch.version_minor, (int, float))
-            and patch.version_minor < 25
-        ):
-            league = "Champion"
-            st.info("Using Champion league for historical patch (Legend not available)")
-            st.session_state.selected_league = league
+        # Historical patches predate the newest leagues: step down to the highest league that existed then
+        version_minor = getattr(patch, "version_minor", None) if patch else None
+        if isinstance(version_minor, (int, float)):
+            requested = league
+            while league in league_min_patch and version_minor < league_min_patch[league]:
+                league = leagues[leagues.index(league) + 1]
+            if league != requested:
+                st.info(f"Using {league} league for historical patch ({requested} not available)")
+                st.session_state.selected_league = league
 
     return st.session_state.selected_league
 

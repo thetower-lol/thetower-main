@@ -2,7 +2,7 @@ import os
 
 import streamlit as st
 
-from thetower.backend.tourney_results.constants import leagues
+from thetower.backend.tourney_results.constants import leagues, top_league
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import check_live_entry
@@ -28,14 +28,14 @@ def setup_common_ui(show_league_selector: bool = True):
     # Check if we have a player_id in query params
     if player_id := options.current_player_id:
         # Get league directly without showing selector
-        league = get_league_for_player(player_id) or "Legend"
+        league = get_league_for_player(player_id) or top_league
         st.session_state.selected_league = league
     else:
         # Either show the selector or use existing/default league without rendering
         if show_league_selector:
             league = get_league_selection(options)
         else:
-            league = st.session_state.get("selected_league", "Legend")
+            league = st.session_state.get("selected_league", top_league)
 
     with st.sidebar:
         is_mobile = st.session_state.get("mobile_view", False)

@@ -5,10 +5,10 @@ import json
 import logging
 from time import perf_counter
 
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-import pandas as pd
 from thetower.backend.tourney_results.constants import leagues
 
 # Try to import thetower_bcs with graceful fallback
@@ -34,6 +34,15 @@ tourney_id, tourney_date, days_until, _ = TournamentPredictor.get_tournament_inf
 
 # BCs are revealed this many days before the tournament
 BC_DAYS_EARLY = 1
+
+
+def _predict(league: str) -> list[str]:
+    """Battle conditions for a league, or the predictor's error for a league it does not model yet."""
+    try:
+        return predict_future_tournament(tourney_id, league)
+    except ValueError as exc:
+        return [f"\u26a0\ufe0f {exc}"]
+
 
 st.markdown("# Battle Conditions")
 if days_until > BC_DAYS_EARLY:
@@ -84,7 +93,7 @@ else:
     st.markdown(f"## Tournament {'is today!' if days_until == 0 else f'is on {tourney_date}'}")
 
     st.dataframe(
-        pd.DataFrame.from_dict({league: predict_future_tournament(tourney_id, league) for league in leagues}, orient="index").transpose().fillna(""),
+        pd.DataFrame.from_dict({league: _predict(league) for league in leagues}, orient="index").transpose().fillna(""),
         width="stretch",
     )
 
