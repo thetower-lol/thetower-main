@@ -7,7 +7,7 @@ import plotly.express as px
 import streamlit as st
 
 from thetower.backend.tourney_results.constants import leagues as ALL_LEAGUES
-from thetower.backend.tourney_results.formatting import make_player_url
+from thetower.backend.tourney_results.formatting import format_wave, make_player_url
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.historical.proximal_utils import get_proximal_players
@@ -225,7 +225,8 @@ def peer_watch():
     display_df = latest_df.loc[:, display_cols]
 
     css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-    st.write(display_df.style.format(make_player_url, subset=["player_id"]).to_html(escape=False), unsafe_allow_html=True)
+    styled = display_df.style.format(make_player_url, subset=["player_id"]).format(format_wave, subset=["wave"])
+    st.write(styled.to_html(escape=False), unsafe_allow_html=True)
     with open(css_path, "r") as infile:
         st.write(f"<style>{infile.read()}</style>", unsafe_allow_html=True)
 

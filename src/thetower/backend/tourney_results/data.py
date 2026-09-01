@@ -50,7 +50,7 @@ def date_to_patch(date: datetime.datetime) -> Optional[Patch]:
 
 
 @ttl_cache(maxsize=512, ttl=60)
-def wave_to_role_in_patch(roles: list[Role], role_bot_top: list[tuple[int, int]], wave: int) -> Optional[Role]:
+def wave_to_role_in_patch(roles: list[Role], role_bot_top: list[tuple[int, int]], wave: float) -> Optional[Role]:
     for role, (wave_bottom, wave_top) in zip(roles, role_bot_top):
         if wave >= wave_bottom and wave < wave_top:
             return role
@@ -80,7 +80,7 @@ def patch_to_roles(league):
     return patch_to_roles
 
 
-def wave_to_role(wave: int, patch: Optional[Patch], league: str) -> Optional[Role]:
+def wave_to_role(wave: float, patch: Optional[Patch], league: str) -> Optional[Role]:
     if not patch:
         return None
 

@@ -9,6 +9,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from thetower.backend.tourney_results.constants import Graph, Options, leagues, legend, top_league
+from thetower.backend.tourney_results.formatting import format_wave
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.overview_cache import read_overview_cache
 
@@ -316,7 +317,7 @@ def render_league_standings(league: str, players: list[dict], is_top: bool = Fal
             f'<div style="flex: 1; min-width: 110px; text-align: center; padding: 0.75rem; background: {bg}; border-radius: 7px; box-shadow: 0 1.5px 3px rgba(0,0,0,0.2);">'
             f'<div style="font-size: 1.5rem;">{_MEDAL_ICONS[idx]}</div>'
             f'<div style="font-size: 0.85rem; font-weight: bold; color: #1a1a1a; margin: 0.375rem 0;">{name}</div>'
-            f'<div style="font-size: 0.8rem; font-weight: bold; color: #333333;">Wave {wave}</div>'
+            f'<div style="font-size: 0.8rem; font-weight: bold; color: #333333;">Wave {format_wave(wave)}</div>'
             "</div>"
         )
     if len(players) >= 4:
@@ -328,7 +329,7 @@ def render_league_standings(league: str, players: list[dict], is_top: bool = Fal
             inner += (
                 f'<div style="margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(255,255,255,0.05); border-radius: 5px;">'
                 f'<div style="font-size: 0.85rem; color: #e0e0e0;"><strong>#{idx + 1}</strong> {name}</div>'
-                f'<div style="font-size: 0.75rem; color: #a0a0a0;">Wave {wave}</div>'
+                f'<div style="font-size: 0.75rem; color: #a0a0a0;">Wave {format_wave(wave)}</div>'
                 "</div>"
             )
         pills.append(

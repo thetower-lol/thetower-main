@@ -15,7 +15,7 @@ from thetower.backend.tourney_results.constants import (
     leagues,
 )
 from thetower.backend.tourney_results.data import get_details, get_patches, get_sus_ids
-from thetower.backend.tourney_results.formatting import BASE_URL, make_player_url
+from thetower.backend.tourney_results.formatting import BASE_URL, format_wave, make_player_url
 from thetower.backend.tourney_results.models import BattleCondition
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
@@ -267,7 +267,7 @@ def compute_comparison(player_id=None, canvas=st):
 
     last_results = last_results[["Name", *[f"{date.month}/{date.day}: {bc}" for date, bc in zip(last_5_tourneys, last_5_bcs)], "id"]]
     last_results.index = last_results.index + 1
-    last_results = last_results.style
+    last_results = last_results.style.format(format_wave, subset=[f"{date.month}/{date.day}: {bc}" for date, bc in zip(last_5_tourneys, last_5_bcs)])
 
     pd_datas = pd_datas.drop_duplicates()
 

@@ -117,6 +117,16 @@ def html_to_rgb(color_code, transparency=None):
         raise ValueError("Invalid HTML color code")
 
 
+def format_wave(wave) -> str:
+    """Render a wave for display: whole waves as integers, fractional ones (the v29+ tiebreaker) trimmed to at most 4 decimals."""
+    if wave is None or pd.isna(wave):
+        return ""
+    value = float(wave)
+    if value.is_integer():
+        return str(int(value))
+    return f"{value:.4f}".rstrip("0").rstrip(".")
+
+
 def style_wave_and_position(df: pd.DataFrame, wave_col: str = "wave", position_col: str = "#") -> pd.io.formats.style.Styler:
     """Return a Pandas Styler with wave-strata and position coloring applied.
 
@@ -145,5 +155,8 @@ def style_wave_and_position(df: pd.DataFrame, wave_col: str = "wave", position_c
 
     if position_col in df.columns:
         styler = styler.map(color_position, subset=[position_col])
+
+    if wave_col in df.columns:
+        styler = styler.format(format_wave, subset=[wave_col])
 
     return styler

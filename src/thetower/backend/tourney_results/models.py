@@ -188,7 +188,7 @@ class TourneyRow(models.Model):
     player_id = models.CharField(max_length=32, null=False, blank=False, db_index=True, help_text="Player id from The Tower")
     position = models.IntegerField(null=False, blank=False, help_text="Position in a given tourney")
     nickname = models.CharField(max_length=32, null=False, blank=False, help_text="Tourney name")
-    wave = models.IntegerField(null=False, blank=False, help_text="Tourney score")
+    wave = models.FloatField(null=False, blank=False, help_text="Tourney score; whole waves before v29, with a fractional tiebreaker from v29 on")
     avatar_id = models.SmallIntegerField(null=True, blank=True, help_text="Avatar id")
     relic_id = models.SmallIntegerField(null=True, blank=True, help_text="Relic id")
 

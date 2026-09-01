@@ -8,7 +8,7 @@ import plotly.express as px
 import streamlit as st
 
 from thetower.backend.tourney_results.data import get_player_id_lookup
-from thetower.backend.tourney_results.formatting import BASE_URL, make_player_url
+from thetower.backend.tourney_results.formatting import BASE_URL, format_wave, make_player_url
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
@@ -358,7 +358,8 @@ def live_bracket():
     display_df = ldf.loc[:, ["player_id", "name", "real_name", "wave"]]
 
     # Create table HTML
-    st.write(display_df.style.format(make_player_url, subset=["player_id"]).to_html(escape=False), unsafe_allow_html=True)
+    styled = display_df.style.format(make_player_url, subset=["player_id"]).format(format_wave, subset=["wave"])
+    st.write(styled.to_html(escape=False), unsafe_allow_html=True)
 
     css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
     with open(css_path, "r") as infile:

@@ -186,7 +186,7 @@ def build_tourney_archive(snapshots: list[Path], write_path: Optional[Path] = No
         return pd.DataFrame()
 
     rows: list[dict] = []
-    last_wave: dict[str, int] = {}
+    last_wave: dict[str, float] = {}
 
     for snap in snapshots:
         try:
@@ -215,7 +215,7 @@ def build_tourney_archive(snapshots: list[Path], write_path: Optional[Path] = No
         for row in df.itertuples(index=False):
             pid = str(row.player_id)
             try:
-                wave = int(row.wave)
+                wave = float(row.wave)
             except (ValueError, TypeError):
                 continue
             if pid not in best or wave > best[pid][0]:
@@ -354,7 +354,7 @@ def reconstruct_all_snapshots(archive: pd.DataFrame, extra_timestamps=None) -> p
     # Melt back to long form
     long = pivot.reset_index().melt(id_vars=["snapshot_time"], var_name="player_id", value_name="wave")
     long = long.dropna(subset=["wave"])  # players not yet appeared at this time
-    long["wave"] = pd.to_numeric(long["wave"], downcast="unsigned")
+    long["wave"] = pd.to_numeric(long["wave"])
 
     # Join static columns (last known values per player — they never change anyway)
     # avatar and relic are excluded: they are never displayed on any live page
@@ -423,14 +423,14 @@ def append_snapshot_to_archive(snapshot_path: Path, archive_path: Path) -> int:
     for row in snap_df.itertuples(index=False):
         pid = str(row.player_id)
         try:
-            wave = int(row.wave)
+            wave = float(row.wave)
         except (ValueError, TypeError):
             continue
         if pid not in best or wave > best[pid][0]:
             best[pid] = (wave, row)
 
     # Load last known wave per player from the existing archive.
-    last_wave: dict[str, int] = {}
+    last_wave: dict[str, float] = {}
     existing: Optional[pd.DataFrame] = None
     if archive_path.exists():
         existing = read_archive(archive_path)
@@ -599,11 +599,11 @@ def verify_archive_fidelity(snapshots: list[Path], archive_path: Path) -> tuple[
             continue
 
         # Apply same ghost-bracket dedup as build_tourney_archive: highest wave per player.
-        best: dict[str, int] = {}
+        best: dict[str, float] = {}
         for row in snap_df.itertuples(index=False):
             pid = str(row.player_id)
             try:
-                wave = int(row.wave)
+                wave = float(row.wave)
             except (ValueError, TypeError):
                 continue
             if pid not in best or wave > best[pid]:
@@ -611,9 +611,9 @@ def verify_archive_fidelity(snapshots: list[Path], archive_path: Path) -> tuple[
 
         # Reconstruct from archive at this snapshot's timestamp.
         reconstructed = reconstruct_at(archive, snap_time)
-        recon_waves: dict[str, int] = {}
+        recon_waves: dict[str, float] = {}
         if not reconstructed.empty:
-            recon_waves = dict(zip(reconstructed["player_id"].astype(str), reconstructed["wave"].astype(int)))
+            recon_waves = dict(zip(reconstructed["player_id"].astype(str), reconstructed["wave"].astype(float)))
 
         for pid, wave in best.items():
             if pid not in recon_waves:

@@ -14,7 +14,7 @@ from thetower.backend.tourney_results.constants import (
     sus_person,
 )
 from thetower.backend.tourney_results.data import get_results_for_patch, get_sus_ids, get_tourneys
-from thetower.backend.tourney_results.formatting import am_i_sus, color_position__top, make_player_url, strike
+from thetower.backend.tourney_results.formatting import am_i_sus, color_position__top, format_wave, make_player_url, strike
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.results_config import get_results_limit
@@ -187,6 +187,7 @@ class Results:
             )
             .map(color_position__top, subset=["#"])
             .map(am_i_sus, subset=["real_name"])
+            .format(format_wave, subset=[date, *previous_4_dates])
         )
 
         return to_be_displayed
@@ -225,7 +226,11 @@ class Results:
             to_be_displayed["sus_me"] = [self._make_sus_link(id, name) for id, name in zip(to_be_displayed.id, to_be_displayed.tourney_name)]
 
         to_be_displayed = (
-            to_be_displayed[indices].style.apply(styling, axis=1).map(color_position__top, subset=["#"]).map(am_i_sus, subset=["real_name"])
+            to_be_displayed[indices]
+            .style.apply(styling, axis=1)
+            .map(color_position__top, subset=["#"])
+            .map(am_i_sus, subset=["real_name"])
+            .format(format_wave, subset=["wave"])
         )
 
         return to_be_displayed

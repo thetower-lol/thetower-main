@@ -23,7 +23,7 @@ from thetower.backend.tourney_results.data import (
     is_sus,
     is_under_review,
 )
-from thetower.backend.tourney_results.formatting import BASE_URL, color_position
+from thetower.backend.tourney_results.formatting import BASE_URL, color_position, format_wave
 from thetower.backend.tourney_results.models import BattleCondition
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyRow
@@ -143,6 +143,7 @@ def compute_player_lookup():
                 axis=1,
             )
             .map(color_position, subset=["#"])
+            .format(format_wave, subset=["wave"])
         )
 
     player_df = player_df.rename({"tourney_name": "name", "position": "#"}, axis=1)
@@ -439,15 +440,19 @@ def write_for_each_patch(patch_tab, player_df):
     wave_df.index = wave_df.index + 1
     position_df.index = position_df.index + 1
 
-    wave_tbdf = wave_df[["patch", "max_wave", "tourney_name", "date", "battle_conditions"]].style.apply(
-        lambda row: [
-            None,
-            None,
-            None,
-            None,
-            None,
-        ],
-        axis=1,
+    wave_tbdf = (
+        wave_df[["patch", "max_wave", "tourney_name", "date", "battle_conditions"]]
+        .style.apply(
+            lambda row: [
+                None,
+                None,
+                None,
+                None,
+                None,
+            ],
+            axis=1,
+        )
+        .format(format_wave, subset=["max_wave"])
     )
 
     position_tbdf = position_df[["patch", "max_position", "tourney_name", "date", "battle_conditions"]].style.apply(

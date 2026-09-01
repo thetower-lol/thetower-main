@@ -166,7 +166,7 @@ def create_tourney_rows(tourney_result: TourneyResult) -> None:
     TourneyRow.objects.bulk_create([TourneyRow(**data) for data in create_data])
 
 
-def calculate_positions(ids: list[int], indices: list[int], waves: list[int], exclude_ids: set[int]) -> list[int]:
+def calculate_positions(ids: list[int], indices: list[int], waves: list[float], exclude_ids: set[int]) -> list[int]:
     """Calculate positions for tournament participants.
 
     Args:

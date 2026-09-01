@@ -6,6 +6,7 @@ import streamlit as st
 
 from thetower.backend.tourney_results.constants import champ
 from thetower.backend.tourney_results.data import get_tourneys
+from thetower.backend.tourney_results.formatting import format_wave
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.results_config import get_results_limit
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
@@ -58,7 +59,7 @@ def live_results():
     # Compute position deltas vs. the prior checkpoint snapshot
     sorted_datetimes = sorted(df["datetime"].unique(), reverse=True)
     prior_positions: dict[str, int] = {}
-    prior_waves: dict[str, int] = {}
+    prior_waves: dict[str, float] = {}
     prior_joined_ids: set[str] = set()
     if len(sorted_datetimes) >= 2:
         prior_moment = sorted_datetimes[1]
@@ -89,15 +90,15 @@ def live_results():
             return f"{current_pos} ↓{abs(delta)}"
         return str(current_pos)
 
-    def _format_wave_delta(current_wave: int, player_id: str) -> str:
+    def _format_wave_delta(current_wave: float, player_id: str) -> str:
         if player_id not in prior_waves:
-            return str(current_wave)
+            return format_wave(current_wave)
         delta = current_wave - prior_waves[player_id]
         if delta > 0:
-            return f"{current_wave} (+{delta})"
+            return f"{format_wave(current_wave)} (+{format_wave(delta)})"
         if delta < 0:
-            return f"{current_wave} ({delta})"
-        return str(current_wave)
+            return f"{format_wave(current_wave)} ({format_wave(delta)})"
+        return format_wave(current_wave)
 
     tourney_active = get_tourney_state().is_active
 
@@ -128,6 +129,8 @@ def live_results():
                 ),
                 subset=["#", "wave"],
             )
+        else:
+            display_df = display_df.style.format(format_wave, subset=["wave"])
         st.dataframe(
             display_df,
             height=700,
