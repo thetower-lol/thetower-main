@@ -37,11 +37,12 @@ BC_DAYS_EARLY = 1
 
 
 def _predict(league: str) -> list[str]:
-    """Battle conditions for a league, or the predictor's error for a league it does not model yet."""
+    """Battle conditions for a league, or a one-line notice when the predictor does not model it yet."""
     try:
         return predict_future_tournament(tourney_id, league)
-    except ValueError as exc:
-        return [f"\u26a0\ufe0f {exc}"]
+    except ValueError:
+        logging.warning(f"Battle conditions unavailable for {league}: the predictor does not know this league yet")
+        return [f"{league} battle conditions are unavailable"]
 
 
 st.markdown("# Battle Conditions")
