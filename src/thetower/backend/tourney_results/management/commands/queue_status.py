@@ -13,7 +13,8 @@ from django.core.management.base import BaseCommand
 from django.db.models import Count
 from django.utils import timezone
 
-from .models import TourneyResult
+from ...models import TourneyResult
+from ...tourney_utils import league_priority_expression
 
 
 class Command(BaseCommand):
@@ -47,21 +48,7 @@ class Command(BaseCommand):
             # Show breakdown by league (ordered by priority)
             pending_by_league = (
                 TourneyResult.objects.filter(needs_recalc=True)
-                .extra(
-                    select={
-                        "league_priority": """
-                        CASE league
-                            WHEN 'Legend' THEN 1
-                            WHEN 'Champion' THEN 2
-                            WHEN 'Platinum' THEN 3
-                            WHEN 'Gold' THEN 4
-                            WHEN 'Silver' THEN 5
-                            WHEN 'Copper' THEN 6
-                            ELSE 7
-                        END
-                    """
-                    }
-                )
+                .annotate(league_priority=league_priority_expression())
                 .values("league")
                 .annotate(count=Count("id"))
                 .order_by("league_priority")
@@ -74,21 +61,7 @@ class Command(BaseCommand):
             # Show next few tournaments to be processed
             next_tournaments = (
                 TourneyResult.objects.filter(needs_recalc=True, recalc_retry_count__lt=3)
-                .extra(
-                    select={
-                        "league_priority": """
-                        CASE league
-                            WHEN 'Legend' THEN 1
-                            WHEN 'Champion' THEN 2
-                            WHEN 'Platinum' THEN 3
-                            WHEN 'Gold' THEN 4
-                            WHEN 'Silver' THEN 5
-                            WHEN 'Copper' THEN 6
-                            ELSE 7
-                        END
-                    """
-                    }
-                )
+                .annotate(league_priority=league_priority_expression())
                 .order_by("league_priority", "-date")[:5]
             )
 

@@ -16,7 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from ...models import TourneyResult
-from ...tourney_utils import reposition
+from ...tourney_utils import league_priority_expression, reposition
 
 logger = logging.getLogger(__name__)
 
@@ -68,26 +68,11 @@ class Command(BaseCommand):
         """
         with transaction.atomic():
             # Get next tournament needing recalc with pessimistic lock
-            # Prioritize by: 1) League importance, 2) Newest date first
-            # League priority: Legend > Champion > Platinum > Gold > Silver > Copper
+            # Prioritize by: 1) League importance (canonical `leagues` order), 2) Newest date first
             tournament = (
                 TourneyResult.objects.select_for_update()
                 .filter(needs_recalc=True, recalc_retry_count__lt=max_retries)
-                .extra(
-                    select={
-                        "league_priority": """
-                        CASE league
-                            WHEN 'Legend' THEN 1
-                            WHEN 'Champion' THEN 2
-                            WHEN 'Platinum' THEN 3
-                            WHEN 'Gold' THEN 4
-                            WHEN 'Silver' THEN 5
-                            WHEN 'Copper' THEN 6
-                            ELSE 7
-                        END
-                    """
-                    }
-                )
+                .annotate(league_priority=league_priority_expression())
                 .order_by("league_priority", "-date")
                 .first()
             )  # High priority leagues first, then newest

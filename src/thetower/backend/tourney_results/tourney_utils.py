@@ -13,12 +13,13 @@ from typing import Optional
 import anthropic
 import pandas as pd
 from django.apps import apps
+from django.db.models import Case, IntegerField, Value, When
 
 from thetower.backend.env_config import get_csv_data
 
 # Local imports
 from .archive_utils import STRING_COLUMN_DTYPES, list_archives, read_archive, reconstruct_at
-from .constants import leagues, legend
+from .constants import leagues, top_league
 from .data import get_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_ids, get_tourneys
 from .models import PromptTemplate, TourneyResult, TourneyRow
 from .shun_config import include_shun_enabled_for
@@ -255,6 +256,19 @@ def reposition(tourney_result: TourneyResult, testrun: bool = False, verbose: bo
     return changes
 
 
+def league_priority_expression() -> Case:
+    """ORM expression ranking a TourneyResult's league by the canonical ``leagues`` order (0 = top).
+
+    Shared by the recalc worker and the queue-status views so every consumer orders
+    the queue the same way, and a new league needs no change beyond ``constants``.
+    """
+    return Case(
+        *[When(league=league, then=Value(index)) for index, league in enumerate(leagues)],
+        default=Value(len(leagues)),
+        output_field=IntegerField(),
+    )
+
+
 def get_summary(last_date: datetime.datetime) -> str:
     """Generate AI summary of tournament results.
 
@@ -266,9 +280,11 @@ def get_summary(last_date: datetime.datetime) -> str:
     """
     logging.info("Collecting ai summary data...")
 
-    qs = TourneyResult.objects.filter(league=legend, date__lte=last_date).order_by("-date")[:10]
+    qs = TourneyResult.objects.filter(league=top_league, date__lte=last_date).order_by("-date")[:10]
     tourney_dates = list(qs.values_list("date", flat=True))
-    logging.info(f"AI summary: querying {len(tourney_dates)} Legend tourneys: {tourney_dates}")
+    logging.info(f"AI summary: querying {len(tourney_dates)} {top_league} tourneys: {tourney_dates}")
+    if not tourney_dates:
+        raise ValueError(f"Missing {top_league} data: no {top_league} tournaments on or before {last_date}")
 
     df = get_tourneys(qs, offset=0, limit=50)
     logging.info(f"AI summary: got {len(df)} rows across {df['date'].nunique() if not df.empty else 0} dates")

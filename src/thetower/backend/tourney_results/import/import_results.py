@@ -17,7 +17,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 
 from thetower.backend.env_config import get_csv_data
 
-from ..constants import leagues
+from ..constants import leagues, top_league
 from ..get_results import get_file_name, get_last_date
 from ..models import BattleCondition, TourneyResult
 from ..overview_cache import regenerate_overview_cache
@@ -48,7 +48,11 @@ logging.basicConfig(level=logging.INFO)
 
 
 def update_summary(result):
-    summary = get_summary(result.date)
+    try:
+        summary = get_summary(result.date)
+    except ValueError as exc:
+        logging.error(f"Skipping the {result.league} summary: {exc}")
+        return
     result.overview = summary
     result.save()
 
@@ -121,9 +125,9 @@ def execute():
 
         create_tourney_rows(result)
 
-        # Generate summary for Legend league results
-        if league == "Legend":
-            logging.info("Generating summary for Legends league results")
+        # Generate summary for the top-league results
+        if league == top_league:
+            logging.info(f"Generating summary for {league} league results")
             thread = threading.Thread(target=update_summary, args=(result,))
             thread.start()
 

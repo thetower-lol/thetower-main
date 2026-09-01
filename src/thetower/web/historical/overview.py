@@ -8,7 +8,7 @@ from typing import Optional
 import streamlit as st
 import streamlit.components.v1 as components
 
-from thetower.backend.tourney_results.constants import Graph, Options, leagues, legend
+from thetower.backend.tourney_results.constants import Graph, Options, leagues, legend, top_league
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.overview_cache import read_overview_cache
 
@@ -185,6 +185,7 @@ def render_patch_leaderboard(top_5: list[dict]) -> None:
     ``second_wins``, ``patch_name``.
     """
     if not top_5:
+        st.info(f"Missing {top_league} data: no {top_league} first-place finishes recorded for the current patch yet.")
         return
     try:
         patch_name = top_5[0].get("patch_name", "")
@@ -226,7 +227,7 @@ def render_patch_leaderboard(top_5: list[dict]) -> None:
         pills_html = "".join(pills)
         st.html(
             f'<div style="margin: 1.5rem 0; padding: 1.125rem; background: #1e1e2e; border-radius: 8px; box-shadow: 0 3px 4.5px rgba(0,0,0,0.3);">'
-            f'<h3 style="margin: 0 0 0.75rem 0; color: #667eea; text-align: center; font-size: 1.1rem;">🏆 Patch {_esc(patch_name)} Leaderboard - Most First Place Finishes</h3>'
+            f'<h3 style="margin: 0 0 0.75rem 0; color: #667eea; text-align: center; font-size: 1.1rem;">🏆 {top_league} - Most First Place Finishes (Patch {_esc(patch_name)})</h3>'
             f'<div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 0.75rem;">{pills_html}</div>'
             "</div>"
         )
@@ -234,12 +235,13 @@ def render_patch_leaderboard(top_5: list[dict]) -> None:
         pass
 
 
-def render_legend_avg_wave_leaderboard(top_5: list[dict]) -> None:
-    """Render the Legend avg-wave leaderboard from pre-fetched data.
+def render_top_league_avg_wave_leaderboard(top_5: list[dict]) -> None:
+    """Render the top-league avg-wave leaderboard from pre-fetched data.
 
     Each item must have keys: ``real_name``, ``avg_wave``, ``tournaments``.
     """
     if not top_5:
+        st.info(f"Missing {top_league} data: no {top_league} tournaments in the current patch yet.")
         return
     try:
         pills = []
@@ -278,7 +280,7 @@ def render_legend_avg_wave_leaderboard(top_5: list[dict]) -> None:
         pills_html = "".join(pills)
         st.html(
             '<div style="margin: 1.5rem 0; padding: 1.125rem; background: #1e1e2e; border-radius: 8px; box-shadow: 0 3px 4.5px rgba(0,0,0,0.3);">'
-            '<h3 style="margin: 0 0 0.75rem 0; color: #667eea; text-align: center; font-size: 1.1rem;">📈 Legend - Highest Average Wave (Latest Patch, min 2 tournaments)</h3>'
+            f'<h3 style="margin: 0 0 0.75rem 0; color: #667eea; text-align: center; font-size: 1.1rem;">📈 {top_league} - Highest Average Wave (Latest Patch, min 2 tournaments)</h3>'
             f'<div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 0.75rem;">{pills_html}</div>'
             "</div>"
         )
@@ -286,7 +288,7 @@ def render_legend_avg_wave_leaderboard(top_5: list[dict]) -> None:
         pass
 
 
-def render_league_standings(league: str, players: list[dict], is_legend: bool = False) -> None:
+def render_league_standings(league: str, players: list[dict], is_top: bool = False) -> None:
     """Render standings for a single league from pre-fetched data.
 
     Each item in *players* must have keys: ``real_name``, ``wave``.
@@ -303,7 +305,7 @@ def render_league_standings(league: str, players: list[dict], is_legend: bool = 
         unsafe_allow_html=True,
     )
 
-    max_display = 5 if is_legend else 3
+    max_display = 5 if is_top else 3
     pills = []
     for idx in range(min(3, len(players))):
         p = players[idx]
@@ -384,17 +386,19 @@ def compute_overview(options: Options) -> None:
 
     render_patch_leaderboard(stats.get("patch_leaderboard", []))
 
-    # Overview text for Legend (single lightweight query, not in cache)
+    # Overview text for the top league (single lightweight query, not in cache)
     from thetower.backend.tourney_results.models import TourneyResult
 
     public = {"public": True} if not os.environ.get("HIDDEN_FEATURES") else {}
     try:
-        if overview_text := TourneyResult.objects.filter(league=legend, **public).latest("date").overview:
+        if overview_text := TourneyResult.objects.filter(league=top_league, **public).latest("date").overview:
             st.markdown(overview_text, unsafe_allow_html=True)
+    except TourneyResult.DoesNotExist:
+        st.warning(f"Missing {top_league} data: no {top_league} tournament results have been imported yet.")
     except Exception:
         pass
 
-    render_legend_avg_wave_leaderboard(stats.get("legend_avg_wave_leaderboard", []))
+    render_top_league_avg_wave_leaderboard(stats.get("top_league_avg_wave_leaderboard", []))
 
     last_tourney_date_str = stats.get("last_tourney_date", "")
     st.markdown(
@@ -405,14 +409,18 @@ def compute_overview(options: Options) -> None:
         unsafe_allow_html=True,
     )
 
+    # Only leagues with a tournament on the latest date are in the cache; the top league is always featured.
     league_standings = stats.get("league_standings", {})
-    render_league_standings(legend, league_standings.get(legend, []), is_legend=True)
+    if league_standings.get(top_league):
+        render_league_standings(top_league, league_standings[top_league], is_top=True)
+    else:
+        st.warning(f"Missing {top_league} data: no {top_league} results for the latest tournament date.")
 
-    other_leagues = leagues[1:]
+    other_leagues = [lg for lg in leagues if lg != top_league and league_standings.get(lg)]
     col1, spacer, col2 = st.columns([1, 0.15, 1])
     for idx, lg in enumerate(other_leagues):
         with col1 if idx % 2 == 0 else col2:
-            render_league_standings(lg, league_standings.get(lg, []), is_legend=False)
+            render_league_standings(lg, league_standings[lg], is_top=False)
 
 
 options = Options(links_toggle=False, default_graph=Graph.last_16.value, average_foreground=True)

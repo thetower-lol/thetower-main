@@ -2,7 +2,7 @@
 Overview page statistics cache.
 
 Computes and serialises the expensive DB queries needed by the overview page
-(patch leaderboard, legend avg-wave leaderboard, per-league standings) to a
+(top-league patch and avg-wave leaderboards, per-league standings) to a
 single JSON file so Streamlit can serve them without hitting the DB on every
 render.
 
@@ -44,7 +44,7 @@ def _get_cache_path() -> Path:
 
 
 def _compute_league_standings(last_tourney_date, leagues_list: list[str], excluded_ids: set) -> dict[str, list[dict]]:
-    """Return top players for each league for the given date, sus/banned filtered."""
+    """Return top players per league for the given date (sus/banned filtered); leagues with no tournament that day are omitted."""
     from .data import get_player_id_lookup
     from .models import TourneyResult, TourneyRow
 
@@ -57,11 +57,10 @@ def _compute_league_standings(last_tourney_date, leagues_list: list[str], exclud
         try:
             qs = TourneyResult.objects.filter(league=league, date=last_tourney_date, **public)
             if not qs.exists():
-                standings[league] = []
                 continue
 
             result = qs.first()
-            limit = 6 if league == "Legend" else 4
+            limit = 6 if league == leagues_list[0] else 4
 
             rows = (
                 TourneyRow.objects.filter(result=result, position__gt=0)
@@ -80,13 +79,13 @@ def _compute_league_standings(last_tourney_date, leagues_list: list[str], exclud
             ]
         except Exception:
             logger.exception("Error computing standings for league %s", league)
-            standings[league] = []
 
     return standings
 
 
 def _compute_patch_leaderboard(excluded_ids: set) -> list[dict]:
-    """Return top-5 players with most first-place finishes in the current patch."""
+    """Return top-5 players with most first-place finishes in the top league for the current patch."""
+    from .constants import top_league
     from .data import get_player_id_lookup
     from .models import PatchNew, TourneyResult, TourneyRow
 
@@ -98,7 +97,9 @@ def _compute_patch_leaderboard(excluded_ids: set) -> list[dict]:
         if not latest_patch:
             return []
 
-        tourney_results = TourneyResult.objects.filter(date__gte=latest_patch.start_date, date__lte=latest_patch.end_date, **public)
+        tourney_results = TourneyResult.objects.filter(
+            date__gte=latest_patch.start_date, date__lte=latest_patch.end_date, league=top_league, **public
+        )
         if not tourney_results.exists():
             return []
 
@@ -130,8 +131,9 @@ def _compute_patch_leaderboard(excluded_ids: set) -> list[dict]:
         return []
 
 
-def _compute_legend_avg_wave_leaderboard(excluded_ids: set) -> list[dict]:
-    """Return top-5 players by average wave in Legend for the current patch (all tourneys required)."""
+def _compute_top_league_avg_wave_leaderboard(excluded_ids: set) -> list[dict]:
+    """Return top-5 players by average wave in the top league for the current patch (all tourneys required)."""
+    from .constants import top_league
     from .data import get_player_id_lookup
     from .models import PatchNew, TourneyResult, TourneyRow
 
@@ -143,7 +145,9 @@ def _compute_legend_avg_wave_leaderboard(excluded_ids: set) -> list[dict]:
         if not latest_patch:
             return []
 
-        tourney_results = TourneyResult.objects.filter(date__gte=latest_patch.start_date, date__lte=latest_patch.end_date, league="Legend", **public)
+        tourney_results = TourneyResult.objects.filter(
+            date__gte=latest_patch.start_date, date__lte=latest_patch.end_date, league=top_league, **public
+        )
         if not tourney_results.exists():
             return []
 
@@ -173,7 +177,7 @@ def _compute_legend_avg_wave_leaderboard(excluded_ids: set) -> list[dict]:
             for pid, avg, tc in player_avg[:5]
         ]
     except Exception:
-        logger.exception("Error computing legend avg wave leaderboard")
+        logger.exception("Error computing top league avg wave leaderboard")
         return []
 
 
@@ -209,7 +213,7 @@ def compute_overview_stats() -> dict[str, Any]:
         "last_tourney_date": last_tourney_date_iso,
         "league_standings": _compute_league_standings(last_tourney_date, leagues, excluded_ids),
         "patch_leaderboard": _compute_patch_leaderboard(excluded_ids),
-        "legend_avg_wave_leaderboard": _compute_legend_avg_wave_leaderboard(excluded_ids),
+        "top_league_avg_wave_leaderboard": _compute_top_league_avg_wave_leaderboard(excluded_ids),
     }
 
 

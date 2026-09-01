@@ -132,6 +132,7 @@ class Options(BaseModel):
 medals = ["🥇", "🥈", "🥉"]
 
 
+mythic = "Mythic"
 legend = "Legend"
 champ = "Champion"
 plat = "Platinum"
@@ -139,10 +140,15 @@ gold = "Gold"
 silver = "Silver"
 copper = "Copper"
 
-leagues = [legend, champ, plat, gold, silver, copper]
+leagues = [mythic, legend, champ, plat, gold, silver, copper]
+top_league = leagues[0]
+
+# First patch (minor version) each league existed in; leagues absent here predate every tracked patch.
+league_min_patch = {mythic: 29, legend: 25}
 
 
 data_folder_name_mapping = {
+    mythic: mythic,
     legend: legend,
     "data": champ,
     "plat": plat,
