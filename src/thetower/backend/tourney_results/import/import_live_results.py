@@ -20,6 +20,7 @@ Staging snapshots are NOT deleted here.  The backup service deletes them
 (together with the tar) only after the tar is verified uploaded to R2, so a
 crash, failed upload, or full disk can never destroy the only copy.
 """
+
 import datetime
 import logging
 import os
@@ -45,34 +46,18 @@ from thetower.backend.tourney_results.archive_utils import (
     verify_tar_contents,
 )
 from thetower.backend.tourney_results.constants import leagues
+from thetower.backend.tourney_results.leaderboard_fetch import get_current_time__game_server, get_date_offset
 from thetower.backend.tourney_results.tourney_utils import get_time
 
 logging.basicConfig(level=logging.INFO)
 
 LIVE_BASE = Path(get_csv_data())
 
-# Tourney-window constants (mirrors get_live_results.py)
-_WEEKDAYS_WED = [2, 3, 4]
-_WEEKDAYS_SAT = [5, 6, 0, 1]
-
-
-def _get_current_time() -> datetime.datetime:
-    return datetime.datetime.now(datetime.UTC)
-
-
-def _get_date_offset() -> int:
-    utcnow = _get_current_time()
-    if utcnow.weekday() in _WEEKDAYS_WED:
-        return utcnow.weekday() - 2
-    elif utcnow.weekday() in _WEEKDAYS_SAT:
-        return (utcnow.weekday() - 5) % 7
-    raise ValueError(f"Unexpected weekday: {utcnow.weekday()}")
-
 
 def _in_tourney_window() -> bool:
     """True while the tourney is running (entry open or extended period)."""
-    date_offset = _get_date_offset()
-    current_hour = _get_current_time().hour
+    date_offset = get_date_offset()
+    current_hour = get_current_time__game_server().hour
     return date_offset == 0 or (date_offset == 1 and current_hour <= 5)
 
 
