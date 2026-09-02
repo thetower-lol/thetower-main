@@ -22,7 +22,6 @@ from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 from thetower.backend.tourney_results.results_config import get_max_results_limit
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
-from thetower.backend.tourney_results.tourney_utils import get_latest_live_df
 from thetower.web.historical.proximal_utils import get_proximal_players
 from thetower.web.historical.search import compute_search
 from thetower.web.util import escape_df_html, get_league_selection
@@ -353,11 +352,14 @@ def get_bracket_players(player_id: str) -> tuple[list[str], str | None]:
         Tuple of (list of player IDs in the same bracket, league name), or ([], None) if not found
     """
     try:
-        # Get live data for all available leagues
+        # Get live data for all available leagues.
+        # Bracket-filtered so partial brackets stay hidden while entry is open (anti-snipe).
+        from thetower.web.live.data_ops import get_latest_bracket_filtered_df
+
         for league in leagues:
             include_shun = include_shun_enabled_for("comparison")
             include_sus = include_sus_enabled_for("comparison")
-            df = get_latest_live_df(league, include_shun, include_sus)
+            df = get_latest_bracket_filtered_df(league, include_shun, include_sus)
 
             # Find if player is in this dataframe
             player_df = df[df.player_id == player_id]
