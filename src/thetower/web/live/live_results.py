@@ -181,30 +181,36 @@ def live_results():
         pdf.index = positions
 
         topx = canvas.selectbox("top x", [1000, 500, 200, 100, 50, 25], key=f"topx_{league}")
-        need_to_get_in = canvas.checkbox("Filter by needing to get in", key=f"need_to_get_in_{league}")
+        join_filter = canvas.selectbox("Filter", ["all", "new", "needing to get in"], key=f"join_filter_{league}")
 
         joined_sum = sum(1 for v in pdf["joined"][:topx] if v)
         joined_tot = len(pdf["joined"][:topx])
         not_joined_count = joined_tot - joined_sum
 
-        if need_to_get_in:
+        top_x_df = pdf[:topx]
+
+        if join_filter == "needing to get in":
             # Show count of players who need to join
             canvas.write(f"{not_joined_count} in the top {topx} need to join", unsafe_allow_html=True)
             # Filter to show only those who haven't joined from the top X
-            top_x_df = pdf[:topx]
             display_df = top_x_df[top_x_df["joined"] == ""]
+        elif join_filter == "new":
+            new_count = sum(1 for v in top_x_df["joined"] if v == "🆕")
+            canvas.write(f"{new_count} in the top {topx} joined since the last refresh", unsafe_allow_html=True)
+            # Filter to show only players who joined since the prior snapshot
+            display_df = top_x_df[top_x_df["joined"] == "🆕"]
         else:
             # Show original message
             color = "green" if joined_sum / joined_tot >= 0.7 else "orange" if joined_sum / joined_tot >= 0.5 else "red"
             canvas.write(f"<font color='{color}'>{joined_sum}</font>/{topx} have already joined.", unsafe_allow_html=True)
             # Show all players in top X
-            display_df = pdf[:topx]
+            display_df = top_x_df
 
         final_df = display_df[["real_name", "wave_last", "joined"]].copy()
         final_df.insert(0, "#", final_df.index)
         final_df = final_df.reset_index(drop=True)
         final_df.index = final_df.index + 1
-        show_cols = ["#", "real_name", "wave_last", "joined"] if need_to_get_in else ["real_name", "wave_last", "joined"]
+        show_cols = ["real_name", "wave_last", "joined"] if join_filter == "all" else ["#", "real_name", "wave_last", "joined"]
         canvas.dataframe(
             final_df[show_cols],
             height=600,
