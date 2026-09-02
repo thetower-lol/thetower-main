@@ -12,7 +12,7 @@ from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
     get_bracket_stats,
     get_cached_plot_data,
-    get_processed_data,
+    get_latest_standings_df,
     require_tournament_data,
 )
 from thetower.web.live.ui_components import render_data_status, setup_common_ui
@@ -29,10 +29,10 @@ def bracket_analysis():
 
     render_data_status(league, "live_bracket_analysis")
 
-    # Get processed data
+    # Latest snapshot standings — everything on this page derives from them
     include_shun = include_shun_enabled_for("live_bracket_analysis")
     include_sus = include_sus_enabled_for("live_bracket_analysis")
-    df, _, ldf, _, _ = get_processed_data(league, include_shun, include_sus)
+    ldf = get_latest_standings_df(league, include_shun, include_sus)
 
     # Sidebar option to include single-player brackets
     show_singles = st.sidebar.checkbox("Show full fidelity", value=False)

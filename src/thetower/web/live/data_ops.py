@@ -363,10 +363,15 @@ def get_live_standings(league: str, shun: bool = False, sus: bool = False) -> tu
         - prior_df: player_id/wave at the prior checkpoint, empty when no
           prior checkpoint exists (e.g. first checkpoint of a tourney)
     """
+    return get_latest_standings_df(league, shun, sus), _get_prior_snapshot(league, shun, sus)
+
+
+def get_latest_standings_df(league: str, shun: bool = False, sus: bool = False) -> pd.DataFrame:
+    """Latest snapshot sorted by wave descending with tie-aware positions as the index."""
     ldf = get_latest_live_df(league, shun, sus)
     ldf = ldf.sort_values("wave", ascending=False).reset_index(drop=True)
     ldf.index = _tie_positions(ldf["wave"])
-    return ldf, _get_prior_snapshot(league, shun, sus)
+    return ldf
 
 
 def _tie_positions(waves) -> list[int]:
