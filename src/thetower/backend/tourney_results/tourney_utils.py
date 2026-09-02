@@ -396,7 +396,9 @@ def get_latest_live_df(league: str, shun: bool = False, sus: bool = False) -> pd
         shun: If True, only exclude suspicious IDs, otherwise exclude both suspicious and shunned
 
     Returns:
-        DataFrame containing data from the latest non-empty CSV
+        DataFrame containing data from the latest non-empty CSV. When staging is
+        empty and the frame was reconstructed from the most recent archive instead,
+        it carries ``df.attrs["from_archive"] = True``.
 
     Raises:
         ValueError: If no current tournament data is available
@@ -437,6 +439,7 @@ def get_latest_live_df(league: str, shun: bool = False, sus: bool = False) -> pd
         if not shun:
             excluded_ids = excluded_ids | get_shun_ids()
         df = df[~df.player_id.isin(excluded_ids)].reset_index(drop=True)
+        df.attrs["from_archive"] = True
         logging.info(f"get_latest_live_df({league}): staging empty, fell back to archive ({archives[-1].name})")
         return df
     t_glob = perf_counter()
