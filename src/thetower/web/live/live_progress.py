@@ -9,7 +9,7 @@ import streamlit as st
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
-    get_processed_data,
+    get_progress_data,
     get_reference_tourney_df,
     process_display_names,
     require_tournament_data,
@@ -29,10 +29,10 @@ def live_progress():
 
     render_data_status(league, "live_progress")
 
-    # Get processed data
+    # Top-25 timeline + join times, expanded from the delta archive
     include_shun = include_shun_enabled_for("live_progress")
     include_sus = include_sus_enabled_for("live_progress")
-    df, tdf, ldf, first_moment, last_moment = get_processed_data(league, include_shun, include_sus)
+    tdf, join_times, timestamps = get_progress_data(league, include_shun, include_sus)
 
     # Process display names for better visualization
     tdf = process_display_names(tdf)
@@ -77,12 +77,11 @@ def live_progress():
         # (absolute counts would leak total participation)
         reference_total = len(pdf.id)
         fill_ups = []
-        for dt, sdf in df.groupby("datetime"):
-            joined_ids = set(sdf.player_id.unique())
+        for dt in timestamps:
             # Convert datetime to user's local timezone
             dt_aware = dt if dt.tzinfo is not None else dt.replace(tzinfo=datetime.timezone.utc)
             dt_local = dt_aware.astimezone(user_tz).replace(tzinfo=None)
-            fillup = sum([player_id in joined_ids for player_id in pdf.id])
+            fillup = sum(1 for player_id in pdf.id if player_id in join_times and join_times[player_id] <= dt)
             fillup_pct = round(fillup / reference_total * 100, 1) if reference_total else 0.0
             fill_ups.append((dt_local, fillup_pct))
 

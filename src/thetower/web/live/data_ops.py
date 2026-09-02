@@ -166,6 +166,61 @@ def _get_processed_data_snapshot(league: str, shun: bool, sus: bool, snapshot_ke
     return df, tdf, ldf, first_moment, last_moment
 
 
+def get_progress_data(league: str, shun: bool = False, sus: bool = False) -> tuple[pd.DataFrame, dict, list]:
+    """
+    Data for the Live Progress page: top-25 timeline plus join times.
+
+    Expands only the top 25 players' delta rows into a timeline instead of
+    reconstructing the full history; fill-up progress needs just each
+    player's first delta row (the reconstruction forward-fills, so "in the
+    snapshot at time t" is exactly "first appearance <= t").
+
+    Snapshot-keyed like get_live_data: recomputes when new data lands.
+
+    Args:
+        league: League identifier
+        shun: Whether to include shunned players
+        sus: Whether to include sus players
+
+    Returns:
+        Tuple containing:
+        - tdf: timeline rows for the top 25 players (same shape as the old
+          get_processed_data tdf: datetime, player_id, wave, name, real_name, ...)
+        - join_times: dict of player_id -> first snapshot time
+        - timestamps: sorted snapshot times of the current tourney (silent
+          snapshots included)
+    """
+    return _get_progress_data_snapshot(league, shun, sus, latest_snapshot_key(league))
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_progress_data_snapshot(league: str, shun: bool, sus: bool, snapshot_key: str) -> tuple[pd.DataFrame, dict, list]:
+    """Cached body of get_progress_data; snapshot_key exists only to key the cache."""
+    t0 = perf_counter()
+    archive, expected_timestamps = _load_archive_df(league)
+
+    excluded_ids = get_banned_ids()
+    if not sus:
+        excluded_ids = excluded_ids | get_sus_ids()
+    if not shun:
+        excluded_ids = excluded_ids | get_shun_ids()
+    archive = archive[~archive["player_id"].isin(excluded_ids)]
+
+    join_times = archive.groupby("player_id")["snapshot_time"].min().to_dict()
+    timestamps = sorted(set(archive["snapshot_time"].unique()) | {pd.Timestamp(t) for t in expected_timestamps})
+
+    top_25 = archive.groupby("player_id")["wave"].max().sort_values(ascending=False).index[:25]
+    tdf = reconstruct_all_snapshots(archive[archive["player_id"].isin(top_25)], extra_timestamps=expected_timestamps)
+
+    lookup = get_player_id_lookup()
+    tdf["real_name"] = [lookup.get(pid, name) for pid, name in zip(tdf["player_id"], tdf["name"])]
+    tdf["real_name"] = tdf["real_name"].astype(str)
+    tdf = tdf.sort_values(["datetime", "wave"], ascending=False).reset_index(drop=True)
+
+    logger.info(f"get_progress_data({league}) took {perf_counter() - t0:.3f}s — {len(tdf):,} timeline rows")
+    return tdf, join_times, timestamps
+
+
 def get_live_standings(league: str, shun: bool = False, sus: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Latest and prior checkpoint standings for a league.
