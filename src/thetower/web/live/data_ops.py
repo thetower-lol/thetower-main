@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 # Cache configuration
 CACHE_TTL_SECONDS = 300  # 5 minutes cache duration
 
+# Snapshot-keyed caches invalidate when a new snapshot lands (the key changes),
+# so this TTL only bounds how long superseded entries linger before eviction.
+# One snapshot period: entries never need to outlive the data they were built from.
+SNAPSHOT_CACHE_TTL_SECONDS = 1800
+
 
 def is_caching_disabled():
     """Check if caching should be disabled by looking for the control file."""
@@ -58,10 +63,13 @@ def cache_data_if_enabled(**cache_args):
     return decorator
 
 
-@cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
 def get_live_data(league: str, shun: bool = False, sus: bool = False) -> pd.DataFrame:
     """
     Get and cache live tournament data.
+
+    The cache is keyed by the latest snapshot for the league, so the expensive
+    reconstruction reruns when new data lands (every ~30 min) rather than on a
+    timer — and callers see fresh data as soon as it arrives.
 
     Args:
         league: League identifier
@@ -71,6 +79,12 @@ def get_live_data(league: str, shun: bool = False, sus: bool = False) -> pd.Data
     Returns:
         DataFrame containing live tournament data
     """
+    return _get_live_data_snapshot(league, shun, sus, latest_snapshot_key(league))
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_live_data_snapshot(league: str, shun: bool, sus: bool, snapshot_key: str) -> pd.DataFrame:
+    """Cached body of get_live_data; snapshot_key exists only to key the cache."""
     t0 = perf_counter()
     archive, expected_timestamps = _load_archive_df(league)
     df = reconstruct_all_snapshots(archive, extra_timestamps=expected_timestamps)
@@ -91,10 +105,11 @@ def get_live_data(league: str, shun: bool = False, sus: bool = False) -> pd.Data
     return df
 
 
-@cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
 def get_processed_data(league: str, shun: bool = False, sus: bool = False):
     """
     Get processed tournament data with common transformations.
+
+    Snapshot-keyed like get_live_data: recomputes when new data lands.
 
     Args:
         league: League identifier
@@ -109,7 +124,13 @@ def get_processed_data(league: str, shun: bool = False, sus: bool = False):
         - First moment datetime
         - Last moment datetime
     """
-    df = get_live_data(league, shun, sus)
+    return _get_processed_data_snapshot(league, shun, sus, latest_snapshot_key(league))
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_processed_data_snapshot(league: str, shun: bool, sus: bool, snapshot_key: str):
+    """Cached body of get_processed_data; snapshot_key exists only to key the cache."""
+    df = _get_live_data_snapshot(league, shun, sus, snapshot_key)
 
     # Common data processing
     group_by_id = df.groupby("player_id", observed=True)
@@ -870,6 +891,27 @@ def _get_snapshot_path(league: str) -> Path:
 def _get_archive_path(league: str) -> Path:
     """Permanent archive directory: where ``*_archive.csv.gz`` files are stored."""
     return Path(get_csv_data()) / f"{league}_live"
+
+
+def latest_snapshot_key(league: str) -> str:
+    """Return a token identifying the newest data for a league (one cheap glob).
+
+    Passed as an extra argument to snapshot-derived cached functions so their
+    entries invalidate exactly when new data lands instead of on a timer.
+    Falls back to the newest archive name between tourneys, and to a constant
+    when no data exists at all (the cached call then raises its usual
+    no-data error, which st.cache_data does not cache).
+    """
+    try:
+        snaps = list_snapshots(_get_snapshot_path(league))
+        if snaps:
+            return snaps[-1].name
+        archives = list_archives(_get_archive_path(league))
+        if archives:
+            return archives[-1].name
+    except Exception:
+        pass
+    return "no-data"
 
 
 def _load_archive_df(league: str) -> tuple[pd.DataFrame, list]:

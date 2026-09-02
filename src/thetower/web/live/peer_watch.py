@@ -13,12 +13,13 @@ from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import get_latest_live_df
 from thetower.web.historical.proximal_utils import get_proximal_players
 from thetower.web.live.data_ops import (
-    CACHE_TTL_SECONDS,
+    SNAPSHOT_CACHE_TTL_SECONDS,
     cache_data_if_enabled,
     format_time_ago,
     get_bracket_data,
     get_data_refresh_timestamp,
     get_live_data,
+    latest_snapshot_key,
     process_display_names,
     require_tournament_data,
 )
@@ -74,9 +75,19 @@ def _search_live_data_for_player(name: str = "", player_id: str = "") -> tuple[s
     return None, None
 
 
-@cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
 def _load_combined_live_data(include_shun: bool, include_sus: bool) -> pd.DataFrame:
-    """Load current live tournament data for all leagues (bracket-filtered) and combine."""
+    """Load current live tournament data for all leagues (bracket-filtered) and combine.
+
+    Snapshot-keyed across every league so the combined frame rebuilds when any
+    league gets new data, instead of on a timer.
+    """
+    combined_key = "|".join(latest_snapshot_key(lg) for lg in ALL_LEAGUES)
+    return _load_combined_live_data_snapshot(include_shun, include_sus, combined_key)
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _load_combined_live_data_snapshot(include_shun: bool, include_sus: bool, snapshot_key: str) -> pd.DataFrame:
+    """Cached body of _load_combined_live_data; snapshot_key exists only to key the cache."""
     frames = []
     for lg in ALL_LEAGUES:
         try:
