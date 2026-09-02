@@ -8,7 +8,7 @@ from typing import Optional
 import streamlit as st
 import streamlit.components.v1 as components
 
-from thetower.backend.tourney_results.constants import Graph, Options, leagues, legend, top_league
+from thetower.backend.tourney_results.constants import Graph, Options, leagues, top_league
 from thetower.backend.tourney_results.formatting import format_wave
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.overview_cache import read_overview_cache
@@ -46,16 +46,16 @@ def render_tournament_countdown():
     try:
         tourney_id, tourney_date, days_until, _ = TournamentPredictor.get_tournament_info()
 
-        # Get battle conditions for Legend league if available
+        # Get battle conditions for the top league if available
         bcs_html = ""
         if days_until <= 1:  # Only show BCs within 24 hours of tournament
             try:
-                legend_bcs = predict_future_tournament(tourney_id, legend)
-                if legend_bcs:
-                    bc_names = " • ".join(legend_bcs)
+                top_bcs = predict_future_tournament(tourney_id, top_league)
+                if top_bcs:
+                    bc_names = " • ".join(top_bcs)
                     bcs_html = f"""
 <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.2);">
-    <div style="font-size: 0.85rem; color: #f0f0f0; margin-bottom: 0.3rem;">Legend Battle Conditions:</div>
+    <div style="font-size: 0.85rem; color: #f0f0f0; margin-bottom: 0.3rem;">{top_league} Battle Conditions:</div>
     <div style="font-size: 0.95rem; color: white; font-weight: 500;">{bc_names}</div>
     <a href="bcs" target="_self" style="font-size: 0.8rem; color: #ffd700; text-decoration: underline; margin-top: 0.3rem; display: inline-block;">View all league BCs →</a>
 </div>"""
