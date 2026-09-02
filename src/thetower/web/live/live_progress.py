@@ -6,13 +6,11 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from thetower.backend.tourney_results.constants import champ
-from thetower.backend.tourney_results.data import get_tourneys
-from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
     get_processed_data,
+    get_reference_tourney_df,
     process_display_names,
     require_tournament_data,
 )
@@ -66,39 +64,42 @@ def live_progress():
     st.plotly_chart(fig, width="stretch")
 
     # Get reference data for fill-up calculation
-    qs = TourneyResult.objects.filter(league=league, public=True).order_by("-date")
-    if not qs:
-        qs = TourneyResult.objects.filter(league=champ, public=True).order_by("-date")
-    tourney = qs[0]
-    pdf = get_tourneys([tourney])
+    pdf = get_reference_tourney_df(league)
 
-    # Fill up progress calculation, as a percentage of last tournament's players
-    # (absolute counts would leak total participation)
-    reference_total = len(pdf.id)
-    fill_ups = []
-    for dt, sdf in df.groupby("datetime"):
-        joined_ids = set(sdf.player_id.unique())
-        # Convert datetime to user's local timezone
-        dt_aware = dt if dt.tzinfo is not None else dt.replace(tzinfo=datetime.timezone.utc)
-        dt_local = dt_aware.astimezone(user_tz).replace(tzinfo=None)
-        fillup = sum([player_id in joined_ids for player_id in pdf.id])
-        fillup_pct = round(fillup / reference_total * 100, 1) if reference_total else 0.0
-        fill_ups.append((dt_local, fillup_pct))
+    if pdf.empty:
+        st.info("No previous tournament results are available to compute fill-up progress yet.")
+    else:
+        reference_league = pdf["league"].iloc[0]
+        if reference_league != league:
+            st.caption(f"No previous {league} results — showing {reference_league} instead.")
 
-    # Create fill up progress plot
-    fill_ups = pd.DataFrame(sorted(fill_ups), columns=["time", "fillup"])
-    fig = px.line(fill_ups, x="time", y="fillup", title="Fill up progress", markers=True, line_shape="linear")
-    fig.update_traces(mode="lines+markers", fill="tozeroy")
-    fig.update_layout(
-        xaxis_title="Time",
-        yaxis_title="Fill up [% of last tournament's players]",
-        hovermode="closest",
-        height=400,
-        margin=dict(l=20, r=20, t=40, b=20),
-        xaxis_tickformat=time_fmt,
-        yaxis_ticksuffix="%",
-    )
-    st.plotly_chart(fig, width="stretch")
+        # Fill up progress calculation, as a percentage of last tournament's players
+        # (absolute counts would leak total participation)
+        reference_total = len(pdf.id)
+        fill_ups = []
+        for dt, sdf in df.groupby("datetime"):
+            joined_ids = set(sdf.player_id.unique())
+            # Convert datetime to user's local timezone
+            dt_aware = dt if dt.tzinfo is not None else dt.replace(tzinfo=datetime.timezone.utc)
+            dt_local = dt_aware.astimezone(user_tz).replace(tzinfo=None)
+            fillup = sum([player_id in joined_ids for player_id in pdf.id])
+            fillup_pct = round(fillup / reference_total * 100, 1) if reference_total else 0.0
+            fill_ups.append((dt_local, fillup_pct))
+
+        # Create fill up progress plot
+        fill_ups = pd.DataFrame(sorted(fill_ups), columns=["time", "fillup"])
+        fig = px.line(fill_ups, x="time", y="fillup", title="Fill up progress", markers=True, line_shape="linear")
+        fig.update_traces(mode="lines+markers", fill="tozeroy")
+        fig.update_layout(
+            xaxis_title="Time",
+            yaxis_title="Fill up [% of last tournament's players]",
+            hovermode="closest",
+            height=400,
+            margin=dict(l=20, r=20, t=40, b=20),
+            xaxis_tickformat=time_fmt,
+            yaxis_ticksuffix="%",
+        )
+        st.plotly_chart(fig, width="stretch")
 
     # Log execution time
     t2_stop = perf_counter()

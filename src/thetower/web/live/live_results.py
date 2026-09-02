@@ -4,15 +4,18 @@ from time import perf_counter
 
 import streamlit as st
 
-from thetower.backend.tourney_results.constants import champ
-from thetower.backend.tourney_results.data import get_tourneys
 from thetower.backend.tourney_results.formatting import format_wave
-from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.results_config import get_results_limit
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import get_tourney_state
-from thetower.web.live.data_ops import format_time_ago, get_data_refresh_timestamp, get_processed_data, require_tournament_data
+from thetower.web.live.data_ops import (
+    format_time_ago,
+    get_data_refresh_timestamp,
+    get_processed_data,
+    get_reference_tourney_df,
+    require_tournament_data,
+)
 from thetower.web.live.ui_components import setup_common_ui
 from thetower.web.util import fmt_dt
 
@@ -50,11 +53,7 @@ def live_results():
     df, tdf, ldf, _, _ = get_processed_data(league, include_shun, include_sus)
 
     # Get reference data for joined calculation
-    qs = TourneyResult.objects.filter(league=league, public=True).order_by("-date")
-    if not qs:
-        qs = TourneyResult.objects.filter(league=champ, public=True).order_by("-date")
-    tourney = qs[0]
-    pdf = get_tourneys([tourney])
+    pdf = get_reference_tourney_df(league)
 
     # Compute position deltas vs. the prior checkpoint snapshot
     sorted_datetimes = sorted(df["datetime"].unique(), reverse=True)
@@ -145,66 +144,73 @@ def live_results():
 
     canvas = cols[0] if is_mobile else cols[1]
 
-    joined_ids = set(ldf.player_id.unique())
-    newly_joined_ids = joined_ids - prior_joined_ids
-
-    def _join_status(player_id: str) -> str:
-        if player_id in newly_joined_ids:
-            return "🆕"
-        if player_id in joined_ids:
-            return "✓"
-        return ""
-
-    pdf["joined"] = [_join_status(pid) for pid in pdf.id]
-    pdf = pdf.rename(columns={"wave": "wave_last"})
-
-    # Calculate positions with tie handling (same wave = same rank)
-    pdf = pdf.sort_values("wave_last", ascending=False).reset_index(drop=True)
-    positions = []
-    current = 0
-    borrow = 1
-    last_wave = None
-    for wave in pdf["wave_last"]:
-        if last_wave is not None and wave == last_wave:
-            borrow += 1
-        else:
-            current += borrow
-            borrow = 1
-        positions.append(current)
-        last_wave = wave
-    pdf.index = positions
-
-    topx = canvas.selectbox("top x", [1000, 500, 200, 100, 50, 25], key=f"topx_{league}")
-    need_to_get_in = canvas.checkbox("Filter by needing to get in", key=f"need_to_get_in_{league}")
-
-    joined_sum = sum(1 for v in pdf["joined"][:topx] if v)
-    joined_tot = len(pdf["joined"][:topx])
-    not_joined_count = joined_tot - joined_sum
-
-    if need_to_get_in:
-        # Show count of players who need to join
-        canvas.write(f"{not_joined_count} in the top {topx} need to join", unsafe_allow_html=True)
-        # Filter to show only those who haven't joined from the top X
-        top_x_df = pdf[:topx]
-        display_df = top_x_df[top_x_df["joined"] == ""]
+    if pdf.empty:
+        canvas.info("No previous tournament results are available to compare against yet.")
     else:
-        # Show original message
-        color = "green" if joined_sum / joined_tot >= 0.7 else "orange" if joined_sum / joined_tot >= 0.5 else "red"
-        canvas.write(f"<font color='{color}'>{joined_sum}</font>/{topx} have already joined.", unsafe_allow_html=True)
-        # Show all players in top X
-        display_df = pdf[:topx]
+        reference_league = pdf["league"].iloc[0]
+        if reference_league != league:
+            canvas.caption(f"No previous {league} results — showing {reference_league} instead.")
 
-    final_df = display_df[["real_name", "wave_last", "joined"]].copy()
-    final_df.insert(0, "#", final_df.index)
-    final_df = final_df.reset_index(drop=True)
-    final_df.index = final_df.index + 1
-    show_cols = ["#", "real_name", "wave_last", "joined"] if need_to_get_in else ["real_name", "wave_last", "joined"]
-    canvas.dataframe(
-        final_df[show_cols],
-        height=600,
-        width="stretch",
-        column_config={"#": st.column_config.NumberColumn("#")},
-    )
+        joined_ids = set(ldf.player_id.unique())
+        newly_joined_ids = joined_ids - prior_joined_ids
+
+        def _join_status(player_id: str) -> str:
+            if player_id in newly_joined_ids:
+                return "🆕"
+            if player_id in joined_ids:
+                return "✓"
+            return ""
+
+        pdf["joined"] = [_join_status(pid) for pid in pdf.id]
+        pdf = pdf.rename(columns={"wave": "wave_last"})
+
+        # Calculate positions with tie handling (same wave = same rank)
+        pdf = pdf.sort_values("wave_last", ascending=False).reset_index(drop=True)
+        positions = []
+        current = 0
+        borrow = 1
+        last_wave = None
+        for wave in pdf["wave_last"]:
+            if last_wave is not None and wave == last_wave:
+                borrow += 1
+            else:
+                current += borrow
+                borrow = 1
+            positions.append(current)
+            last_wave = wave
+        pdf.index = positions
+
+        topx = canvas.selectbox("top x", [1000, 500, 200, 100, 50, 25], key=f"topx_{league}")
+        need_to_get_in = canvas.checkbox("Filter by needing to get in", key=f"need_to_get_in_{league}")
+
+        joined_sum = sum(1 for v in pdf["joined"][:topx] if v)
+        joined_tot = len(pdf["joined"][:topx])
+        not_joined_count = joined_tot - joined_sum
+
+        if need_to_get_in:
+            # Show count of players who need to join
+            canvas.write(f"{not_joined_count} in the top {topx} need to join", unsafe_allow_html=True)
+            # Filter to show only those who haven't joined from the top X
+            top_x_df = pdf[:topx]
+            display_df = top_x_df[top_x_df["joined"] == ""]
+        else:
+            # Show original message
+            color = "green" if joined_sum / joined_tot >= 0.7 else "orange" if joined_sum / joined_tot >= 0.5 else "red"
+            canvas.write(f"<font color='{color}'>{joined_sum}</font>/{topx} have already joined.", unsafe_allow_html=True)
+            # Show all players in top X
+            display_df = pdf[:topx]
+
+        final_df = display_df[["real_name", "wave_last", "joined"]].copy()
+        final_df.insert(0, "#", final_df.index)
+        final_df = final_df.reset_index(drop=True)
+        final_df.index = final_df.index + 1
+        show_cols = ["#", "real_name", "wave_last", "joined"] if need_to_get_in else ["real_name", "wave_last", "joined"]
+        canvas.dataframe(
+            final_df[show_cols],
+            height=600,
+            width="stretch",
+            column_config={"#": st.column_config.NumberColumn("#")},
+        )
 
     # Log execution time
     t2_stop = perf_counter()

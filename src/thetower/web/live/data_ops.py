@@ -17,7 +17,9 @@ from thetower.backend.tourney_results.archive_utils import (
     read_archive,
     reconstruct_all_snapshots,
 )
-from thetower.backend.tourney_results.data import get_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_ids
+from thetower.backend.tourney_results.constants import leagues
+from thetower.backend.tourney_results.data import get_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_ids, get_tourneys
+from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import (
@@ -139,6 +141,23 @@ def get_processed_data(league: str, shun: bool = False, sus: bool = False):
     ldf.index = positions
 
     return df, tdf, ldf, first_moment, last_moment
+
+
+def get_reference_tourney_df(league: str) -> pd.DataFrame:
+    """Return the latest public tourney results to compare live data against.
+
+    Walks down the league hierarchy starting at `league`, so a just-launched top
+    league with no usable history falls back to the league below it (whose players
+    promote into it). Returns an empty DataFrame if no league has usable rows.
+    """
+    start = leagues.index(league) if league in leagues else 0
+    for reference_league in leagues[start:]:
+        qs = TourneyResult.objects.filter(league=reference_league, public=True).order_by("-date")
+        if qs:
+            pdf = get_tourneys([qs[0]])
+            if not pdf.empty:
+                return pdf
+    return pd.DataFrame()
 
 
 @cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
