@@ -10,7 +10,6 @@ from thetower.backend.tourney_results.constants import leagues as ALL_LEAGUES
 from thetower.backend.tourney_results.formatting import format_wave, make_player_url
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
-from thetower.backend.tourney_results.tourney_utils import get_latest_live_df
 from thetower.web.historical.proximal_utils import get_proximal_players
 from thetower.web.live.data_ops import (
     SNAPSHOT_CACHE_TTL_SECONDS,
@@ -18,6 +17,7 @@ from thetower.web.live.data_ops import (
     format_time_ago,
     get_bracket_data,
     get_data_refresh_timestamp,
+    get_latest_bracket_filtered_df,
     get_live_data,
     latest_snapshot_key,
     process_display_names,
@@ -41,8 +41,9 @@ def _search_live_data_for_player(name: str = "", player_id: str = "") -> tuple[s
 
     for lg in ALL_LEAGUES:
         try:
-            # Latest snapshot only — searching needs current membership, not the full history
-            df_tmp = get_latest_live_df(lg, include_shun, include_sus)
+            # Latest snapshot only — searching needs current membership, not the full history.
+            # Bracket-filtered so partial brackets stay hidden while entry is open (anti-snipe).
+            df_tmp = get_latest_bracket_filtered_df(lg, include_shun, include_sus)
             if df_tmp.empty:
                 continue
             if player_id:
