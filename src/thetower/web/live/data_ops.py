@@ -180,6 +180,33 @@ def get_bracket_data(df: pd.DataFrame):
     return get_full_brackets(df, anti_snipe=anti_snipe)
 
 
+def get_latest_bracket_filtered_df(league: str, shun: bool = False, sus: bool = False) -> pd.DataFrame:
+    """
+    Latest snapshot for a league, restricted to fullish brackets during entry.
+
+    Cross-league search paths use this instead of get_live_data: one snapshot
+    instead of the full reconstructed history, which keeps a seven-league loop
+    cheap. Applies the same anti-snipe rule as get_bracket_data (>= 28 players,
+    only while entry is open).
+
+    Args:
+        league: League identifier
+        shun: Whether to include shunned players
+        sus: Whether to include sus players
+
+    Returns:
+        DataFrame containing the latest snapshot rows for searchable brackets
+    """
+    df = get_latest_live_df(league, shun, sus)
+
+    if get_tourney_state().name == "ENTRY_OPEN":
+        bracket_counts = df.groupby("bracket", observed=True)["player_id"].nunique()
+        fullish_brackets = bracket_counts[bracket_counts >= 28].index
+        df = df[df["bracket"].isin(fullish_brackets)]
+
+    return df
+
+
 def process_display_names(df: pd.DataFrame) -> pd.DataFrame:
     """
     Process display names by adding player_id to duplicated names.

@@ -15,6 +15,7 @@ from thetower.web.live.data_ops import (
     format_time_ago,
     get_bracket_data,
     get_data_refresh_timestamp,
+    get_latest_bracket_filtered_df,
     get_live_data,
     initialize_bracket_state,
     process_bracket_selection,
@@ -141,13 +142,11 @@ def live_bracket():
 
             all_matches = []  # Store (player_name, player_id, league) tuples
 
+            include_shun = include_shun_enabled_for("live_bracket")
+            include_sus = include_sus_enabled_for("live_bracket")
             for lg in ALL_LEAGUES:
                 try:
-                    include_shun = include_shun_enabled_for("live_bracket")
-                    include_sus = include_sus_enabled_for("live_bracket")
-                    df_tmp = get_live_data(lg, include_shun, include_sus)
-                    order_tmp, full_tmp = get_bracket_data(df_tmp)
-                    df_tmp = df_tmp[df_tmp.bracket.isin(full_tmp)].copy()
+                    df_tmp = get_latest_bracket_filtered_df(lg, include_shun, include_sus)
                     if not df_tmp.empty:
                         # Partial match on player_id
                         match_df = df_tmp[df_tmp["player_id"].str.contains(pid_search, na=False, regex=False)]
@@ -190,13 +189,11 @@ def live_bracket():
             name_lower = search_name.lower()
             all_matches = []  # Store (player_name, player_id, league) tuples
 
+            include_shun = include_shun_enabled_for("live_bracket")
+            include_sus = include_sus_enabled_for("live_bracket")
             for lg in ALL_LEAGUES:
                 try:
-                    include_shun = include_shun_enabled_for("live_bracket")
-                    include_sus = include_sus_enabled_for("live_bracket")
-                    df_tmp = get_live_data(lg, include_shun, include_sus)
-                    order_tmp, full_tmp = get_bracket_data(df_tmp)
-                    df_tmp = df_tmp[df_tmp.bracket.isin(full_tmp)].copy()
+                    df_tmp = get_latest_bracket_filtered_df(lg, include_shun, include_sus)
                     if not df_tmp.empty:
                         # Partial match on real_name and name
                         match_df = df_tmp[(df_tmp["real_name"].str.lower().str.contains(name_lower, na=False, regex=False))]
