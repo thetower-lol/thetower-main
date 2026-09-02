@@ -13,10 +13,10 @@ from thetower.backend.tourney_results.shun_config import include_shun_enabled_fo
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
     format_time_ago,
-    get_bracket_data,
+    get_bracket_overview,
+    get_bracket_timeline,
     get_data_refresh_timestamp,
     get_latest_bracket_filtered_df,
-    get_live_data,
     initialize_bracket_state,
     process_bracket_selection,
     process_display_names,
@@ -54,13 +54,13 @@ def live_bracket():
     else:
         st.caption("📊 Data refresh time: Unknown")
 
-    # Get live data and process brackets
+    # Latest snapshot (anti-snipe filtered) covers membership checks and selection;
+    # the matched bracket's timeline is expanded separately once a bracket is chosen.
     try:
         include_shun = include_shun_enabled_for("live_bracket")
         include_sus = include_sus_enabled_for("live_bracket")
-        df = get_live_data(league, include_shun, include_sus)
-        bracket_order, fullish_brackets = get_bracket_data(df)
-        df_filtered = df[df.bracket.isin(fullish_brackets)].copy()  # no sniping
+        df_filtered = get_latest_bracket_filtered_df(league, include_shun, include_sus)
+        bracket_order, fullish_brackets = get_bracket_overview(league, include_shun, include_sus)
 
     except (IndexError, ValueError):
         if options.current_player_id:
@@ -84,9 +84,11 @@ def live_bracket():
             st.error(f"{known_name} ({options.current_player_id}) hasn't participated in this tournament.")
             return
 
-    # Now use filtered data for display
+    # Now use filtered data for display; bracket order restricted to fullish brackets
+    # (same as the old get_bracket_data recompute on the filtered frame)
     df = df_filtered
-    bracket_order, fullish_brackets = get_bracket_data(df)
+    _fullish = set(fullish_brackets)
+    bracket_order = [b for b in bracket_order if b in _fullish]
 
     # Function to clear selection and search again
     def search_for_new():
@@ -175,12 +177,11 @@ def live_bracket():
                 # Single match found
                 selected_real_name = all_matches[0][0]
                 league = all_matches[0][2]
-                # Reload data for the correct league
-                include_shun = include_shun_enabled_for("live_bracket")
-                include_sus = include_sus_enabled_for("live_bracket")
-                df = get_live_data(league, include_shun, include_sus)
-                bracket_order, fullish_brackets = get_bracket_data(df)
-                df = df[df.bracket.isin(fullish_brackets)].copy()
+                # Reload data for the correct league (include flags computed above)
+                df = get_latest_bracket_filtered_df(league, include_shun, include_sus)
+                bracket_order, fullish_brackets = get_bracket_overview(league, include_shun, include_sus)
+                _fullish = set(fullish_brackets)
+                bracket_order = [b for b in bracket_order if b in _fullish]
         elif selected_real_name_input.strip():
             # Search across all leagues for partial matches
             from thetower.backend.tourney_results.constants import leagues as ALL_LEAGUES
@@ -226,12 +227,11 @@ def live_bracket():
                 # Single match found
                 selected_real_name = all_matches[0][0]
                 league = all_matches[0][2]
-                # Reload data for the correct league
-                include_shun = include_shun_enabled_for("live_bracket")
-                include_sus = include_sus_enabled_for("live_bracket")
-                df = get_live_data(league, include_shun, include_sus)
-                bracket_order, fullish_brackets = get_bracket_data(df)
-                df = df[df.bracket.isin(fullish_brackets)].copy()
+                # Reload data for the correct league (include flags computed above)
+                df = get_latest_bracket_filtered_df(league, include_shun, include_sus)
+                bracket_order, fullish_brackets = get_bracket_overview(league, include_shun, include_sus)
+                _fullish = set(fullish_brackets)
+                bracket_order = [b for b in bracket_order if b in _fullish]
             # Store search term for later
             st.session_state.player_search_term = search_name
         elif selected_bracket_input.strip():
@@ -324,8 +324,12 @@ def live_bracket():
             st.error(error_msg)
             return
 
-    # Create a copy of the DataFrame to avoid SettingWithCopyWarning
-    tdf = tdf.copy()
+    # Selection worked on the latest snapshot; expand the chosen bracket's
+    # full timeline from the delta archive for the chart
+    tdf = get_bracket_timeline(league, bracket_id, include_shun, include_sus)
+    if tdf.empty:
+        st.error("No data available for this bracket.")
+        return
 
     # Display bracket information
     player_ids = sorted(tdf.player_id.unique())

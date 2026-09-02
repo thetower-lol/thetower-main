@@ -221,6 +221,76 @@ def _get_progress_data_snapshot(league: str, shun: bool, sus: bool, snapshot_key
     return tdf, join_times, timestamps
 
 
+def _excluded_ids(shun: bool, sus: bool) -> set:
+    """Moderation exclusion set: always banned, plus sus/shun unless explicitly included."""
+    excluded = get_banned_ids()
+    if not sus:
+        excluded = excluded | get_sus_ids()
+    if not shun:
+        excluded = excluded | get_shun_ids()
+    return excluded
+
+
+def get_bracket_overview(league: str, shun: bool = False, sus: bool = False) -> tuple[list, list]:
+    """
+    Bracket ordering and fullish-bracket list for a league, from the delta archive.
+
+    Same semantics as get_bracket_data on the reconstructed history — creation
+    order is each bracket's first delta row, counts are unique players ever
+    seen, anti-snipe (>= 28) applies only while entry is open — without
+    building the history. Snapshot-keyed cache.
+
+    Returns:
+        Tuple of (bracket_order, fullish_brackets).
+    """
+    return _get_bracket_overview_snapshot(league, shun, sus, latest_snapshot_key(league))
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_bracket_overview_snapshot(league: str, shun: bool, sus: bool, snapshot_key: str) -> tuple[list, list]:
+    """Cached body of get_bracket_overview; snapshot_key exists only to key the cache."""
+    archive, _ = _load_archive_df(league)
+    archive = archive[~archive["player_id"].isin(_excluded_ids(shun, sus))]
+
+    bracket_order = archive.groupby("bracket")["snapshot_time"].min().sort_values().index.tolist()
+
+    if get_tourney_state().name == "ENTRY_OPEN":
+        counts = archive.groupby("bracket")["player_id"].nunique()
+        fullish_brackets = [bracket for bracket in bracket_order if counts.get(bracket, 0) >= 28]
+    else:
+        fullish_brackets = bracket_order
+
+    return bracket_order, fullish_brackets
+
+
+def get_bracket_timeline(league: str, bracket_id: str, shun: bool = False, sus: bool = False) -> pd.DataFrame:
+    """
+    Timeline rows for one bracket, expanded from the delta archive.
+
+    Filters the archive to the bracket's ~30 players and runs the same
+    reconstruction as the full history did, so the chart data is identical —
+    ~1,500 rows instead of the whole league. Snapshot-keyed cache.
+    """
+    return _get_bracket_timeline_snapshot(league, bracket_id, shun, sus, latest_snapshot_key(league))
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_bracket_timeline_snapshot(league: str, bracket_id: str, shun: bool, sus: bool, snapshot_key: str) -> pd.DataFrame:
+    """Cached body of get_bracket_timeline; snapshot_key exists only to key the cache."""
+    archive, expected_timestamps = _load_archive_df(league)
+    archive = archive[archive["bracket"] == bracket_id]
+    archive = archive[~archive["player_id"].isin(_excluded_ids(shun, sus))]
+
+    tdf = reconstruct_all_snapshots(archive, extra_timestamps=expected_timestamps)
+    if tdf.empty:
+        return tdf
+
+    lookup = get_player_id_lookup()
+    tdf["real_name"] = [lookup.get(pid, name) for pid, name in zip(tdf["player_id"], tdf["name"])]
+    tdf["real_name"] = tdf["real_name"].astype(str)
+    return tdf.sort_values(["datetime", "wave"], ascending=False).reset_index(drop=True)
+
+
 def get_live_standings(league: str, shun: bool = False, sus: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Latest and prior checkpoint standings for a league.
