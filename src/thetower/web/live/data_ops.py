@@ -25,7 +25,6 @@ from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import (
-    get_full_brackets,
     get_latest_live_df,
     get_time,
     get_tourney_state,
@@ -65,107 +64,6 @@ def cache_data_if_enabled(**cache_args):
     return decorator
 
 
-def get_live_data(league: str, shun: bool = False, sus: bool = False) -> pd.DataFrame:
-    """
-    Get and cache live tournament data.
-
-    The cache is keyed by the latest snapshot for the league, so the expensive
-    reconstruction reruns when new data lands (every ~30 min) rather than on a
-    timer — and callers see fresh data as soon as it arrives.
-
-    Args:
-        league: League identifier
-        shun: Whether to include shunned players
-        sus: Whether to include sus players
-
-    Returns:
-        DataFrame containing live tournament data
-    """
-    return _get_live_data_snapshot(league, shun, sus, latest_snapshot_key(league))
-
-
-@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
-def _get_live_data_snapshot(league: str, shun: bool, sus: bool, snapshot_key: str) -> pd.DataFrame:
-    """Cached body of get_live_data; snapshot_key exists only to key the cache."""
-    t0 = perf_counter()
-    archive, expected_timestamps = _load_archive_df(league)
-    df = reconstruct_all_snapshots(archive, extra_timestamps=expected_timestamps)
-
-    excluded_ids = get_banned_ids()
-    if not sus:
-        excluded_ids = excluded_ids | get_sus_ids()
-    if not shun:
-        excluded_ids = excluded_ids | get_shun_ids()
-    df = df[~df["player_id"].isin(excluded_ids)]
-
-    lookup = get_player_id_lookup()
-    df["real_name"] = [lookup.get(pid, name) for pid, name in zip(df["player_id"], df["name"])]
-    df["real_name"] = df["real_name"].astype(str).astype("category")
-
-    df = df.sort_values(["datetime", "wave"], ascending=False).reset_index(drop=True)
-    logger.info(f"get_live_data({league}) took {perf_counter() - t0:.3f}s — {len(df):,} rows")
-    return df
-
-
-def get_processed_data(league: str, shun: bool = False, sus: bool = False):
-    """
-    Get processed tournament data with common transformations.
-
-    Snapshot-keyed like get_live_data: recomputes when new data lands.
-
-    Args:
-        league: League identifier
-        shun: Whether to include shunned players
-        sus: Whether to include sus players
-
-    Returns:
-        Tuple containing:
-        - Complete DataFrame
-        - Top 25 players DataFrame
-        - Latest data DataFrame
-        - First moment datetime
-        - Last moment datetime
-    """
-    return _get_processed_data_snapshot(league, shun, sus, latest_snapshot_key(league))
-
-
-@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
-def _get_processed_data_snapshot(league: str, shun: bool, sus: bool, snapshot_key: str):
-    """Cached body of get_processed_data; snapshot_key exists only to key the cache."""
-    df = _get_live_data_snapshot(league, shun, sus, snapshot_key)
-
-    # Common data processing
-    group_by_id = df.groupby("player_id", observed=True)
-    top_25 = group_by_id.wave.max().sort_values(ascending=False).index[:25]
-    tdf = df[df.player_id.isin(top_25)]
-
-    first_moment = tdf.datetime.iloc[-1]
-    last_moment = tdf.datetime.iloc[0]
-    ldf = df[df.datetime == last_moment].copy()
-
-    # Sort by wave descending to ensure proper position calculation
-    ldf = ldf.sort_values("wave", ascending=False).reset_index(drop=True)
-
-    # Calculate positions accounting for ties (same wave = same position)
-    positions = []
-    current = 0
-    borrow = 1
-    last_wave = None
-
-    for wave in ldf["wave"]:
-        if last_wave is not None and wave == last_wave:
-            borrow += 1
-        else:
-            current += borrow
-            borrow = 1
-        positions.append(current)
-        last_wave = wave
-
-    ldf.index = positions
-
-    return df, tdf, ldf, first_moment, last_moment
-
-
 def get_progress_data(league: str, shun: bool = False, sus: bool = False) -> tuple[pd.DataFrame, dict, list]:
     """
     Data for the Live Progress page: top-25 timeline plus join times.
@@ -175,7 +73,7 @@ def get_progress_data(league: str, shun: bool = False, sus: bool = False) -> tup
     player's first delta row (the reconstruction forward-fills, so "in the
     snapshot at time t" is exactly "first appearance <= t").
 
-    Snapshot-keyed like get_live_data: recomputes when new data lands.
+    Snapshot-keyed: recomputes when new data lands.
 
     Args:
         league: League identifier
@@ -235,7 +133,7 @@ def get_bracket_overview(league: str, shun: bool = False, sus: bool = False) -> 
     """
     Bracket ordering and fullish-bracket list for a league, from the delta archive.
 
-    Same semantics as get_bracket_data on the reconstructed history — creation
+    Same semantics as the old get_bracket_data on the reconstructed history — creation
     order is each bracket's first delta row, counts are unique players ever
     seen, anti-snipe (>= 28) applies only while entry is open — without
     building the history. Snapshot-keyed cache.
@@ -359,7 +257,7 @@ def get_live_standings(league: str, shun: bool = False, sus: bool = False) -> tu
     Returns:
         Tuple containing:
         - ldf: latest snapshot sorted by wave descending with tie-aware
-          positions as the index (same shape get_processed_data returned)
+          positions as the index (same shape the old get_processed_data returned)
         - prior_df: player_id/wave at the prior checkpoint, empty when no
           prior checkpoint exists (e.g. first checkpoint of a tourney)
     """
@@ -448,34 +346,14 @@ def get_reference_tourney_df(league: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-@cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
-def get_bracket_data(df: pd.DataFrame):
-    """
-    Process bracket-specific data.
-
-    Args:
-        df: DataFrame containing tournament data
-
-    Returns:
-        Tuple containing:
-        - bracket_order: List of brackets ordered by creation time
-        - fullish_brackets: List of brackets (filtered based on tournament state)
-    """
-    # Check tournament state - only apply anti-snipe protection during ENTRY_OPEN
-    tourney_state = get_tourney_state()
-    anti_snipe = tourney_state.name == "ENTRY_OPEN"
-
-    return get_full_brackets(df, anti_snipe=anti_snipe)
-
-
 def get_latest_bracket_filtered_df(league: str, shun: bool = False, sus: bool = False) -> pd.DataFrame:
     """
     Latest snapshot for a league, restricted to fullish brackets during entry.
 
-    Cross-league search paths use this instead of get_live_data: one snapshot
-    instead of the full reconstructed history, which keeps a seven-league loop
-    cheap. Applies the same anti-snipe rule as get_bracket_data (>= 28 players,
-    only while entry is open).
+    Cross-league search paths use this instead of the full reconstructed
+    history, which keeps a seven-league loop cheap. Applies the same
+    anti-snipe rule as get_bracket_overview (>= 28 players, only while
+    entry is open).
 
     Args:
         league: League identifier
@@ -1071,11 +949,6 @@ def update_bracket_index(new_index, max_index, league):
     """Update bracket navigation index with bounds checking"""
     bracket_key = f"current_bracket_idx_{league}"
     st.session_state[bracket_key] = max(0, min(new_index, max_index))
-
-
-def clear_cache():
-    """Clear all cached data in Streamlit"""
-    st.cache_data.clear()
 
 
 @cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)

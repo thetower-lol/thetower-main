@@ -8,13 +8,14 @@ ensuring each freshly-written snapshot is picked up promptly.
 During the tourney window, for each league:
   - Any staging snapshots in current_tourney/{league}/ not yet appended to the
     delta archive are processed via append_snapshot_to_archive().
-  - Streamlit cache is cleared so the web UI sees the new data.
 
 After the tourney window closes, for each league still holding staging snapshots:
   - Archive fidelity is verified (row-for-row reconstruction check).
   - Snapshots are bundled into a raw tar in {league}_raw/.
   - Tar contents are verified (byte-for-byte).
-  - Streamlit cache is cleared.
+
+The web UI picks up new data on its own: its live-data caches are keyed by the
+latest snapshot, so appending here invalidates them without any signal.
 
 Staging snapshots are NOT deleted here.  The backup service deletes them
 (together with the tar) only after the tar is verified uploaded to R2, so a
@@ -109,7 +110,7 @@ def _cleanup_completed_tourney(group: list[Path], archive_path: Path, raw_dir: P
 def process_league(league: str, in_window: bool) -> bool:
     """Process one league: append new snapshots and optionally clean up after tourney.
 
-    Returns True if any archive was updated (so caller knows to clear Streamlit cache).
+    Returns True if any archive was updated.
     """
     staging_dir = LIVE_BASE / "current_tourney" / league
     live_dir = LIVE_BASE / f"{league}_live"
@@ -173,24 +174,12 @@ def execute():
     in_window = _in_tourney_window()
     logging.info(f"import_live_results: tourney_window={in_window}")
 
-    any_updated = False
     for league in leagues:
         try:
-            updated = process_league(league, in_window)
-            if updated:
-                any_updated = True
+            process_league(league, in_window)
         except Exception:
             logging.exception(f"import_live_results: unhandled error processing league {league}")
         time.sleep(1)
-
-    if any_updated:
-        try:
-            from thetower.web.live.data_ops import clear_cache
-
-            clear_cache()
-            logging.info("import_live_results: cleared Streamlit cache")
-        except Exception as exc:
-            logging.warning(f"import_live_results: failed to clear Streamlit cache: {exc}")
 
     logging.info("import_live_results: run complete")
 
