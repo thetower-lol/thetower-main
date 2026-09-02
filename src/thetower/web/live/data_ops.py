@@ -291,6 +291,56 @@ def _get_bracket_timeline_snapshot(league: str, bracket_id: str, shun: bool, sus
     return tdf.sort_values(["datetime", "wave"], ascending=False).reset_index(drop=True)
 
 
+def get_peer_live_data(peer_ids: tuple, shun: bool = False, sus: bool = False) -> pd.DataFrame:
+    """
+    Live timelines for the given players across every league (bracket-filtered).
+
+    Expands only the peers' delta rows per league instead of reconstructing
+    and combining every league's full history. Snapshot-keyed across all
+    leagues and cached per peer group — the values are tiny.
+
+    Returns a frame shaped like the old combined loader: timeline rows
+    (datetime, player_id, wave, real_name, ...) plus a league column,
+    restricted to fullish brackets.
+    """
+    combined_key = "|".join(latest_snapshot_key(lg) for lg in leagues)
+    return _get_peer_live_data_snapshot(tuple(sorted(peer_ids)), shun, sus, combined_key)
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_peer_live_data_snapshot(peer_ids: tuple, shun: bool, sus: bool, snapshot_key: str) -> pd.DataFrame:
+    """Cached body of get_peer_live_data; snapshot_key exists only to key the cache."""
+    frames = []
+    lookup = get_player_id_lookup()
+    excluded = _excluded_ids(shun, sus)
+
+    for lg in leagues:
+        try:
+            archive, expected_timestamps = _load_archive_df(lg)
+        except (IndexError, ValueError):
+            continue  # league has no current data
+        try:
+            archive = archive[archive["player_id"].isin(peer_ids) & ~archive["player_id"].isin(excluded)]
+            if archive.empty:
+                continue
+            _, fullish_brackets = get_bracket_overview(lg, shun, sus)
+            archive = archive[archive["bracket"].isin(fullish_brackets)]
+            if archive.empty:
+                continue
+            df_tmp = reconstruct_all_snapshots(archive, extra_timestamps=expected_timestamps)
+            if df_tmp.empty:
+                continue
+            df_tmp["real_name"] = [lookup.get(pid, name) for pid, name in zip(df_tmp["player_id"], df_tmp["name"])]
+            df_tmp["real_name"] = df_tmp["real_name"].astype(str)
+            df_tmp["league"] = lg
+            frames.append(df_tmp)
+        except Exception:
+            logger.exception(f"get_peer_live_data: failed to load {lg}")
+            continue
+
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 def get_live_standings(league: str, shun: bool = False, sus: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Latest and prior checkpoint standings for a league.

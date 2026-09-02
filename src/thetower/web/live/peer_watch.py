@@ -12,13 +12,10 @@ from thetower.backend.tourney_results.shun_config import include_shun_enabled_fo
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.historical.proximal_utils import get_proximal_players
 from thetower.web.live.data_ops import (
-    SNAPSHOT_CACHE_TTL_SECONDS,
-    cache_data_if_enabled,
     format_time_ago,
-    get_bracket_data,
     get_data_refresh_timestamp,
     get_latest_bracket_filtered_df,
-    get_live_data,
+    get_peer_live_data,
     latest_snapshot_key,
     process_display_names,
     require_tournament_data,
@@ -74,36 +71,6 @@ def _search_live_data_for_player(name: str = "", player_id: str = "") -> tuple[s
         if c4.button("Select", key=f"pw_select_{m_id}_{m_league}", on_click=add_player_id, args=(m_id,)):
             pass
     return None, None
-
-
-def _load_combined_live_data(include_shun: bool, include_sus: bool) -> pd.DataFrame:
-    """Load current live tournament data for all leagues (bracket-filtered) and combine.
-
-    Snapshot-keyed across every league so the combined frame rebuilds when any
-    league gets new data, instead of on a timer.
-    """
-    combined_key = "|".join(latest_snapshot_key(lg) for lg in ALL_LEAGUES)
-    return _load_combined_live_data_snapshot(include_shun, include_sus, combined_key)
-
-
-@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
-def _load_combined_live_data_snapshot(include_shun: bool, include_sus: bool, snapshot_key: str) -> pd.DataFrame:
-    """Cached body of _load_combined_live_data; snapshot_key exists only to key the cache."""
-    frames = []
-    for lg in ALL_LEAGUES:
-        try:
-            df_tmp = get_live_data(lg, include_shun, include_sus)
-            if df_tmp.empty:
-                continue
-            # Apply same bracket filter as live_bracket.py to restrict to current tournament
-            _, fullish_brackets = get_bracket_data(df_tmp)
-            df_tmp = df_tmp[df_tmp.bracket.isin(fullish_brackets)].copy()
-            if not df_tmp.empty:
-                df_tmp["league"] = lg
-                frames.append(df_tmp)
-        except Exception:
-            continue
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 @require_tournament_data
@@ -185,14 +152,13 @@ def peer_watch():
 
     st.caption(f"Showing {peer_n} peers above/below **{focal_name}** — {focal_league} · {focal_date} (last completed tournament)")
 
-    # --- Load combined live data and filter to peer group ---
-    all_live_df = _load_combined_live_data(include_shun_enabled_for("peer_watch"), include_sus_enabled_for("peer_watch"))
+    # --- Load live data for the peer group only (expanded from the delta archives) ---
+    peer_live_df = get_peer_live_data(tuple(peer_ids), include_shun_enabled_for("peer_watch"), include_sus_enabled_for("peer_watch"))
 
-    if all_live_df.empty:
+    # Distinguish "no tourney data at all" from "peers not participating"
+    if peer_live_df.empty and all(latest_snapshot_key(lg) == "no-data" for lg in ALL_LEAGUES):
         st.error("No live tournament data available.")
         return
-
-    peer_live_df = all_live_df[all_live_df["player_id"].isin(peer_ids)].copy()
 
     found_ids = set(peer_live_df["player_id"].unique())
     missing_ids = [pid for pid in peer_ids if pid not in found_ids]
