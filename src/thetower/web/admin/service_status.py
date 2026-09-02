@@ -6,6 +6,7 @@ Gracefully handles Windows development environments.
 """
 
 import logging
+import os
 import platform
 import subprocess
 from datetime import datetime, timezone
@@ -180,6 +181,53 @@ def get_service_restart_count(service_name: str) -> Optional[int]:
         return int(value) if value.isdigit() else None
 
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        return None
+
+
+def get_fd_stats(service_name: str) -> Optional[dict]:
+    """
+    Read open-file-descriptor usage for a service's main process from /proc.
+
+    Needs no root: /proc/<pid>/fd is readable by the process owner, and all
+    tower services run as the same user as this site. Returns None when the
+    service has no main PID or /proc can't be read (stopped service, Windows,
+    or a process owned by a different user).
+    """
+    if is_windows():
+        return None
+
+    try:
+        result = subprocess.run(
+            ["systemctl", "show", service_name, "--property=MainPID", "--value"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        pid = result.stdout.strip()
+        if not pid.isdigit() or pid == "0":
+            return None
+
+        fd_dir = f"/proc/{pid}/fd"
+        fd_names = os.listdir(fd_dir)
+
+        sockets = 0
+        for fd_name in fd_names:
+            try:
+                if os.readlink(f"{fd_dir}/{fd_name}").startswith("socket:"):
+                    sockets += 1
+            except OSError:
+                continue  # fd closed between listdir and readlink
+
+        soft_limit = None
+        with open(f"/proc/{pid}/limits") as fh:
+            for line in fh:
+                if line.startswith("Max open files"):
+                    soft_limit = int(line.split()[3])
+                    break
+
+        return {"open": len(fd_names), "sockets": sockets, "soft_limit": soft_limit}
+
+    except (OSError, ValueError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
         return None
 
 
@@ -483,6 +531,15 @@ def service_status_page():
                     else:
                         st.caption(f"🔁 {restart_count} restart{'s' if restart_count != 1 else ''}")
 
+                # Open FDs vs the soft limit — exhaustion breaks static assets/websockets during tourneys
+                fd_stats = get_fd_stats(config["service"])
+                if fd_stats and fd_stats["soft_limit"]:
+                    fd_label = f"📁 {fd_stats['open']}/{fd_stats['soft_limit']} FDs ({fd_stats['sockets']} sockets)"
+                    if fd_stats["open"] >= fd_stats["soft_limit"] * 0.8:
+                        st.markdown(f"⚠️ **{fd_label}**")
+                    else:
+                        st.caption(fd_label)
+
             with col4:
                 # Action button logic
                 if load_state == "loaded" or is_windows():
@@ -681,6 +738,10 @@ def service_status_page():
         - Displays both absolute time (UTC) and relative time (e.g., "2 hours ago")
         - ⏸️ **Never Started**: Service has never been activated
         - ❓ **Unknown**: Start time information unavailable
+
+        **File Descriptors:**
+        - 📁 Shows open FDs vs the process soft limit, with socket count (mostly user websockets)
+        - ⚠️ Highlighted at 80%+ of the limit — at 100% the site starts failing to serve static assets
 
         **Actions:**
         - 🔄 **Restart button**: Restart services (most services)
