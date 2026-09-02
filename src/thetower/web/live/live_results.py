@@ -118,7 +118,13 @@ def live_results():
         # secure (e.g. gate behind HIDDEN_FEATURES or real auth).
         results_full = st.query_params.get("results") == "full"
         row_limit = None if results_full else min(get_results_limit(league), 5000)
-        display_df = ldf_display[display_cols][:row_limit]
+        limited_df = ldf_display[:row_limit]
+        if tourney_active:
+            active_only = st.toggle("Active players only", key=f"active_only_{league}", help="Players whose wave improved since the last checkpoint")
+            if active_only:
+                active_ids = {pid for pid, wave in zip(ldf["player_id"], ldf["wave"]) if pid not in prior_waves or wave > prior_waves[pid]}
+                limited_df = limited_df[limited_df["player_id"].isin(active_ids)]
+        display_df = limited_df[display_cols]
         if tourney_active:
             display_df = display_df.style.map(
                 lambda v: (
