@@ -12,7 +12,7 @@ from thetower.backend.tourney_results.tourney_utils import get_tourney_state
 from thetower.web.live.data_ops import (
     format_time_ago,
     get_data_refresh_timestamp,
-    get_processed_data,
+    get_live_standings,
     get_reference_tourney_df,
     require_tournament_data,
 )
@@ -47,23 +47,20 @@ def live_results():
     else:
         st.caption("📊 Data refresh time: Unknown")
 
-    # Get processed data
+    # Latest + prior checkpoint standings, read directly from the two newest snapshots
     include_shun = include_shun_enabled_for("live_results")
     include_sus = include_sus_enabled_for("live_results")
-    df, tdf, ldf, _, _ = get_processed_data(league, include_shun, include_sus)
+    ldf, prior_snapshot_df = get_live_standings(league, include_shun, include_sus)
 
     # Get reference data for joined calculation
     pdf = get_reference_tourney_df(league)
 
     # Compute position deltas vs. the prior checkpoint snapshot
-    sorted_datetimes = sorted(df["datetime"].unique(), reverse=True)
     prior_positions: dict[str, int] = {}
     prior_waves: dict[str, float] = {}
     prior_joined_ids: set[str] = set()
-    if len(sorted_datetimes) >= 2:
-        prior_moment = sorted_datetimes[1]
-        prior_df = df[df["datetime"] == prior_moment].copy()
-        prior_df = prior_df.sort_values("wave", ascending=False).reset_index(drop=True)
+    if not prior_snapshot_df.empty:
+        prior_df = prior_snapshot_df.sort_values("wave", ascending=False).reset_index(drop=True)
         p_current, p_borrow, p_last_wave = 0, 1, None
         p_pos_list: list[int] = []
         for wave in prior_df["wave"]:

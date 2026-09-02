@@ -10,12 +10,14 @@ import streamlit as st
 
 from thetower.backend.env_config import get_csv_data
 from thetower.backend.tourney_results.archive_utils import (
+    STRING_COLUMN_DTYPES,
     build_tourney_archive,
     group_snapshots_by_tourney,
     list_archives,
     list_snapshots,
     read_archive,
     reconstruct_all_snapshots,
+    reconstruct_at,
 )
 from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.data import get_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_ids, get_tourneys
@@ -162,6 +164,91 @@ def _get_processed_data_snapshot(league: str, shun: bool, sus: bool, snapshot_ke
     ldf.index = positions
 
     return df, tdf, ldf, first_moment, last_moment
+
+
+def get_live_standings(league: str, shun: bool = False, sus: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Latest and prior checkpoint standings for a league.
+
+    Reads the two newest snapshots directly instead of unpacking the full
+    reconstructed tourney history — Live Results only ever compares the
+    current checkpoint against the prior one. Uncached by design: a snapshot
+    read is tens of milliseconds and moderation changes take effect
+    immediately.
+
+    Args:
+        league: League identifier
+        shun: Whether to include shunned players
+        sus: Whether to include sus players
+
+    Returns:
+        Tuple containing:
+        - ldf: latest snapshot sorted by wave descending with tie-aware
+          positions as the index (same shape get_processed_data returned)
+        - prior_df: player_id/wave at the prior checkpoint, empty when no
+          prior checkpoint exists (e.g. first checkpoint of a tourney)
+    """
+    ldf = get_latest_live_df(league, shun, sus)
+    ldf = ldf.sort_values("wave", ascending=False).reset_index(drop=True)
+    ldf.index = _tie_positions(ldf["wave"])
+    return ldf, _get_prior_snapshot(league, shun, sus)
+
+
+def _tie_positions(waves) -> list[int]:
+    """Tie-aware positions for a wave series sorted descending: tied players share the first position of their group."""
+    positions: list[int] = []
+    current, borrow, last_wave = 0, 1, None
+    for wave in waves:
+        if last_wave is not None and wave == last_wave:
+            borrow += 1
+        else:
+            current += borrow
+            borrow = 1
+        positions.append(current)
+        last_wave = wave
+    return positions
+
+
+def _get_prior_snapshot(league: str, shun: bool, sus: bool) -> pd.DataFrame:
+    """
+    player_id/wave rows at the prior checkpoint of the current tourney, moderation-filtered.
+
+    Empty when there is no prior checkpoint (first checkpoint of a tourney, or
+    no data at all). The prior snapshot always comes from the same tourney
+    group as the latest one — at a new tourney's first checkpoint the staging
+    dir can still hold the previous tourney's files. Falls back to the archive
+    between tourneys, after staging cleanup.
+    """
+    empty = pd.DataFrame(columns=["player_id", "wave"])
+
+    try:
+        snaps = list_snapshots(_get_snapshot_path(league))
+        if snaps:
+            current_group = group_snapshots_by_tourney(snaps)[-1]
+            if len(current_group) < 2:
+                return empty
+            df = pd.read_csv(current_group[-2], dtype=STRING_COLUMN_DTYPES)
+        else:
+            archives = list_archives(_get_archive_path(league))
+            if not archives:
+                return empty
+            archive = read_archive(archives[-1])
+            times = sorted(archive["snapshot_time"].unique())
+            if len(times) < 2:
+                return empty
+            df = reconstruct_at(archive, times[-2])
+        if df.empty:
+            return empty
+    except Exception:
+        logging.exception(f"Failed to load prior snapshot for {league}; rank deltas will show as new")
+        return empty
+
+    excluded_ids = get_banned_ids()
+    if not sus:
+        excluded_ids = excluded_ids | get_sus_ids()
+    if not shun:
+        excluded_ids = excluded_ids | get_shun_ids()
+    return df[~df["player_id"].isin(excluded_ids)][["player_id", "wave"]].reset_index(drop=True)
 
 
 def get_reference_tourney_df(league: str) -> pd.DataFrame:
