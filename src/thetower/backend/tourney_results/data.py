@@ -657,10 +657,14 @@ def get_active_role_window() -> Optional[RoleWindow]:
 
 
 def get_results_for_window(window: RoleWindow, league=champ):
-    """Tournament results in a role window: everything on/after its start_date (open-ended)."""
-    hidden_features = os.environ.get("HIDDEN_FEATURES")
-    public = {"public": True} if not hidden_features else {}
-    return TourneyResult.objects.filter(date__gte=window.start_date, league=league, **public).order_by("-date")
+    """Tournament results in a role window: everything public on/after its start_date (open-ended).
+
+    Always restricted to public results, unlike the HIDDEN_FEATURES-conditional filter in
+    get_results_for_patch: the bot runs with HIDDEN_FEATURES set, and roles must not see
+    unreviewed or unpublished tournaments — the window gates (gates_satisfied) and the
+    bot's refresh trigger already count public results only.
+    """
+    return TourneyResult.objects.filter(date__gte=window.start_date, league=league, public=True).order_by("-date")
 
 
 @ttl_cache(maxsize=128, ttl=60)
