@@ -30,7 +30,7 @@ from .constants import (
 from .formatting import color_position_barebones
 from .models import BattleCondition
 from .models import PatchNew as Patch
-from .models import Role, TourneyResult, TourneyRow
+from .models import Role, RoleWindow, TourneyResult, TourneyRow
 from .results_config import get_results_limit
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "thetower.backend.towerdb.settings")
@@ -641,6 +641,26 @@ def get_results_for_patch(patch: Patch, league=champ):
     hidden_features = os.environ.get("HIDDEN_FEATURES")
     public = {"public": True} if not hidden_features else {}
     return TourneyResult.objects.filter(date__gte=patch.start_date, date__lte=patch.end_date, league=league, **public).order_by("-date")
+
+
+def get_active_role_window() -> Optional[RoleWindow]:
+    """Resolve the role window Discord roles should be computed from.
+
+    A window is eligible when every gate set on it is satisfied; among eligible
+    windows the latest start_date wins. Returns None when no window is eligible
+    (including an empty table) — callers fall back to the latest patch.
+    """
+    for window in RoleWindow.objects.order_by("-start_date"):
+        if window.gates_satisfied():
+            return window
+    return None
+
+
+def get_results_for_window(window: RoleWindow, league=champ):
+    """Tournament results in a role window: everything on/after its start_date (open-ended)."""
+    hidden_features = os.environ.get("HIDDEN_FEATURES")
+    public = {"public": True} if not hidden_features else {}
+    return TourneyResult.objects.filter(date__gte=window.start_date, league=league, **public).order_by("-date")
 
 
 @ttl_cache(maxsize=128, ttl=60)

@@ -9,7 +9,19 @@ from django.utils.safestring import mark_safe
 from simple_history.admin import SimpleHistoryAdmin
 
 from ..sus.models import PlayerId
-from .models import BattleCondition, Injection, NameDayWinner, PatchNew, PositionRole, PromptTemplate, RainPeriod, Role, TourneyResult, TourneyRow
+from .models import (
+    BattleCondition,
+    Injection,
+    NameDayWinner,
+    PatchNew,
+    PositionRole,
+    PromptTemplate,
+    RainPeriod,
+    Role,
+    RoleWindow,
+    TourneyResult,
+    TourneyRow,
+)
 
 # Graceful thetower_bcs import handling
 try:
@@ -359,6 +371,28 @@ class PatchNewAdmin(SimpleHistoryAdmin):
         "version_patch",
         "start_date",
         "end_date",
+    )
+
+
+@admin.register(RoleWindow)
+class RoleWindowAdmin(SimpleHistoryAdmin):
+    def _eligible(self, obj):
+        return obj.gates_satisfied()
+
+    _eligible.short_description = "Eligible"
+    _eligible.boolean = True
+
+    list_display = (
+        "label",
+        "start_date",
+        "min_tournaments",
+        "active_after",
+        "_eligible",
+    )
+
+    search_fields = (
+        "label",
+        "start_date",
     )
 
 

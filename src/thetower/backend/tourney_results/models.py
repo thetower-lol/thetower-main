@@ -1,3 +1,5 @@
+import datetime
+
 from colorfield.fields import ColorField
 from django.core.cache import cache
 from django.db import models
@@ -282,3 +284,39 @@ class RainPeriod(models.Model):
 
     class Meta:
         ordering = ["-start_date"]
+
+
+class RoleWindow(models.Model):
+    """A window of tournament data that Discord roles are computed from.
+
+    Decouples role resets from the patch table: `start_date` is the data boundary
+    (tournaments on/after it count toward roles), while the optional gates control
+    when the bot switches to this window. A window with no gates is active as soon
+    as it is added; when gates are set, ALL of them must be satisfied.
+    """
+
+    label = models.CharField(max_length=64, null=False, blank=False, help_text="Human-readable name for this window, e.g. 'V29 launch'.")
+    start_date = models.DateField(null=False, blank=False, help_text="Tournaments on/after this date count toward roles once the window is active.")
+    min_tournaments = models.PositiveSmallIntegerField(
+        default=0, help_text="Activate only once this many tourney dates exist on/after start_date. 0 = no count gate."
+    )
+    active_after = models.DateField(null=True, blank=True, help_text="Activate only on/after this date. Empty = no date gate.")
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-start_date"]
+
+    def gates_satisfied(self, today: datetime.date | None = None) -> bool:
+        """Whether every gate set on this window is satisfied (unset gates pass automatically)."""
+        today = today or timezone.now().date()
+        if self.active_after and today < self.active_after:
+            return False
+        if self.min_tournaments:
+            tourney_dates = TourneyResult.objects.filter(public=True, date__gte=self.start_date).values("date").distinct().count()
+            if tourney_dates < self.min_tournaments:
+                return False
+        return True
+
+    def __str__(self):
+        return f"{self.label} (from {self.start_date})"
