@@ -115,7 +115,7 @@ if hidden_features:
         st.Page("admin/access_log_stats.py", title="Access Log Stats", icon="📊", url_path="accesslogstats"),
         st.Page("admin/api_log.py", title="API Request Log", icon="🔑", url_path="apilog"),
         st.Page("admin/backup_status.py", title="Backup Status", icon="☁️", url_path="backupstatus"),
-        st.Page("admin/memory_monitor.py", title="Memory Monitor", icon="📉", url_path="memorymonitor"),
+        st.Page("admin/resource_monitor.py", title="Resource Monitor", icon="📉", url_path="resourcemonitor"),
     ]
 
     admin_moderation_pages = [
