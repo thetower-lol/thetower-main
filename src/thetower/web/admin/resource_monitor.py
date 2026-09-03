@@ -1,8 +1,12 @@
-"""Memory Monitor admin page.
+"""Resource Monitor admin page.
 
-Displays RSS memory usage over time for all tower services, sampled every 30
-minutes by the placement cache generator. Data is read from the rotating
-memory.log file written by generate_placement_cache.py.
+Displays per-service RSS memory, CPU usage, and open file descriptors over
+time, sampled every 30 minutes by the placement cache generator into the
+rotating resources.log (timestamp,service,pid,rss_kb,cpu_seconds,num_fds,
+num_sockets). CPU% is derived from deltas of the cumulative CPU seconds
+between consecutive samples of the same pid, so it reads as average core
+usage per interval (100 = one full core). Rows converted from the retired
+memory.log carry -1 for cpu/fd values and are excluded from those charts.
 """
 
 import logging
@@ -33,15 +37,17 @@ _SERVICE_LABELS: dict[str, str] = {
     "get_results": "Get Results",
 }
 
+_RESOURCE_COLUMNS = ["timestamp", "service", "pid", "rss_kb", "cpu_seconds", "num_fds", "num_sockets"]
+
 
 @st.cache_data(ttl=120)
-def _load_memory_data() -> pd.DataFrame:
-    """Load and parse all memory log files (current + rotated). Cached 2 minutes."""
+def _load_resource_data() -> pd.DataFrame:
+    """Load and parse all resources log files (current + rotated). Cached 2 minutes."""
     csv_data = Path(get_csv_data())
-    log_files = sorted(glob(str(csv_data / "memory.log*")))
+    log_files = sorted(glob(str(csv_data / "resources.log*")))
 
     if not log_files:
-        return pd.DataFrame(columns=["timestamp", "service", "pid", "rss_mb"])
+        return pd.DataFrame(columns=_RESOURCE_COLUMNS + ["rss_mb", "service_label"])
 
     dfs = []
     for path in log_files:
@@ -49,15 +55,15 @@ def _load_memory_data() -> pd.DataFrame:
             df = pd.read_csv(
                 path,
                 header=None,
-                names=["timestamp", "service", "pid", "rss_kb"],
+                names=_RESOURCE_COLUMNS,
                 on_bad_lines="skip",
             )
             dfs.append(df)
         except Exception:
-            logger.exception(f"Failed to read memory log {path}")
+            logger.exception(f"Failed to read resources log {path}")
 
     if not dfs:
-        return pd.DataFrame(columns=["timestamp", "service", "pid", "rss_mb"])
+        return pd.DataFrame(columns=_RESOURCE_COLUMNS + ["rss_mb", "service_label"])
 
     combined = pd.concat(dfs, ignore_index=True)
     combined["timestamp"] = pd.to_datetime(combined["timestamp"], utc=True, errors="coerce")
@@ -67,14 +73,38 @@ def _load_memory_data() -> pd.DataFrame:
     return combined.sort_values("timestamp")
 
 
-def render_memory_monitor() -> None:
-    st.header("Memory Monitor")
-    st.caption("RSS memory usage per service, sampled every 30 minutes by the placement cache generator.")
+def _derive_cpu_pct(rdf: pd.DataFrame) -> pd.DataFrame:
+    """Average CPU% per sampling interval, from cumulative CPU seconds.
 
-    df = _load_memory_data()
+    Deltas between consecutive samples of the same service divided by wall
+    time give average core usage over the interval (100 = one full core).
+    Deltas across a pid change (service restart) or counter reset are dropped.
+    """
+    rdf = rdf[rdf["cpu_seconds"] >= 0].sort_values("timestamp")
+    parts = []
+    for _, group in rdf.groupby("service"):
+        group = group.copy()
+        dt = group["timestamp"].diff().dt.total_seconds()
+        dcpu = group["cpu_seconds"].diff()
+        valid = group["pid"].eq(group["pid"].shift()) & (dcpu >= 0) & (dt > 0)
+        group["cpu_pct"] = (dcpu / dt * 100).where(valid)
+        parts.append(group.dropna(subset=["cpu_pct"]))
+    if not parts:
+        return pd.DataFrame(columns=list(rdf.columns) + ["cpu_pct"])
+    return pd.concat(parts, ignore_index=True)
+
+
+def render_resource_monitor() -> None:
+    st.header("Resource Monitor")
+    st.caption(
+        "Per-service RSS, CPU, and open-file usage, sampled every 30 minutes by the placement cache generator. "
+        "For live FD counts against the process limit, see Service Status."
+    )
+
+    df = _load_resource_data()
 
     if df.empty:
-        st.info("No memory log data yet. Data will appear after the next placement cache run (at :01 or :31 past the hour).")
+        st.info("No resource log data yet. Data will appear after the next placement cache run (at :01 or :31 past the hour).")
         return
 
     earliest = df["timestamp"].min()
@@ -106,6 +136,8 @@ def render_memory_monitor() -> None:
         st.warning("No data for the selected filters.")
         return
 
+    # --- Memory ---
+    st.subheader("Memory")
     fig = px.line(
         filtered,
         x="timestamp",
@@ -114,25 +146,73 @@ def render_memory_monitor() -> None:
         labels={"timestamp": "Time (UTC)", "rss_mb": "RSS (MB)", "service_label": "Service"},
         title=f"Memory Usage — Last {lookback_days} Day{'s' if lookback_days > 1 else ''}",
     )
-    fig.update_layout(
-        legend_title_text="Service",
-        hovermode="x unified",
-        yaxis={"rangemode": "tozero"},
-    )
+    fig.update_layout(legend_title_text="Service", hovermode="x unified", yaxis={"rangemode": "tozero"})
     st.plotly_chart(fig, use_container_width=True)
 
-    # Summary table: latest reading per service
+    # --- CPU ---
+    st.subheader("CPU")
+    cpu_df = _derive_cpu_pct(filtered)
+    if cpu_df.empty:
+        st.info("CPU data appears once the sampler has written two consecutive resources.log samples (deltas need pairs).")
+    else:
+        fig = px.line(
+            cpu_df,
+            x="timestamp",
+            y="cpu_pct",
+            color="service_label",
+            labels={"timestamp": "Time (UTC)", "cpu_pct": "Avg CPU % (100 = one core)", "service_label": "Service"},
+            title="Average CPU per Sampling Interval",
+        )
+        fig.update_layout(legend_title_text="Service", hovermode="x unified", yaxis={"rangemode": "tozero"})
+        st.plotly_chart(fig, use_container_width=True)
+
+    # --- File descriptors ---
+    st.subheader("Open File Descriptors")
+    fd_df = filtered[filtered["num_fds"] >= 0]
+    if fd_df.empty:
+        st.info("FD data appears after the first post-upgrade sampler run.")
+    else:
+        fig = px.line(
+            fd_df,
+            x="timestamp",
+            y="num_fds",
+            color="service_label",
+            hover_data=["num_sockets"],
+            labels={"timestamp": "Time (UTC)", "num_fds": "Open FDs", "num_sockets": "Sockets", "service_label": "Service"},
+            title="Open File Descriptors (hover shows socket count)",
+        )
+        fig.update_layout(legend_title_text="Service", hovermode="x unified", yaxis={"rangemode": "tozero"})
+        st.plotly_chart(fig, use_container_width=True)
+
+    # --- Latest readings ---
     st.subheader("Latest Readings")
-    latest_per_service = (
+    table = (
         filtered.sort_values("timestamp")
         .groupby("service_label")
         .last()
-        .reset_index()[["service_label", "rss_mb", "timestamp"]]
-        .rename(columns={"service_label": "Service", "rss_mb": "RSS (MB)", "timestamp": "Sampled At"})
-        .sort_values("RSS (MB)", ascending=False)
+        .reset_index()[["service_label", "rss_mb", "num_fds", "num_sockets", "timestamp"]]
+        .rename(
+            columns={"service_label": "Service", "rss_mb": "RSS (MB)", "num_fds": "FDs", "num_sockets": "Sockets", "timestamp": "Sampled At"}
+        )
     )
-    latest_per_service["RSS (MB)"] = latest_per_service["RSS (MB)"].round(1)
-    st.dataframe(latest_per_service, hide_index=True, use_container_width=True)
+    table["RSS (MB)"] = table["RSS (MB)"].round(1)
+    # Converted memory.log history carries -1 sentinels — show as blank, not negative
+    table["FDs"] = table["FDs"].where(table["FDs"] >= 0)
+    table["Sockets"] = table["Sockets"].where(table["Sockets"] >= 0)
+
+    if not cpu_df.empty:
+        clatest = (
+            cpu_df.sort_values("timestamp")
+            .groupby("service_label")["cpu_pct"]
+            .last()
+            .reset_index()
+            .rename(columns={"service_label": "Service", "cpu_pct": "CPU %"})
+        )
+        clatest["CPU %"] = clatest["CPU %"].round(1)
+        table = table.merge(clatest, on="Service", how="left")
+
+    table = table.sort_values("RSS (MB)", ascending=False)
+    st.dataframe(table, hide_index=True, use_container_width=True)
 
 
-render_memory_monitor()
+render_resource_monitor()

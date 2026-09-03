@@ -421,27 +421,26 @@ def process_tourney_group(league: str, group: list[Path], include_shun: bool = F
         logging.exception("Failed to update player_index from latest snapshot")
 
 
-_memory_logger = logging.getLogger("tower.memory")
-_memory_logger_configured = False
+_resource_logger = logging.getLogger("tower.resources")
+_resource_logger_configured = False
 
 
-def _setup_memory_logger() -> None:
-    global _memory_logger_configured
-    if _memory_logger_configured:
+def _setup_resource_logger() -> None:
+    global _resource_logger_configured
+    if _resource_logger_configured:
         return
-    log_file = LIVE_BASE / "memory.log"
     handler = logging.handlers.TimedRotatingFileHandler(
-        log_file,
+        LIVE_BASE / "resources.log",
         when="d",
         backupCount=14,
         encoding="utf-8",
         utc=True,
     )
     handler.setFormatter(logging.Formatter("%(message)s"))
-    _memory_logger.addHandler(handler)
-    _memory_logger.setLevel(logging.INFO)
-    _memory_logger.propagate = False
-    _memory_logger_configured = True
+    _resource_logger.addHandler(handler)
+    _resource_logger.setLevel(logging.INFO)
+    _resource_logger.propagate = False
+    _resource_logger_configured = True
 
 
 def _get_service_name(proc: psutil.Process) -> str | None:
@@ -488,9 +487,32 @@ def _get_service_name(proc: psutil.Process) -> str | None:
     return None
 
 
-def _log_memory_snapshot() -> None:
-    """Append an RSS memory snapshot for all known tower processes to the rotating memory log."""
-    _setup_memory_logger()
+def _count_fds(pid: int) -> tuple[int, int]:
+    """Return (open fds, sockets among them) for a same-uid process, or (-1, -1) if unreadable."""
+    fd_dir = f"/proc/{pid}/fd"
+    try:
+        fd_names = os.listdir(fd_dir)
+    except OSError:
+        return -1, -1
+    sockets = 0
+    for fd_name in fd_names:
+        try:
+            if os.readlink(f"{fd_dir}/{fd_name}").startswith("socket:"):
+                sockets += 1
+        except OSError:
+            continue  # fd closed between listdir and readlink
+    return len(fd_names), sockets
+
+
+def _log_resource_snapshot() -> None:
+    """Append per-service resource snapshots to the rotating resources log.
+
+    One CSV line per service per run:
+    timestamp,service,pid,rss_kb,cpu_seconds,num_fds,num_sockets. cpu_seconds is
+    cumulative user+system time — consumers derive CPU%% from deltas between
+    consecutive samples of the same pid. Unreadable values are recorded as -1.
+    """
+    _setup_resource_logger()
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     my_uid = os.getuid()
     try:
@@ -502,7 +524,13 @@ def _log_memory_snapshot() -> None:
                 if name is None:
                     continue
                 rss_kb = proc.memory_info().rss // 1024
-                _memory_logger.info("%s,%s,%d,%d", now, name, proc.pid, rss_kb)
+                try:
+                    cpu = proc.cpu_times()
+                    cpu_seconds = cpu.user + cpu.system
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    cpu_seconds = -1.0
+                num_fds, num_sockets = _count_fds(proc.pid)
+                _resource_logger.info("%s,%s,%d,%d,%.1f,%d,%d", now, name, proc.pid, rss_kb, cpu_seconds, num_fds, num_sockets)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
     except Exception:
@@ -529,7 +557,7 @@ def execute_once():
         except Exception:
             logging.exception(f"Failed processing league {league}")
     logging.info("Placement cache generation run complete")
-    _log_memory_snapshot()
+    _log_resource_snapshot()
 
 
 def main():
