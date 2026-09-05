@@ -10,9 +10,14 @@ from thetower.web.util import fmt_dt, get_league_selection, get_options
 
 
 def get_league_for_player(player_id: str) -> str:
-    """Find which league a player is participating in."""
+    """Find which league a player is participating in.
+
+    ``fast=True`` reads only the membership columns of the latest snapshot and
+    skips the full player-name lookup — sufficient for a participation check,
+    and this loop runs up to once per league on every player-linked render.
+    """
     for league in leagues:
-        if check_live_entry(league, player_id):
+        if check_live_entry(league, player_id, fast=True):
             return league
     return None
 

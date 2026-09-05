@@ -7,6 +7,7 @@ from time import perf_counter
 
 import pandas as pd
 import streamlit as st
+from django.db.models import Max
 
 from thetower.backend.env_config import get_csv_data
 from thetower.backend.tourney_results.archive_utils import (
@@ -245,9 +246,10 @@ def get_live_standings(league: str, shun: bool = False, sus: bool = False) -> tu
 
     Reads the two newest snapshots directly instead of unpacking the full
     reconstructed tourney history — Live Results only ever compares the
-    current checkpoint against the prior one. Uncached by design: a snapshot
-    read is tens of milliseconds and moderation changes take effect
-    immediately.
+    current checkpoint against the prior one. Both halves are snapshot-keyed
+    caches (get_latest_standings_df, _get_prior_snapshot): under tourney load
+    the uncached reads repeated on every script run and starved the interpreter
+    lock, so moderation changes now take effect at the next snapshot.
 
     Args:
         league: League identifier
@@ -265,7 +267,13 @@ def get_live_standings(league: str, shun: bool = False, sus: bool = False) -> tu
 
 
 def get_latest_standings_df(league: str, shun: bool = False, sus: bool = False) -> pd.DataFrame:
-    """Latest snapshot sorted by wave descending with tie-aware positions as the index."""
+    """Latest snapshot sorted by wave descending with tie-aware positions as the index. Snapshot-keyed cache."""
+    return _get_latest_standings_snapshot(league, shun, sus, latest_snapshot_key(league))
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_latest_standings_snapshot(league: str, shun: bool, sus: bool, snapshot_key: str) -> pd.DataFrame:
+    """Cached body of get_latest_standings_df; snapshot_key exists only to key the cache."""
     ldf = get_latest_live_df(league, shun, sus)
     ldf = ldf.sort_values("wave", ascending=False).reset_index(drop=True)
     ldf.index = _tie_positions(ldf["wave"])
@@ -295,8 +303,15 @@ def _get_prior_snapshot(league: str, shun: bool, sus: bool) -> pd.DataFrame:
     no data at all). The prior snapshot always comes from the same tourney
     group as the latest one — at a new tourney's first checkpoint the staging
     dir can still hold the previous tourney's files. Falls back to the archive
-    between tourneys, after staging cleanup.
+    between tourneys, after staging cleanup. Snapshot-keyed cache: the prior
+    checkpoint only changes when a new latest snapshot lands.
     """
+    return _get_prior_snapshot_cached(league, shun, sus, latest_snapshot_key(league))
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_prior_snapshot_cached(league: str, shun: bool, sus: bool, snapshot_key: str) -> pd.DataFrame:
+    """Cached body of _get_prior_snapshot; snapshot_key exists only to key the cache."""
     empty = pd.DataFrame(columns=["player_id", "wave"])
 
     try:
@@ -335,7 +350,30 @@ def get_reference_tourney_df(league: str) -> pd.DataFrame:
     Walks down the league hierarchy starting at `league`, so a just-launched top
     league with no usable history falls back to the league below it (whose players
     promote into it). Returns an empty DataFrame if no league has usable rows.
+
+    Cached: the frame is identical for every visitor until a newer public result
+    is published, so the cache key is the newest public result in each candidate
+    league (one cheap query). The TTL bounds staleness for edits to an existing
+    result and for moderation / results-limit changes.
     """
+    return _get_reference_tourney_df_cached(league, _reference_tourney_key(league))
+
+
+def _reference_tourney_key(league: str) -> str:
+    """Token for the newest public result in every league get_reference_tourney_df may fall back to."""
+    start = leagues.index(league) if league in leagues else 0
+    latest = (
+        TourneyResult.objects.filter(league__in=leagues[start:], public=True)
+        .values("league")
+        .annotate(latest_date=Max("date"), latest_id=Max("id"))
+        .order_by("league")
+    )
+    return "|".join(f"{row['league']}:{row['latest_date']}:{row['latest_id']}" for row in latest) or "no-data"
+
+
+@cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
+def _get_reference_tourney_df_cached(league: str, reference_key: str) -> pd.DataFrame:
+    """Cached body of get_reference_tourney_df; reference_key exists only to key the cache."""
     start = leagues.index(league) if league in leagues else 0
     for reference_league in leagues[start:]:
         qs = TourneyResult.objects.filter(league=reference_league, public=True).order_by("-date")
@@ -353,7 +391,7 @@ def get_latest_bracket_filtered_df(league: str, shun: bool = False, sus: bool = 
     Cross-league search paths use this instead of the full reconstructed
     history, which keeps a seven-league loop cheap. Applies the same
     anti-snipe rule as get_bracket_overview (>= 28 players, only while
-    entry is open).
+    entry is open). Snapshot-keyed cache, like get_bracket_overview.
 
     Args:
         league: League identifier
@@ -363,6 +401,12 @@ def get_latest_bracket_filtered_df(league: str, shun: bool = False, sus: bool = 
     Returns:
         DataFrame containing the latest snapshot rows for searchable brackets
     """
+    return _get_latest_bracket_filtered_snapshot(league, shun, sus, latest_snapshot_key(league))
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_latest_bracket_filtered_snapshot(league: str, shun: bool, sus: bool, snapshot_key: str) -> pd.DataFrame:
+    """Cached body of get_latest_bracket_filtered_df; snapshot_key exists only to key the cache."""
     df = get_latest_live_df(league, shun, sus)
 
     if get_tourney_state().name == "ENTRY_OPEN":
