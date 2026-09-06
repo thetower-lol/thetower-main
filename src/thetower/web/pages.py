@@ -1,6 +1,5 @@
 # Standard library imports
 import os
-import time
 import zoneinfo
 from importlib.metadata import version
 from pathlib import Path
@@ -12,7 +11,7 @@ from streamlit_js_eval import streamlit_js_eval
 
 from thetower.backend.tourney_results.constants import Graph, Options
 from thetower.web.maintenance import get_maintenance_state
-from thetower.web.request_logger import log_render_complete, log_request
+from thetower.web.request_logger import log_render_complete, log_request, start_render
 from thetower.web.util import makeitrain
 
 # Django setup
@@ -295,10 +294,17 @@ st.html("""
 """)
 
 _path, _render_id = log_request()
-_render_start = time.perf_counter()
-pg.run()
-_elapsed_ms = int((time.perf_counter() - _render_start) * 1000)
-log_render_complete(_render_id, _elapsed_ms)
+_render_clock = start_render()
+_render_status = "ok"
+try:
+    pg.run()
+except BaseException as _exc:  # re-raised below; BaseException so Streamlit's control-flow exceptions are recorded too
+    _render_status = type(_exc).__name__
+    raise
+finally:
+    _render_stats = log_render_complete(_render_id, _path, _render_clock, _render_status)
+# Unlabeled on purpose: wall ms | cpu ms | runs in flight, same order as the render log line.
+_render_badge = f"⚡ {_render_stats.elapsed_ms} ms | {_render_stats.cpu_ms} | {_render_stats.inflight}"
 st.sidebar.markdown(
     """<div style="text-align:center; margin-bottom:0.5em; font-size:0.9em; padding:0.5em; background-color:rgba(30,144,255,0.1); border-radius:0.5em; border:1px solid rgba(30,144,255,0.3);">
         <b>🐟 Support the fishy!</b><br>
@@ -309,9 +315,9 @@ st.sidebar.markdown(
 try:
     _pkg_version = version("thetower")
     _prefix = "🔧 " if hidden_features else ""
-    _version_line = f"{_prefix}Version: {_pkg_version} &nbsp;·&nbsp; ⚡ {_elapsed_ms} ms"
+    _version_line = f"{_prefix}Version: {_pkg_version} &nbsp;·&nbsp; {_render_badge}"
 except Exception:
-    _version_line = f"⚡ {_elapsed_ms} ms"
+    _version_line = _render_badge
 st.sidebar.markdown(
     f'<div style="text-align:center; font-size:0.75em; color:#888888; margin-bottom:0.5em;">{_version_line}</div>',
     unsafe_allow_html=True,

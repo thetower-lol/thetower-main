@@ -277,7 +277,9 @@ with tab_render:
         # Join render data to access log on render_id to get page paths
         df_access_ids = df[["render_id", "path"]].copy()
         df_access_ids = df_access_ids[df_access_ids["render_id"] != "-"]
-        df_joined = df_render.merge(df_access_ids, on="render_id", how="left")
+        # Newer render rows carry their own path; it matches the access-log path for the same
+        # render_id, so drop it before the merge to keep a single "path" column.
+        df_joined = df_render.drop(columns=["path"], errors="ignore").merge(df_access_ids, on="render_id", how="left")
         df_joined["path"] = df_joined["path"].fillna("unknown")
 
         st.caption(f"**{len(df_render):,} render timing entries** in selected range")

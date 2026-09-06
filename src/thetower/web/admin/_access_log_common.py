@@ -16,8 +16,9 @@ import streamlit as st
 # Parsed keys in all cases: dt, site, ip, path, qs, ctx, render_id
 #
 # Render log format produced by request_logger.log_render_complete():
-#   a3f2b1c4e9d07b21 | 2026-04-01 12:00:01 UTC | 1423
-# Parsed keys: render_id, dt, elapsed_ms
+#   New (8 fields, 2.3.14+): a3f2b1c4e9d07b21 | 2026-04-01 12:00:01 UTC | 1423 | 812 | 3 | /livebracketview | Legend | ok
+#   Old (3 fields):          a3f2b1c4e9d07b21 | 2026-04-01 12:00:01 UTC | 1423
+# Parsed keys: render_id, dt, elapsed_ms; new lines add cpu_ms, inflight, path, league, status
 
 # Matches rotated filenames: web_access.log.2026-03-21_14
 FILE_RE = re.compile(r"^web_access\.log\.(\d{4}-\d{2}-\d{2})_(\d{2})$")
@@ -105,7 +106,11 @@ def parse_files(paths: list[Path]) -> list[dict]:
 
 
 def parse_render_files(paths: list[Path]) -> list[dict]:
-    """Parse web_render.log files into {render_id, dt, elapsed_ms} dicts."""
+    """Parse web_render.log files into {render_id, dt, elapsed_ms, ...} dicts.
+
+    Lines written by 2.3.14+ also carry cpu_ms, inflight, path, league and
+    status; those keys are present only for such rows.
+    """
     rows = []
     for path in paths:
         try:
@@ -114,14 +119,22 @@ def parse_render_files(paths: list[Path]) -> list[dict]:
                 if not line:
                     continue
                 parts = [p.strip() for p in line.split("|")]
-                if len(parts) != 3:
+                if len(parts) < 3:
                     continue
-                render_id, dt, elapsed_raw = parts
+                render_id, dt, elapsed_raw = parts[:3]
                 try:
                     elapsed_ms = int(elapsed_raw)
                 except ValueError:
                     continue
-                rows.append({"render_id": render_id, "dt": dt, "elapsed_ms": elapsed_ms})
+                row = {"render_id": render_id, "dt": dt, "elapsed_ms": elapsed_ms}
+                if len(parts) >= 8:
+                    try:
+                        row["cpu_ms"] = int(parts[3])
+                        row["inflight"] = int(parts[4])
+                    except ValueError:
+                        pass
+                    row["path"], row["league"], row["status"] = parts[5], parts[6], parts[7]
+                rows.append(row)
         except Exception as e:
             st.warning(f"Could not read {path.name}: {e}")
     return rows

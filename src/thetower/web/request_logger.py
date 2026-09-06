@@ -6,16 +6,21 @@ Only logs once per URL per session to avoid spamming on Streamlit re-runs.
 
 Render timing is tracked via a separate web_render.log file.  Each access
 log entry includes a render_id (16-char hex) that links to the matching
-render timing entry.  Use log_render_complete() after pg.run() to write it.
+render timing entry.  Call start_render() before pg.run() and
+log_render_complete() in a ``finally`` after it; the render line records wall
+time, the script thread's CPU time, how many runs were in flight, the page,
+the league and how the run ended.
 """
 
 import logging
 import logging.handlers
 import os
 import secrets
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 import streamlit as st
@@ -36,6 +41,19 @@ _SESSION_DEDUP_TTL: float = 30.0  # seconds
 _SESSION_PURGE_INTERVAL: int = 200  # purge stale entries every N writes
 _session_write_count: int = 0
 _session_last_url: dict[str, tuple[str, float]] = {}
+
+# Script runs currently executing (every run, dedup'd or not), so each render
+# line can record the queue depth it started behind.
+_inflight: int = 0
+_inflight_lock = threading.Lock()
+
+
+class RenderStats(NamedTuple):
+    """Per-run numbers returned by log_render_complete(), shown unlabeled in the sidebar badge."""
+
+    elapsed_ms: int
+    cpu_ms: int
+    inflight: int
 
 
 def _purge_stale_sessions() -> None:
@@ -212,15 +230,75 @@ def log_request() -> tuple[str, str]:
     return path, render_id
 
 
-def log_render_complete(render_id: str, elapsed_ms: int) -> None:
-    """Write a render-timing entry to web_render.log.
+def start_render() -> tuple[float, float, int]:
+    """Mark the start of a script run; call just before pg.run().
 
-    Call this after pg.run() in pages.py, passing the render_id returned by
-    log_request() and the elapsed milliseconds.  No-ops silently when render_id
-    is empty (i.e. the visit was dedup'd and no access log entry was written).
+    Increments the in-flight counter and returns (wall_start, cpu_start,
+    inflight) for log_render_complete().  ``inflight`` is the number of script
+    runs executing at this moment, this one included.
     """
+    global _inflight
+    with _inflight_lock:
+        _inflight += 1
+        inflight = _inflight
+    return time.perf_counter(), time.thread_time(), inflight
+
+
+def _get_league(path: str) -> str:
+    """League the page rendered for, or '-'.
+
+    An explicit ``league`` query param wins.  Live pages set
+    ``session_state.selected_league`` on every run via setup_common_ui, so it is
+    current for them; on other pages it may be left over from an earlier visit,
+    so it is only trusted under /live.
+    """
+    try:
+        league = st.query_params.get("league")
+        if not league and path.startswith("/live"):
+            league = st.session_state.get("selected_league")
+        return str(league) if league else "-"
+    except Exception:
+        return "-"
+
+
+def log_render_complete(render_id: str, path: str, clock: tuple[float, float, int], status: str = "ok") -> RenderStats:
+    """Release the in-flight slot and write a render-timing entry to web_render.log.
+
+    Call in a ``finally`` after pg.run() in pages.py with the render_id and path
+    from log_request() and the tuple from start_render().  Always decrements the
+    in-flight counter; only writes a line when render_id is non-empty (i.e. the
+    visit was logged rather than dedup'd).  Returns RenderStats in every case,
+    for the sidebar badge.
+
+    Line format (pipe-separated):
+        render_id | dt | elapsed_ms | cpu_ms | inflight | path | league | status
+    elapsed_ms is wall time.  cpu_ms is CPU time consumed by this script thread
+    (time.thread_time), so elapsed minus cpu is time spent waiting on the GIL or
+    IO.  inflight is the number of script runs executing when this one started.
+    status is "ok" or the class name of the exception that ended the run;
+    Streamlit's control-flow exceptions (StopException, RerunException) appear
+    by name too.
+    """
+    global _inflight
+    with _inflight_lock:
+        _inflight -= 1
+    wall_start, cpu_start, inflight = clock
+    elapsed_ms = int((time.perf_counter() - wall_start) * 1000)
+    cpu_ms = int((time.thread_time() - cpu_start) * 1000)
+    stats = RenderStats(elapsed_ms, cpu_ms, inflight)
     if not render_id:
-        return
+        return stats
     _setup_render_logger()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    _render_logger.info("%s | %s | %d", render_id, now, elapsed_ms)
+    _render_logger.info(
+        "%s | %s | %d | %d | %d | %s | %s | %s",
+        render_id,
+        now,
+        elapsed_ms,
+        cpu_ms,
+        inflight,
+        path,
+        _get_league(path),
+        status,
+    )
+    return stats
