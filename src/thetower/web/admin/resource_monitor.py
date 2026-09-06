@@ -94,6 +94,27 @@ def _derive_cpu_pct(rdf: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True)
 
 
+def _finish_figure(fig, cutoff: pd.Timestamp, latest: pd.Timestamp) -> None:
+    """Shared layout, with the x-axis pinned to the selected window.
+
+    Left to autorange, each chart spans only its own series. CPU and FD samples
+    exist only from the sampler upgrade onward while converted memory.log rows
+    reach further back, so widening the window visibly moved just the memory
+    chart. Endpoints are passed tz-naive UTC to match how Plotly serializes the
+    timestamp column.
+    """
+    pad = (latest - cutoff) * 0.02
+    fig.update_xaxes(range=[(cutoff - pad).tz_convert(None), (latest + pad).tz_convert(None)])
+    fig.update_layout(legend_title_text="Service", hovermode="x unified", yaxis={"rangemode": "tozero"})
+
+
+def _series_start_note(label: str, series_df: pd.DataFrame, cutoff: pd.Timestamp) -> None:
+    """Caption when a series begins after the window start, so the empty left part reads as 'no data yet'."""
+    first = series_df["timestamp"].min()
+    if pd.notna(first) and first > cutoff:
+        st.caption(f"{label} sampling starts {first:%Y-%m-%d %H:%M} UTC; the window before that has no {label} data.")
+
+
 def render_resource_monitor() -> None:
     st.header("Resource Monitor")
     st.caption(
@@ -124,6 +145,7 @@ def render_resource_monitor() -> None:
         col1.caption(f"Showing all {span_days} day(s) of data available.")
     cutoff = latest - pd.Timedelta(days=lookback_days)
     filtered = df[df["timestamp"] >= cutoff]
+    window_label = f"Last {lookback_days} Day{'s' if lookback_days > 1 else ''}"
 
     selected_services = col2.multiselect(
         "Services",
@@ -144,9 +166,9 @@ def render_resource_monitor() -> None:
         y="rss_mb",
         color="service_label",
         labels={"timestamp": "Time (UTC)", "rss_mb": "RSS (MB)", "service_label": "Service"},
-        title=f"Memory Usage — Last {lookback_days} Day{'s' if lookback_days > 1 else ''}",
+        title=f"Memory Usage — {window_label}",
     )
-    fig.update_layout(legend_title_text="Service", hovermode="x unified", yaxis={"rangemode": "tozero"})
+    _finish_figure(fig, cutoff, latest)
     st.plotly_chart(fig, use_container_width=True)
 
     # --- CPU ---
@@ -161,10 +183,11 @@ def render_resource_monitor() -> None:
             y="cpu_pct",
             color="service_label",
             labels={"timestamp": "Time (UTC)", "cpu_pct": "Avg CPU % (100 = one core)", "service_label": "Service"},
-            title="Average CPU per Sampling Interval",
+            title=f"Average CPU per Sampling Interval — {window_label}",
         )
-        fig.update_layout(legend_title_text="Service", hovermode="x unified", yaxis={"rangemode": "tozero"})
+        _finish_figure(fig, cutoff, latest)
         st.plotly_chart(fig, use_container_width=True)
+        _series_start_note("CPU", cpu_df, cutoff)
 
     # --- File descriptors ---
     st.subheader("Open File Descriptors")
@@ -179,10 +202,11 @@ def render_resource_monitor() -> None:
             color="service_label",
             hover_data=["num_sockets"],
             labels={"timestamp": "Time (UTC)", "num_fds": "Open FDs", "num_sockets": "Sockets", "service_label": "Service"},
-            title="Open File Descriptors (hover shows socket count)",
+            title=f"Open File Descriptors — {window_label} (hover shows socket count)",
         )
-        fig.update_layout(legend_title_text="Service", hovermode="x unified", yaxis={"rangemode": "tozero"})
+        _finish_figure(fig, cutoff, latest)
         st.plotly_chart(fig, use_container_width=True)
+        _series_start_note("FD", fd_df, cutoff)
 
     # --- Latest readings ---
     st.subheader("Latest Readings")
@@ -191,9 +215,7 @@ def render_resource_monitor() -> None:
         .groupby("service_label")
         .last()
         .reset_index()[["service_label", "rss_mb", "num_fds", "num_sockets", "timestamp"]]
-        .rename(
-            columns={"service_label": "Service", "rss_mb": "RSS (MB)", "num_fds": "FDs", "num_sockets": "Sockets", "timestamp": "Sampled At"}
-        )
+        .rename(columns={"service_label": "Service", "rss_mb": "RSS (MB)", "num_fds": "FDs", "num_sockets": "Sockets", "timestamp": "Sampled At"})
     )
     table["RSS (MB)"] = table["RSS (MB)"].round(1)
     # Converted memory.log history carries -1 sentinels — show as blank, not negative
