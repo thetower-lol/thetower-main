@@ -235,7 +235,35 @@ def live_bracket():
             # Store search term for later
             st.session_state.player_search_term = search_name
         elif selected_bracket_input.strip():
-            selected_bracket = selected_bracket_input.strip()
+            # Search across all leagues for the bracket; the page's auto-detected league is
+            # only a default, and bracket IDs are stored upper-case
+            from thetower.backend.tourney_results.constants import leagues as ALL_LEAGUES
+
+            bracket_search = selected_bracket_input.strip().upper()
+            bracket_league = None
+
+            include_shun = include_shun_enabled_for("live_bracket")
+            include_sus = include_sus_enabled_for("live_bracket")
+            for lg in ALL_LEAGUES:
+                try:
+                    df_tmp = get_latest_bracket_filtered_df(lg, include_shun, include_sus)
+                    if not df_tmp.empty and (df_tmp["bracket"] == bracket_search).any():
+                        bracket_league = lg
+                        break
+                except Exception:
+                    continue
+
+            if bracket_league is None:
+                st.error(f"No bracket found matching '{bracket_search}' in any active league.")
+                return
+
+            selected_bracket = bracket_search
+            league = bracket_league
+            # Reload data for the correct league (include flags computed above)
+            df = get_latest_bracket_filtered_df(league, include_shun, include_sus)
+            bracket_order, fullish_brackets = get_bracket_overview(league, include_shun, include_sus)
+            _fullish = set(fullish_brackets)
+            bracket_order = [b for b in bracket_order if b in _fullish]
 
     if not any([selected_real_name, selected_player_id, selected_bracket]):
         return
