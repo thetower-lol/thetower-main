@@ -64,7 +64,7 @@ def compute_player_lookup():
 
     if options.current_player is None:
         compute_search(player=True, comparison=False)
-        exit()
+        st.stop()
 
     info_tab, league_graph_tab, patch_tab = st.tabs(["Overview", "Performance Graph", "Patch best"])
 

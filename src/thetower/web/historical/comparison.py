@@ -131,7 +131,7 @@ def compute_comparison(player_id=None, canvas=st):
 
     if (not st.session_state.options.compare_players) or (st.session_state.get("display_comparison") is None):
         compute_search(player=False, comparison=True)
-        exit()
+        st.stop()
     else:
         users = st.session_state.options.compare_players or st.session_state.comparison
 
