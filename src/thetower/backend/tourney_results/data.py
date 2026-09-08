@@ -631,6 +631,15 @@ def get_soft_banned_ids():
     return standalone_soft_banned | instance_ids
 
 
+def get_all_banned_ids() -> set:
+    """Tower ids under an active hard or soft ban.
+
+    Banned runs are routinely impossible scores, so they are kept out of public views entirely and out of
+    every wave statistic on both sites; the hidden site still shows a banned player's own history, badged.
+    """
+    return get_banned_ids() | get_soft_banned_ids()
+
+
 def get_last_tourney(league=champ):
     hidden_features = os.environ.get("HIDDEN_FEATURES")
     public = {"public": True} if not hidden_features else {}
@@ -678,7 +687,13 @@ def get_tourneys(
     limit: int = how_many_results_public_site,
     filter_sus: bool = True,
     ids: list[int] | None = None,
+    filter_banned: bool = False,
 ) -> pd.DataFrame:
+    """Rows for the given results, position-bounded and optionally without sus or banned players.
+
+    filter_banned drops hard- and soft-banned players; the public site passes it so banned players
+    are hidden outright there, while the hidden site keeps their history and badges them instead.
+    """
     hidden_features = os.environ.get("HIDDEN_FEATURES")
     upper_limit = offset + limit
 
@@ -693,6 +708,8 @@ def get_tourneys(
 
     if filter_sus:
         rows = rows.filter(~Q(player_id__in=get_sus_ids()) & Q(position__gt=0))
+    if filter_banned:
+        rows = rows.exclude(player_id__in=get_all_banned_ids())
 
     rows = rows.order_by("result__date", "position")
     return get_details(rows)

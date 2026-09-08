@@ -14,7 +14,7 @@ from thetower.backend.tourney_results.constants import (
     champ,
     leagues,
 )
-from thetower.backend.tourney_results.data import get_details, get_patches, get_sus_ids
+from thetower.backend.tourney_results.data import get_all_banned_ids, get_details, get_patches, get_sus_ids
 from thetower.backend.tourney_results.formatting import BASE_URL, format_wave, make_player_url
 from thetower.backend.tourney_results.models import BattleCondition
 from thetower.backend.tourney_results.models import PatchNew as Patch
@@ -155,12 +155,16 @@ def compute_comparison(player_id=None, canvas=st):
     player_ids = PlayerId.objects.filter(id__in=users).select_related("game_instance__player")
     if not include_sus_enabled_for("comparison"):
         player_ids = player_ids.exclude(id__in=sus_ids)
+    # Banned players are hidden from the public site regardless of the sus/shun toggles
+    banned_ids = set() if hidden_features else get_all_banned_ids()
+    if banned_ids:
+        player_ids = player_ids.exclude(id__in=banned_ids)
     # Get all game instances from the player_ids
     game_instances = [pid.game_instance for pid in player_ids if pid.game_instance]
     # Get all known players from these game instances
     known_players = {gi.player for gi in game_instances if gi.player}
     # Get all PlayerIds across all game instances for these players
-    all_player_ids = set(PlayerId.objects.filter(game_instance__player__in=known_players).values_list("id", flat=True)) | set(users)
+    all_player_ids = (set(PlayerId.objects.filter(game_instance__player__in=known_players).values_list("id", flat=True)) | set(users)) - banned_ids
 
     # Cross-league query: uses the highest per-league cap rather than per-league bounds.
     hidden_query = {} if hidden_features else {"result__public": True, "position__lt": get_max_results_limit()}

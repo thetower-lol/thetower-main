@@ -18,8 +18,9 @@ from thetower.backend.tourney_results.data import (
     get_details,
     get_id_lookup,
     get_patches,
+    is_banned,
     is_shun,
-    is_support_flagged,
+    is_soft_banned,
     is_sus,
     is_under_review,
 )
@@ -98,7 +99,14 @@ def compute_player_lookup():
         st.error(f"No results found for the player {player_id}.")
         return
 
-    if (is_sus(player_id) or is_support_flagged(player_id)) and not hidden_features and not include_sus_enabled_for("player"):
+    # Banned players are hidden from the public site outright; the hidden site shows their history with a badge.
+    # is_banned/is_soft_banned resolve bans filed on the player's game instance, not just on this tower id.
+    # Sus is separate and follows the include_sus toggle, so it stays visible while the config says so.
+    if (is_banned(player_id) or is_soft_banned(player_id)) and not hidden_features:
+        st.error(f"No results found for the player {player_id}.")
+        return
+
+    if is_sus(player_id) and not hidden_features and not include_sus_enabled_for("player"):
         st.error(f"No results found for the player {player_id}.")
         return
 
@@ -495,7 +503,7 @@ def handle_start_date_loop(fig, graph_position_instead, tbdf):
 
 def handle_sus_or_banned_ids(info_tab, player_id):
     if hidden_features:
-        if is_support_flagged(player_id):
+        if is_banned(player_id) or is_soft_banned(player_id):
             info_tab.warning("This player is currently (soft/hard) banned.")
         elif is_sus(player_id):
             info_tab.warning("This player is currently sussed.")

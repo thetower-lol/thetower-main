@@ -3,6 +3,7 @@ import os
 import streamlit as st
 
 from thetower.backend.tourney_results.constants import leagues
+from thetower.backend.tourney_results.data import get_all_banned_ids
 from thetower.backend.tourney_results.models import BattleCondition, TourneyResult, TourneyRow
 
 
@@ -84,6 +85,7 @@ def compute_bc_filter():
     # position <= the target instead of querying for exact position matches.
     all_rows = (
         TourneyRow.objects.filter(result_id__in=result_ids, position__lte=max(position_cols), position__gt=0)
+        .exclude(player_id__in=get_all_banned_ids())
         .values("result_id", "position", "wave")
         .order_by("result_id", "position")
     )

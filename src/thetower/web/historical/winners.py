@@ -23,8 +23,8 @@ def compute_winners():
 
     hidden_features = os.environ.get("HIDDEN_FEATURES")
     public = {"public": True} if not hidden_features else {}
-    cdf = get_tourneys(TourneyResult.objects.filter(league=champ, **public), offset=0, limit=10)
-    ldf = get_tourneys(TourneyResult.objects.filter(league=legend, **public), offset=0, limit=10)
+    cdf = get_tourneys(TourneyResult.objects.filter(league=champ, **public), offset=0, limit=10, filter_banned=not hidden_features)
+    ldf = get_tourneys(TourneyResult.objects.filter(league=legend, **public), offset=0, limit=10, filter_banned=not hidden_features)
 
     selected_patches = [patch for patch in patches if patch.version_minor >= selected_patches_slider.version_minor]
 

@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import streamlit as st
 
-from thetower.backend.tourney_results.data import date_to_patch
+from thetower.backend.tourney_results.data import date_to_patch, get_all_banned_ids
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 from thetower.backend.tourney_results.results_config import get_results_limit
 from thetower.web.util import get_league_selection, get_options
@@ -72,7 +72,12 @@ def compute_counts():
 
     champ_results = champ_results[(which_page - 1) * per_page : which_page * per_page]
 
-    rows = TourneyRow.objects.filter(result__in=champ_results, position__lt=limit, position__gt=0).order_by("-wave").values("result_id", "wave")
+    rows = (
+        TourneyRow.objects.filter(result__in=champ_results, position__lt=limit, position__gt=0)
+        .exclude(player_id__in=get_all_banned_ids())
+        .order_by("-wave")
+        .values("result_id", "wave")
+    )
 
     row_height = (per_page + 1) * 35 + 2
 

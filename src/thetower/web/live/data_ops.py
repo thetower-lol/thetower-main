@@ -1,6 +1,7 @@
 import datetime
 import json
 import logging
+import os
 from functools import wraps
 from pathlib import Path
 from time import perf_counter
@@ -21,7 +22,7 @@ from thetower.backend.tourney_results.archive_utils import (
     reconstruct_at,
 )
 from thetower.backend.tourney_results.constants import leagues
-from thetower.backend.tourney_results.data import get_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_ids, get_tourneys
+from thetower.backend.tourney_results.data import get_all_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_ids, get_tourneys
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
@@ -98,7 +99,7 @@ def _get_progress_data_snapshot(league: str, shun: bool, sus: bool, snapshot_key
     t0 = perf_counter()
     archive, expected_timestamps = _load_archive_df(league)
 
-    excluded_ids = get_banned_ids()
+    excluded_ids = live_banned_ids()
     if not sus:
         excluded_ids = excluded_ids | get_sus_ids()
     if not shun:
@@ -120,9 +121,18 @@ def _get_progress_data_snapshot(league: str, shun: bool, sus: bool, snapshot_key
     return tdf, join_times, timestamps
 
 
+def live_banned_ids() -> set:
+    """Ids the live pages drop as banned: hard and soft bans on the public site, nothing on the hidden site.
+
+    The hidden site shows every player; the public site never shows a banned one. Soft bans do not stop
+    in-game play, so without this the soft-banned keep appearing on public live pages.
+    """
+    return set() if os.environ.get("HIDDEN_FEATURES") else get_all_banned_ids()
+
+
 def _excluded_ids(shun: bool, sus: bool) -> set:
-    """Moderation exclusion set: always banned, plus sus/shun unless explicitly included."""
-    excluded = get_banned_ids()
+    """Moderation exclusion set: banned per the site policy, plus sus/shun unless explicitly included."""
+    excluded = live_banned_ids()
     if not sus:
         excluded = excluded | get_sus_ids()
     if not shun:
@@ -274,7 +284,7 @@ def get_latest_standings_df(league: str, shun: bool = False, sus: bool = False) 
 @cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
 def _get_latest_standings_snapshot(league: str, shun: bool, sus: bool, snapshot_key: str) -> pd.DataFrame:
     """Cached body of get_latest_standings_df; snapshot_key exists only to key the cache."""
-    ldf = get_latest_live_df(league, shun, sus)
+    ldf = get_latest_live_df(league, shun, sus, banned_ids=live_banned_ids())
     ldf = ldf.sort_values("wave", ascending=False).reset_index(drop=True)
     ldf.index = _tie_positions(ldf["wave"])
     return ldf
@@ -336,7 +346,7 @@ def _get_prior_snapshot_cached(league: str, shun: bool, sus: bool, snapshot_key:
         logging.exception(f"Failed to load prior snapshot for {league}; rank deltas will show as new")
         return empty
 
-    excluded_ids = get_banned_ids()
+    excluded_ids = live_banned_ids()
     if not sus:
         excluded_ids = excluded_ids | get_sus_ids()
     if not shun:
@@ -407,7 +417,7 @@ def get_latest_bracket_filtered_df(league: str, shun: bool = False, sus: bool = 
 @cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
 def _get_latest_bracket_filtered_snapshot(league: str, shun: bool, sus: bool, snapshot_key: str) -> pd.DataFrame:
     """Cached body of get_latest_bracket_filtered_df; snapshot_key exists only to key the cache."""
-    df = get_latest_live_df(league, shun, sus)
+    df = get_latest_live_df(league, shun, sus, banned_ids=live_banned_ids())
 
     if get_tourney_state().name == "ENTRY_OPEN":
         bracket_counts = df.groupby("bracket", observed=True)["player_id"].nunique()
@@ -536,7 +546,7 @@ def get_placement_analysis_data(league: str):
                         logging.debug(f"get_placement_analysis_data: parsed {len(bracket_creation_times)} bracket_creation_times from cache")
 
                         # Load only latest snapshot to build the live DataFrame for analysis
-                        df_latest = get_latest_live_df(league, include_shun, include_sus)
+                        df_latest = get_latest_live_df(league, include_shun, include_sus, banned_ids=live_banned_ids())
                         logging.debug(f"get_placement_analysis_data: df_latest.shape={getattr(df_latest, 'shape', None)}")
 
                         # compute fullish brackets from latest snapshot
@@ -578,7 +588,7 @@ def get_placement_analysis_data(league: str):
                         bracket_creation_times = {
                             br: (datetime.datetime.fromisoformat(ts) if isinstance(ts, str) else ts) for br, ts in raw_times.items()
                         }
-                        df_latest = get_latest_live_df(league, include_shun, include_sus)
+                        df_latest = get_latest_live_df(league, include_shun, include_sus, banned_ids=live_banned_ids())
                         bracket_counts = dict(df_latest.groupby("bracket", observed=True).player_id.unique().map(lambda ids: len(ids)))
                         fullish_brackets = [bracket for bracket, count in bracket_counts.items() if count >= 28]
                         df = df_latest[df_latest.bracket.isin(fullish_brackets)].copy()
@@ -883,7 +893,7 @@ def get_quantile_analysis_data(league: str):
                         quantile_df = pd.DataFrame(results)
 
                         # Get latest timestamp from a quick CSV read
-                        df_latest = get_latest_live_df(league, include_shun, include_sus)
+                        df_latest = get_latest_live_df(league, include_shun, include_sus, banned_ids=live_banned_ids())
                         latest_time = df_latest["datetime"].max()
 
                         tourney_start_date = found_date or tourney_date
@@ -923,7 +933,7 @@ def get_quantile_analysis_data(league: str):
                                         results.append({"rank": rank, "quantile": q, "waves": wave_value})
                             if results:
                                 quantile_df = pd.DataFrame(results)
-                                df_latest = get_latest_live_df(league, include_shun, include_sus)
+                                df_latest = get_latest_live_df(league, include_shun, include_sus, banned_ids=live_banned_ids())
                                 latest_time = df_latest["datetime"].max()
                                 logging.debug(f"get_quantile_analysis_data: archive fallback succeeded for {found_date}")
                                 return quantile_df, found_date, latest_time

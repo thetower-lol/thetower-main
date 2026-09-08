@@ -6,6 +6,7 @@ from thetower.backend.tourney_results.constants import leagues, top_league
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import check_live_entry
+from thetower.web.live.data_ops import live_banned_ids
 from thetower.web.util import fmt_dt, get_league_selection, get_options
 
 
@@ -17,7 +18,7 @@ def get_league_for_player(player_id: str) -> str:
     and this loop runs up to once per league on every player-linked render.
     """
     for league in leagues:
-        if check_live_entry(league, player_id, fast=True):
+        if check_live_entry(league, player_id, fast=True, excluded_ids=live_banned_ids()):
             return league
     return None
 

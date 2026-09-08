@@ -86,7 +86,9 @@ class Results:
             with st.expander("Writeup..."):
                 st.write(qs[0].overview)
 
-        self.df = get_tourneys(qs, offset=begin, limit=step, filter_sus=not include_sus_enabled_for("tourney_results"))
+        self.df = get_tourneys(
+            qs, offset=begin, limit=step, filter_sus=not include_sus_enabled_for("tourney_results"), filter_banned=not self.hidden_features
+        )
         self.df = self.df.reset_index(drop=True)
 
         if self.df.empty:

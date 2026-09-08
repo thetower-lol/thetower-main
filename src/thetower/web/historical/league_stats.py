@@ -18,7 +18,7 @@ import streamlit as st
 from django.db.models import Q
 
 from thetower.backend.tourney_results.constants import leagues
-from thetower.backend.tourney_results.data import get_patches
+from thetower.backend.tourney_results.data import get_all_banned_ids, get_patches
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 
 # Colours used consistently across charts
@@ -96,10 +96,11 @@ def compute_league_stats() -> None:
         st.info("No tournament data found for the selected filters.")
         return
 
-    rows = TourneyRow.objects.filter(
-        result__in=TourneyResult.objects.filter(patch_q, league__in=selected_leagues),
-        position__gt=0,
-    ).values("result_id", "wave")
+    rows = (
+        TourneyRow.objects.filter(result__in=TourneyResult.objects.filter(patch_q, league__in=selected_leagues), position__gt=0)
+        .exclude(player_id__in=get_all_banned_ids())
+        .values("result_id", "wave")
+    )
 
     waves_by_result: dict[int, list[int]] = defaultdict(list)
     for row in rows:

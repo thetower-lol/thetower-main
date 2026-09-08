@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from thetower.backend.tourney_results.constants import leagues
+from thetower.backend.tourney_results.data import get_all_banned_ids
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 from thetower.backend.tourney_results.tourney_utils import get_tourney_state
 
@@ -11,7 +12,7 @@ _DEFAULT_LEAGUES = leagues[:4]
 _PLACES = list(range(1, 31))
 
 
-def _compute_cohort_stats(result: TourneyResult) -> tuple[list[tuple[float, float] | None], int, float, float]:
+def _compute_cohort_stats(result: TourneyResult, banned_ids: set) -> tuple[list[tuple[float, float] | None], int, float, float]:
     """
     For each of the 30 bracket places compute the median and mean wave across the cohort
     of players who would occupy that place in a perfectly-distributed bracket assignment.
@@ -28,7 +29,9 @@ def _compute_cohort_stats(result: TourneyResult) -> tuple[list[tuple[float, floa
         global_median: median of all player waves
         global_mean: mean of all player waves
     """
-    waves = list(TourneyRow.objects.filter(result=result, position__gt=0).values_list("wave", flat=True).order_by("-wave"))
+    waves = list(
+        TourneyRow.objects.filter(result=result, position__gt=0).exclude(player_id__in=banned_ids).values_list("wave", flat=True).order_by("-wave")
+    )
     if not waves:
         return [None] * 30, 0, 0.0, 0.0
 
@@ -101,6 +104,7 @@ def compute_static_placement():
     summary_cols = st.columns(len(selected_leagues))
     cohort_stats: dict[str, list[tuple[float, float] | None]] = {}
 
+    banned_ids = get_all_banned_ids()
     for i, league in enumerate(selected_leagues):
         result = results_by_league[league]
         if result is None:
@@ -109,7 +113,7 @@ def compute_static_placement():
             cohort_stats[league] = [None] * 30
             continue
 
-        stats_per_place, _n_brackets, global_med, global_mean = _compute_cohort_stats(result)
+        stats_per_place, _n_brackets, global_med, global_mean = _compute_cohort_stats(result, banned_ids)
         cohort_stats[league] = stats_per_place
 
         bcs = result.conditions.all()

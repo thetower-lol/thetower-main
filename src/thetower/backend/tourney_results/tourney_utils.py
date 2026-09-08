@@ -385,7 +385,7 @@ def get_full_brackets(df: pd.DataFrame, anti_snipe: bool = True) -> tuple[list[s
     return bracket_order, fullish_brackets
 
 
-def get_latest_live_df(league: str, shun: bool = False, sus: bool = False) -> pd.DataFrame:
+def get_latest_live_df(league: str, shun: bool = False, sus: bool = False, banned_ids: set | None = None) -> pd.DataFrame:
     """Load only the latest non-empty live tournament CSV for a league.
 
     This is a slimmer alternative to `get_live_df` when callers only need the
@@ -394,6 +394,8 @@ def get_latest_live_df(league: str, shun: bool = False, sus: bool = False) -> pd
     Args:
         league: League identifier
         shun: If True, only exclude suspicious IDs, otherwise exclude both suspicious and shunned
+        banned_ids: Ids to drop as banned. None keeps the default of the hard-ban set; the public site
+            passes hard plus soft bans and the hidden site passes an empty set (see web.live.data_ops).
 
     Returns:
         DataFrame containing data from the latest non-empty CSV. When staging is
@@ -433,7 +435,7 @@ def get_latest_live_df(league: str, shun: bool = False, sus: bool = False) -> pd
         lookup = get_player_id_lookup()
         df["real_name"] = [lookup.get(pid, name) for pid, name in zip(df.player_id, df.name)]
         df["real_name"] = df["real_name"].astype(str)
-        excluded_ids = get_banned_ids()
+        excluded_ids = set(get_banned_ids() if banned_ids is None else banned_ids)
         if not sus:
             excluded_ids = excluded_ids | get_sus_ids()
         if not shun:
@@ -462,8 +464,8 @@ def get_latest_live_df(league: str, shun: bool = False, sus: bool = False) -> pd
     df["real_name"] = [lookup.get(id, name) for id, name in zip(df.player_id, df.name)]
     df["real_name"] = df["real_name"].astype(str)
 
-    # Optionally exclude sus IDs; always exclude banned IDs; optionally exclude shunned IDs
-    excluded_ids = get_banned_ids()
+    # Optionally exclude sus IDs; optionally exclude shunned IDs; banned per the caller (default: hard bans)
+    excluded_ids = set(get_banned_ids() if banned_ids is None else banned_ids)
     if not sus:
         excluded_ids = excluded_ids | get_sus_ids()
     if not shun:
@@ -479,7 +481,12 @@ def get_latest_live_df(league: str, shun: bool = False, sus: bool = False) -> pd
     return df
 
 
-def check_live_entry(league: str, player_id: str, fast: bool = False) -> bool:
+def _entry_exclusions(excluded_ids: set | None) -> set:
+    """The ids check_live_entry treats as not entered: the caller's set, or sus plus hard bans by default."""
+    return get_sus_ids() | get_banned_ids() if excluded_ids is None else excluded_ids
+
+
+def check_live_entry(league: str, player_id: str, fast: bool = False, excluded_ids: set | None = None) -> bool:
     """Check if player has entered live tournament.
 
     Args:
@@ -487,6 +494,8 @@ def check_live_entry(league: str, player_id: str, fast: bool = False) -> bool:
         player_id: Player ID to check
         fast: If True, use only latest checkpoint (sufficient for participation checking since players persist in checkpoints).
               If False, use full recent data (for detailed bracket analysis).
+        excluded_ids: Ids that do not count as entered. None keeps the default of sus plus hard-banned ids;
+            the site passes its own banned set so sus players stay visible and the hidden site excludes nobody.
 
     Returns:
         True if player has entered, False otherwise
@@ -515,8 +524,7 @@ def check_live_entry(league: str, player_id: str, fast: bool = False) -> bool:
                 df = read_archive(archives[-1])
                 if df.empty or player_id not in df["player_id"].values:
                     return False
-                excluded_ids = get_sus_ids() | get_banned_ids()
-                return player_id not in excluded_ids
+                return player_id not in _entry_exclusions(excluded_ids)
             t_glob = perf_counter()
             last_date = get_time(last_file)
             try:
