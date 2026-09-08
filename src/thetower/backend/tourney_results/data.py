@@ -16,7 +16,7 @@ import pandas as pd
 # reporting; restore once deprecated pages are rewritten.
 # import streamlit as st
 from cachetools.func import ttl_cache
-from django.db.models import Q, QuerySet
+from django.db.models import Case, IntegerField, Q, QuerySet, Value, When
 
 from ..sus.models import ModerationRecord, PlayerId
 from .archive_utils import STRING_COLUMN_DTYPES
@@ -688,11 +688,15 @@ def get_tourneys(
     filter_sus: bool = True,
     ids: list[int] | None = None,
     filter_banned: bool = False,
+    include_unplaced: bool = False,
 ) -> pd.DataFrame:
     """Rows for the given results, position-bounded and optionally without sus or banned players.
 
     filter_banned drops hard- and soft-banned players; the public site passes it so banned players
     are hidden outright there, while the hidden site keeps their history and badges them instead.
+    include_unplaced also returns rows that hold no position (-1: banned, or sus/shunned when the
+    config excludes them at placement time), listed after the placed rows of each tournament; the
+    hidden site's results table passes it so a ban does not erase a player from the table.
     """
     hidden_features = os.environ.get("HIDDEN_FEATURES")
     upper_limit = offset + limit
@@ -704,14 +708,18 @@ def get_tourneys(
 
     id_filtering = {"player_id__in": ids} if ids else {}
 
-    rows = TourneyRow.objects.filter(result__in=tourney_results, position__gte=offset, position__lt=upper_limit, **id_filtering)
+    position_window = Q(position__gte=offset, position__lt=upper_limit)
+    if include_unplaced:
+        position_window |= Q(position__lt=1)
+    rows = TourneyRow.objects.filter(position_window, result__in=tourney_results, **id_filtering)
 
     if filter_sus:
         rows = rows.filter(~Q(player_id__in=get_sus_ids()) & Q(position__gt=0))
     if filter_banned:
         rows = rows.exclude(player_id__in=get_all_banned_ids())
 
-    rows = rows.order_by("result__date", "position")
+    unplaced_last = Case(When(position__lt=1, then=Value(1)), default=Value(0), output_field=IntegerField())
+    rows = rows.order_by("result__date", unplaced_last, "position")
     return get_details(rows)
 
 

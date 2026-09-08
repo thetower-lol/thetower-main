@@ -30,6 +30,7 @@ PAGE_KEYS = [
     "live_results",
     "namechangers",
     "overview_cache",
+    "peer_watch",
     "player",
     "reposition",
     "search",
@@ -105,11 +106,13 @@ def _render_config_section(
     rows = []
     for p in sorted(set(PAGE_KEYS) | set(pages_on_disk.keys())):
         on_disk = pages_on_disk.get(p)
-        rows.append({
-            "page": p,
-            "in file": "(not set)" if on_disk is None else str(bool(on_disk)).lower(),
-            "resolved": resolve_fn(p),
-        })
+        rows.append(
+            {
+                "page": p,
+                "in file": "(not set)" if on_disk is None else str(bool(on_disk)).lower(),
+                "resolved": resolve_fn(p),
+            }
+        )
     st.table(rows)
 
 

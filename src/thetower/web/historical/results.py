@@ -13,7 +13,7 @@ from thetower.backend.tourney_results.constants import (
     how_many_results_hidden_site,
     sus_person,
 )
-from thetower.backend.tourney_results.data import get_results_for_patch, get_sus_ids, get_tourneys
+from thetower.backend.tourney_results.data import get_all_banned_ids, get_results_for_patch, get_sus_ids, get_tourneys
 from thetower.backend.tourney_results.formatting import am_i_sus, color_position__top, format_wave, make_player_url, strike
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyResult
@@ -87,7 +87,12 @@ class Results:
                 st.write(qs[0].overview)
 
         self.df = get_tourneys(
-            qs, offset=begin, limit=step, filter_sus=not include_sus_enabled_for("tourney_results"), filter_banned=not self.hidden_features
+            qs,
+            offset=begin,
+            limit=step,
+            filter_sus=not include_sus_enabled_for("tourney_results"),
+            filter_banned=not self.hidden_features,
+            include_unplaced=bool(self.hidden_features),
         )
         self.df = self.df.reset_index(drop=True)
 
@@ -141,6 +146,13 @@ class Results:
         to_be_displayed["tourney_name"] = [
             strike(name) if id_ in self.sus_ids else name for id_, name in zip(to_be_displayed.id, to_be_displayed.tourney_name)
         ]
+        if self.hidden_features:
+            # Banned players keep their rows here; they hold no position, so they show unplaced and flagged
+            banned_ids = get_all_banned_ids()
+            to_be_displayed["real_name"] = [
+                f"🚫 {name}" if id_ in banned_ids else name for id_, name in zip(to_be_displayed.id, to_be_displayed.real_name)
+            ]
+            to_be_displayed["position"] = ["—" if position < 1 else position for position in to_be_displayed.position]
         to_be_displayed["avatar"] = to_be_displayed.avatar.map(make_avatar)
         to_be_displayed["relic"] = to_be_displayed.relic.map(make_relic)
 
