@@ -120,6 +120,7 @@ if hidden_features:
     admin_moderation_pages = [
         st.Page("admin/visibility_admin.py", title="Moderation Visibility Config", icon="🛑", url_path="visibilityadmin"),
         st.Page("admin/sus_moderation.py", title="Sus Moderation", icon="🚫", url_path="susmoderation"),
+        st.Page("admin/active_bans.py", title="Active Bans", icon="⛔", url_path="activebans"),
         st.Page("admin/multiple_moderation.py", title="Multiple Moderation", icon="⚠️", url_path="multiplemoderation"),
         st.Page("admin/league_progression.py", title="League Progression", icon="📈", url_path="leagueprogression"),
         st.Page("admin/duplicate_tournaments.py", title="Duplicate Tournaments", icon="🔍", url_path="duplicates"),
