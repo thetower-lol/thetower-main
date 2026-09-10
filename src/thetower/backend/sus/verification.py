@@ -40,6 +40,14 @@ MAX_IMAGE_PIXELS = int(os.getenv("WEB_MAX_IMAGE_PIXELS", str(6_000_000)))
 # and still high enough to read a Tower ID off.
 MIN_IMAGE_PIXELS = int(os.getenv("WEB_MIN_IMAGE_PIXELS", str(1_500_000)))
 
+# Bytes-per-pixel above which a stored PNG is almost certainly a photograph of a screen rather
+# than a screenshot. PNG spends bits on entropy, and UI is flat where a camera sensor is noisy,
+# so the encoded size is itself the measurement — no decoding or extra dependency needed.
+# Measured over 2661 stored submissions: approved ones run p50 0.275, p90 0.461, p99 0.827,
+# while the photo that stalled OCR was 1.18. At 1.0 only 7 of 1991 approved submissions (0.35%)
+# would have been flagged, so the warning stays rare enough to mean something.
+PHOTO_BYTES_PER_PIXEL = float(os.getenv("WEB_PHOTO_BYTES_PER_PIXEL", "1.0"))
+
 # How long a submission may sit in `pending` — accepted, but never given a result — before it
 # is failed and the submitter released. `pending` is not a terminal status, so Guards 1 and 2
 # treat it as an active claim: until it resolves, that account cannot submit again and nobody
@@ -665,6 +673,30 @@ def normalize_verification_image(image_bytes: bytes, max_bytes: int = MAX_UPLOAD
         logger.info("Shrank screenshot to fit the %d byte budget: now %dx%d, %d bytes", max_bytes, img.width, img.height, len(data))
 
     return data
+
+
+def looks_like_photo_of_screen(image_bytes: bytes) -> bool:
+    """True when an encoded PNG looks like a photograph of a screen rather than a screenshot.
+
+    PNG spends bits on entropy, and game UI is flat where a camera sensor is noisy, so the
+    encoded size per pixel is itself the measurement — no decoding and no extra dependency.
+    Advisory only: photos verify far less reliably (glare, moire, perspective), so it is
+    worth telling the submitter, but never worth refusing an upload over.
+    """
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as img:  # header only — does not decode
+            pixels = img.width * img.height
+    except Exception:
+        logger.debug("looks_like_photo_of_screen could not read image header", exc_info=True)
+        return False
+
+    if pixels <= 0:
+        return False
+    return len(image_bytes) / pixels > PHOTO_BYTES_PER_PIXEL
 
 
 def save_verification_image(stem: str, image_bytes: bytes, extension: str = ".png") -> Path:
