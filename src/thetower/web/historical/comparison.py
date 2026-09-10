@@ -31,7 +31,9 @@ hidden_features = os.environ.get("HIDDEN_FEATURES")
 
 
 def compute_comparison(player_id=None, canvas=st):
-    st.markdown("# Player Comparison")
+    # The league is only known once the patch selectbox below has rendered, so the title is filled in then
+    title = st.empty()
+    title.markdown("# Player Comparison")
     # Check if there's a bracket_player query param to load a full bracket for comparison
     bracket_player_id = st.query_params.get("bracket_player")
 
@@ -189,7 +191,14 @@ def compute_comparison(player_id=None, canvas=st):
 
     datas = [(sdf, player_id) for player_id, sdf in player_df.groupby("id") if len(sdf) >= 2]
     datas = filter_plot_datas(datas, patch, filter_bcs)
-    datas = filter_league(datas, patch)
+
+    # Only a patch the user picked in the selectbox is passed on to the league selector. The last-N and "all"
+    # graph modes span patches; inferring one from the oldest row stepped Mythic down to Legend for every
+    # bracket comparison and dropped the Mythic rows of everyone in it.
+    # The default is pre-set to the bracket/proximal league when those query params are used.
+    league = get_league_selection(patch=patch if isinstance(patch, Patch) else None)
+    title.markdown(f"# Player Comparison - {league} League")
+    datas = filter_league(datas, league)
 
     if not datas:
         return
@@ -438,17 +447,8 @@ def get_patch_df(df, player_df, patch):
     return patch_df
 
 
-def filter_league(datas, patch):
-    """Keep each player's rows for the selected league.
-
-    Only a patch the user picked in the selectbox is passed on to the league selector. The last-N and "all"
-    graph modes span patches; inferring one from the oldest row stepped Mythic down to Legend for every
-    bracket comparison and dropped the Mythic rows of everyone in it.
-    """
-    selected_patch = patch if isinstance(patch, Patch) else None
-
-    # Use patch-aware league selection (default is pre-set to bracket league when bracket_player param is used)
-    league = get_league_selection(patch=selected_patch)
+def filter_league(datas, league):
+    """Keep each player's rows for the given league."""
     filtered_datas = [(sdf[sdf.league == league], name) for sdf, name in datas]
 
     # Log if no data remains after filtering
