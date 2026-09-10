@@ -35,6 +35,11 @@ MAX_UPLOAD_BYTES = int(os.getenv("WEB_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 # A phone screenshot is typically 2-3 Mpx, so 6 Mpx leaves normal uploads untouched.
 MAX_IMAGE_PIXELS = int(os.getenv("WEB_MAX_IMAGE_PIXELS", str(6_000_000)))
 
+# Floor for the byte-budget shrink below. Far enough down that the budget is always reachable
+# (even wall-to-wall sensor noise costs ~2.5 bytes/pixel, so 1.5 Mpx lands well inside 10 MB)
+# and still high enough to read a Tower ID off.
+MIN_IMAGE_PIXELS = int(os.getenv("WEB_MIN_IMAGE_PIXELS", str(1_500_000)))
+
 # How long a submission may sit in `pending` — accepted, but never given a result — before it
 # is failed and the submitter released. `pending` is not a terminal status, so Guards 1 and 2
 # treat it as an active claim: until it resolves, that account cannot submit again and nobody
@@ -587,19 +592,48 @@ def get_image_storage_path(stem: str, extension: str = ".png") -> Path:
     return UPLOAD_DIR / get_image_shard(stem) / f"{stem}{extension}"
 
 
-def normalize_verification_image(image_bytes: bytes) -> bytes:
-    """Validate an uploaded screenshot, downscale it if oversized, and re-encode it as PNG.
+def _resize_to_pixels(img, target_pixels: int):
+    """Return img scaled to about target_pixels, preserving aspect ratio."""
+    from PIL import Image
 
-    Every upload path needs the same three things: proof the bytes really are an image,
-    a cap on the pixel count so OCR stays bounded, and a normalised PNG that carries no
-    EXIF/XMP or arbitrary chunks. Downscaling preserves aspect ratio and only applies
-    above MAX_IMAGE_PIXELS, so ordinary phone screenshots are re-encoded unchanged.
+    scale = (target_pixels / (img.width * img.height)) ** 0.5
+    new_size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
+    # Palette and bilevel images have no meaningful interpolation; promote them first.
+    if img.mode in ("P", "1"):
+        img = img.convert("RGB")
+    return img.resize(new_size, Image.LANCZOS)
+
+
+def _encode_png(img) -> bytes:
+    import io
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def normalize_verification_image(image_bytes: bytes, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
+    """Validate an uploaded screenshot, size it down to fit, and re-encode it as PNG.
+
+    Every upload path needs the same things: proof the bytes really are an image, a cap on
+    the pixel count so OCR stays bounded, a result that fits the storage budget, and a
+    normalised PNG carrying no EXIF/XMP or arbitrary chunks.
+
+    Two limits apply, for different reasons. MAX_IMAGE_PIXELS bounds OCR cost. max_bytes
+    bounds what lands on disk: re-encoding to lossless PNG can inflate a compressed upload
+    several times over, and a user who cleared the upload limit honestly must never then be
+    refused for what our own processing did to their file. So the encoded size is measured
+    and the image shrunk until it fits, rather than assumed to fit. An ordinary phone
+    screenshot is 2-3 Mpx of flat UI and passes through re-encoded but unscaled.
 
     Args:
         image_bytes: The raw uploaded bytes.
+        max_bytes: Budget for the encoded result. Defaults to the upload limit, so the
+            stored file is never larger than a file we would have accepted.
 
     Returns:
-        PNG-encoded bytes, downscaled to at most MAX_IMAGE_PIXELS.
+        PNG-encoded bytes, at most MAX_IMAGE_PIXELS and, barring a pathological image
+        already at MIN_IMAGE_PIXELS, within max_bytes.
 
     Raises:
         UnidentifiedImageError: The bytes are not a readable image.
@@ -614,17 +648,23 @@ def normalize_verification_image(image_bytes: bytes) -> bytes:
 
     pixels = img.width * img.height
     if pixels > MAX_IMAGE_PIXELS:
-        scale = (MAX_IMAGE_PIXELS / pixels) ** 0.5
-        new_size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
-        # Palette and bilevel images have no meaningful interpolation; promote them first.
-        if img.mode in ("P", "1"):
-            img = img.convert("RGB")
-        logger.info("Downscaling oversized screenshot: %dx%d (%.1f Mpx) -> %dx%d", img.width, img.height, pixels / 1e6, new_size[0], new_size[1])
-        img = img.resize(new_size, Image.LANCZOS)
+        img = _resize_to_pixels(img, MAX_IMAGE_PIXELS)
+        logger.info("Downscaled oversized screenshot for OCR cost: %.1f Mpx -> %dx%d", pixels / 1e6, img.width, img.height)
 
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+    data = _encode_png(img)
+
+    # PNG size is close to linear in pixel count for the noisy images that overshoot, so
+    # aiming straight at the budget converges in a pass or two. The 0.9 leaves room for the
+    # estimate to come in slightly heavy; the attempt cap stops a pathological image looping.
+    attempts = 0
+    while len(data) > max_bytes and img.width * img.height > MIN_IMAGE_PIXELS and attempts < 4:
+        target = max(MIN_IMAGE_PIXELS, int(img.width * img.height * (max_bytes * 0.9) / len(data)))
+        img = _resize_to_pixels(img, target)
+        data = _encode_png(img)
+        attempts += 1
+        logger.info("Shrank screenshot to fit the %d byte budget: now %dx%d, %d bytes", max_bytes, img.width, img.height, len(data))
+
+    return data
 
 
 def save_verification_image(stem: str, image_bytes: bytes, extension: str = ".png") -> Path:
