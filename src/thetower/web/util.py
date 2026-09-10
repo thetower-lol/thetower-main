@@ -137,7 +137,9 @@ def get_league_selection(options=None, patch=None):
         league_index = leagues.index(st.session_state.selected_league)
         league = st.radio("League", leagues, league_index, key="league_selector", on_change=league_changed)
 
-        # Historical patches predate the newest leagues: step down to the highest league that existed then
+        # Historical patches predate the newest leagues: step down to the highest league that existed then.
+        # The step-down is for this view only and is not written back to session state, so the selection
+        # in the radio (or the bracket league set from the query string) survives reruns and other pages.
         version_minor = getattr(patch, "version_minor", None) if patch else None
         if isinstance(version_minor, (int, float)):
             requested = league
@@ -145,9 +147,8 @@ def get_league_selection(options=None, patch=None):
                 league = leagues[leagues.index(league) + 1]
             if league != requested:
                 st.info(f"Using {league} league for historical patch ({requested} not available)")
-                st.session_state.selected_league = league
 
-    return st.session_state.selected_league
+    return league
 
 
 def gantt(df):

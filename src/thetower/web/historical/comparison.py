@@ -189,7 +189,7 @@ def compute_comparison(player_id=None, canvas=st):
 
     datas = [(sdf, player_id) for player_id, sdf in player_df.groupby("id") if len(sdf) >= 2]
     datas = filter_plot_datas(datas, patch, filter_bcs)
-    datas = filter_league(datas)
+    datas = filter_league(datas, patch)
 
     if not datas:
         return
@@ -438,17 +438,17 @@ def get_patch_df(df, player_df, patch):
     return patch_df
 
 
-def filter_league(datas):
-    # Get current patch from first dataset if available
-    patch = None
-    if datas and len(datas) > 0 and not datas[0][0].empty and "patch" in datas[0][0].columns:
-        try:
-            patch = datas[0][0]["patch"].iloc[0]
-        except Exception as e:
-            st.write(f"🔍 Debug: Error getting patch: {str(e)}")
+def filter_league(datas, patch):
+    """Keep each player's rows for the selected league.
+
+    Only a patch the user picked in the selectbox is passed on to the league selector. The last-N and "all"
+    graph modes span patches; inferring one from the oldest row stepped Mythic down to Legend for every
+    bracket comparison and dropped the Mythic rows of everyone in it.
+    """
+    selected_patch = patch if isinstance(patch, Patch) else None
 
     # Use patch-aware league selection (default is pre-set to bracket league when bracket_player param is used)
-    league = get_league_selection(patch=patch)
+    league = get_league_selection(patch=selected_patch)
     filtered_datas = [(sdf[sdf.league == league], name) for sdf, name in datas]
 
     # Log if no data remains after filtering
