@@ -34,6 +34,17 @@ REVIEW_DB_PATH = UPLOAD_DIR / "review_queue.db"
 # Terminal statuses (submissions that are complete and should not be re-actioned)
 _TERMINAL_STATUSES = ("approved", "passed", "rejected", "abandoned", "failed")
 
+
+class ImageTooLargeError(ValueError):
+    """Raised when a verification image exceeds MAX_UPLOAD_BYTES.
+
+    Callers check the *uploaded* bytes, but every upload path re-encodes to PNG before
+    storing it, and PNG is lossless: a compressed JPEG well under the cap can inflate
+    several times over once decoded and re-encoded. This is raised from
+    save_verification_image() so the bytes that actually reach disk are the ones measured.
+    """
+
+
 # Try to import OCR utilities
 try:
     from thetower.utils.ocr import analyze_verification_screenshot
@@ -564,6 +575,13 @@ def get_image_storage_path(stem: str, extension: str = ".png") -> Path:
 
 
 def save_verification_image(stem: str, image_bytes: bytes, extension: str = ".png") -> Path:
+    """Write a verification image to sharded storage.
+
+    Raises:
+        ImageTooLargeError: if the encoded bytes exceed MAX_UPLOAD_BYTES.
+    """
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise ImageTooLargeError(f"Encoded image is {len(image_bytes)} bytes, over the {MAX_UPLOAD_BYTES} byte limit (stem {stem})")
     path = get_image_storage_path(stem, extension)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(image_bytes)
