@@ -1039,6 +1039,15 @@ def requeue_submission(stem: str, requeued_by: str | None = None) -> dict[str, A
         submission_source=row.get("submission_source") or "web",
         id_change_reason=row.get("id_change_reason") or None,
     )
+    if result.get("status") == "error":
+        # Every early return in process_verification leaves the row exactly as it found it.
+        # Since this one was just set back to pending, letting that stand would strand the
+        # submission in the state requeue exists to clear — and re-lock both guards with it.
+        reason = result.get("reason") or "error"
+        fail_submission(stem, failed_by=requeued_by, final_outcome=f"requeue_{reason}")
+        logger.warning("Requeue of %s refused (%s) — submission failed rather than left pending", stem, reason)
+        return result
+
     logger.info("Requeue of %s finished with status=%s", stem, result.get("status"))
     return result
 
