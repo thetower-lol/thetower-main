@@ -64,6 +64,24 @@ _VERSION_RE = re.compile(
 # Matches the "ID:" label at the start of the ID line
 _ID_LINE_RE = re.compile(r"\bID[\s:;]+", re.IGNORECASE)
 
+# ---------------------------------------------------------------------------
+# Cost limits
+# ---------------------------------------------------------------------------
+
+# Every pass below upsamples 2-4x. That exists to lift small text to the ~20-30 px cap
+# height Tesseract reads best, which is the right move for a phone screenshot — but an
+# image that already arrives far larger is, in effect, upsampled: its text is past that
+# height before we touch it, so scaling it again buys nothing and costs a great deal.
+# Cost grows with the square of each scale factor, so the multipliers are only safe on
+# inputs near the size they were tuned against. Normalising first gives every image the
+# same tuned pipeline, and bounds the worst case: prod has seen a 28 Mpx upload turn
+# ~10 s of OCR into hours of it.
+_OCR_REFERENCE_PIXELS = int(os.getenv("OCR_REFERENCE_PIXELS", str(3_000_000)))
+
+# Hard ceiling per Tesseract invocation, as a backstop for whatever the resolution cap
+# does not catch. A pass that times out contributes nothing rather than hanging the caller.
+_TESSERACT_TIMEOUT_SECONDS = int(os.getenv("OCR_TESSERACT_TIMEOUT", "60"))
+
 # OCR character correction map for hex strings
 _HEX_FIXES = str.maketrans(
     {
@@ -131,6 +149,10 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         if img is None:
             return OcrResult(error=f"Could not load image: {image_path}")
 
+        # Bring oversized screenshots down to the resolution the scale factors below
+        # are tuned for, before any of them run.
+        img = _normalise_for_ocr(img)
+
         # ------------------------------------------------------------------
         # Pass 1 – label check + version extraction
         # Word-level detection (PSM 3) at 3× is more reliable than full-text
@@ -144,16 +166,12 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         # ------------------------------------------------------------------
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray3x = cv2.resize(gray, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-        label_data = pytesseract.image_to_data(
-            gray3x,
-            config="--oem 3 --psm 3",
-            output_type=pytesseract.Output.DICT,
-        )
+        label_data = _ocr_data(gray3x, "--oem 3 --psm 3")
         label_words = {w.lower() for w in label_data["text"] if w.strip()}
         # Also run CLAHE variant and merge — dark screenshots cause misreads (e.g. "EULA" → "euta")
         _clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         clahe_3x = cv2.resize(_clahe.apply(gray), None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-        clahe_label_data = pytesseract.image_to_data(clahe_3x, config="--oem 3 --psm 3", output_type=pytesseract.Output.DICT)
+        clahe_label_data = _ocr_data(clahe_3x, "--oem 3 --psm 3")
         label_words |= {w.lower() for w in clahe_label_data["text"] if w.strip()}
         # Require ≥2 of {subreddit, discord, eula, id:} to confirm the Settings screen.
         # A single signal is insufficient — a cropped screenshot showing only the bottom
@@ -185,7 +203,7 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
             for top_pct, bot_pct in ((0, 35), (25, 60), (50, 80), (65, 100)):
                 band = gray[int(h * top_pct / 100) : int(h * bot_pct / 100), :]
                 band3x = cv2.resize(band, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-                band_data = pytesseract.image_to_data(band3x, config="--oem 3 --psm 3", output_type=pytesseract.Output.DICT)
+                band_data = _ocr_data(band3x, "--oem 3 --psm 3")
                 all_words.update(w.lower() for w in band_data["text"] if w.strip())
             _count = _signal_count(all_words)
 
@@ -195,7 +213,7 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         gray2x = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         proc = clahe.apply(gray2x)
-        full_text = pytesseract.image_to_string(proc, config="--oem 3 --psm 6")
+        full_text = _ocr_text(proc, "--oem 3 --psm 6")
 
         # Version + build extraction from the ID line
         version: Optional[str] = None
@@ -227,7 +245,7 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         # introduced by heavy upsampling, so voting across scales improves accuracy.
         candidate_votes: Counter = Counter()
         for _label, variant in _get_variants(img):
-            text = pytesseract.image_to_string(variant, config=_ID_CONFIG)
+            text = _ocr_text(variant, _ID_CONFIG)
             pid = _parse_id_from_text(text)
             if pid:
                 candidate_votes[pid] += 1
@@ -300,6 +318,39 @@ def _parse_id_from_text(text: str) -> Optional[str]:
         if is_valid_tower_id(fixed):
             return fixed
     return None
+
+
+def _normalise_for_ocr(img):
+    """Downscale an oversized screenshot to the resolution the scale factors are tuned for.
+
+    Returns the image unchanged when it is already at or below _OCR_REFERENCE_PIXELS.
+    """
+    height, width = img.shape[:2]
+    pixels = width * height
+    if pixels <= _OCR_REFERENCE_PIXELS:
+        return img
+    scale = (_OCR_REFERENCE_PIXELS / pixels) ** 0.5
+    new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+    logger.info("Downscaling %dx%d (%.1f Mpx) screenshot to %dx%d for OCR", width, height, pixels / 1e6, new_size[0], new_size[1])
+    return cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
+
+
+def _ocr_text(image, config: str) -> str:
+    """image_to_string with a hard timeout. A pass that times out contributes nothing."""
+    try:
+        return pytesseract.image_to_string(image, config=config, timeout=_TESSERACT_TIMEOUT_SECONDS)
+    except RuntimeError as exc:  # covers TesseractError and the timeout RuntimeError
+        logger.warning("Tesseract pass failed or timed out (config=%s): %s", config, exc)
+        return ""
+
+
+def _ocr_data(image, config: str) -> dict:
+    """image_to_data with a hard timeout. A pass that times out yields no words."""
+    try:
+        return pytesseract.image_to_data(image, config=config, output_type=pytesseract.Output.DICT, timeout=_TESSERACT_TIMEOUT_SECONDS)
+    except RuntimeError as exc:  # covers TesseractError and the timeout RuntimeError
+        logger.warning("Tesseract pass failed or timed out (config=%s): %s", config, exc)
+        return {"text": []}
 
 
 def _get_variants(img):
