@@ -456,6 +456,21 @@ def process_display_names(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+def _placement_frame(df_latest: pd.DataFrame) -> pd.DataFrame:
+    """Latest-snapshot rows for placement analysis.
+
+    Anti-snipe: brackets still filling (< 28 players) are hidden while entry is open, matching
+    get_bracket_overview. After entry closes the last bracket of each league stays partial for good,
+    and its players must still find themselves here, so no filter applies.
+    """
+    if get_tourney_state().name != "ENTRY_OPEN":
+        return df_latest.copy()
+    bracket_counts = df_latest.groupby("bracket", observed=True)["player_id"].nunique()
+    fullish_brackets = bracket_counts[bracket_counts >= 28].index
+    logging.debug(f"get_placement_analysis_data: found {len(fullish_brackets)} fullish_brackets (>=28 players)")
+    return df_latest[df_latest["bracket"].isin(fullish_brackets)].copy()
+
+
 @cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
 def get_placement_analysis_data(league: str):
     """
@@ -549,12 +564,7 @@ def get_placement_analysis_data(league: str):
                         df_latest = get_latest_live_df(league, include_shun, include_sus, banned_ids=live_banned_ids())
                         logging.debug(f"get_placement_analysis_data: df_latest.shape={getattr(df_latest, 'shape', None)}")
 
-                        # compute fullish brackets from latest snapshot
-                        bracket_counts = dict(df_latest.groupby("bracket", observed=True).player_id.unique().map(lambda ids: len(ids)))
-                        fullish_brackets = [bracket for bracket, count in bracket_counts.items() if count >= 28]
-                        logging.debug(f"get_placement_analysis_data: found {len(fullish_brackets)} fullish_brackets (>=28 players)")
-
-                        df = df_latest[df_latest.bracket.isin(fullish_brackets)].copy()
+                        df = _placement_frame(df_latest)
                         df["real_name"] = df["real_name"].astype("str")
                         latest_time = df["datetime"].max()
                         logging.debug(f"get_placement_analysis_data: filtered df.shape={getattr(df, 'shape', None)}, latest_time={latest_time}")
@@ -589,9 +599,7 @@ def get_placement_analysis_data(league: str):
                             br: (datetime.datetime.fromisoformat(ts) if isinstance(ts, str) else ts) for br, ts in raw_times.items()
                         }
                         df_latest = get_latest_live_df(league, include_shun, include_sus, banned_ids=live_banned_ids())
-                        bracket_counts = dict(df_latest.groupby("bracket", observed=True).player_id.unique().map(lambda ids: len(ids)))
-                        fullish_brackets = [bracket for bracket, count in bracket_counts.items() if count >= 28]
-                        df = df_latest[df_latest.bracket.isin(fullish_brackets)].copy()
+                        df = _placement_frame(df_latest)
                         df["real_name"] = df["real_name"].astype("str")
                         latest_time = df["datetime"].max()
                         logging.debug(f"get_placement_analysis_data: archive fallback succeeded, df.shape={df.shape}")
