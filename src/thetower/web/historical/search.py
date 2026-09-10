@@ -7,6 +7,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "thetower.backend.towerdb.settin
 django.setup()
 
 
+from collections import Counter
 from itertools import groupby
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from django.db import connection
 from django.db.models import Q
 
 from thetower.backend.sus.models import ModerationRecord, PlayerId
+from thetower.backend.tourney_results.constants import leagues as league_order
 from thetower.backend.tourney_results.models import TourneyRow
 
 # Cross-league queries (including raw SQL) can't cheaply apply per-league caps, so search
@@ -27,6 +29,46 @@ from thetower.web.util import add_player_id, add_to_comparison
 def _next_prefix(s: str) -> str:
     """Return the string that sorts immediately after all strings starting with s."""
     return s[:-1] + chr(ord(s[-1]) + 1)
+
+
+RECENT_TOURNEYS = 4  # even on purpose: an odd window just echoes the most recent tourney for a strict alternator
+_LEAGUE_RANK = {league: rank for rank, league in enumerate(league_order)}  # 0 = top league
+
+
+def _league_labels(player_ids: list[str]) -> dict[str, str]:
+    """One league label per player: the league they have played most in their last four tourneys, ties to
+    the higher league, plus "(peak X)" when they have played higher than that at some point.
+
+    A lifetime list of every league a player ever touched reads as history, not identity. With an even
+    window and ties going up, a player who bounces between two leagues reads as the higher one every
+    week, a promotion shows after two tourneys, a demotion after three, and the peak keeps the best
+    league visible without letting stale history lead. One query per batch.
+    """
+    if not player_ids:
+        return {}
+    rows = (
+        TourneyRow.objects.filter(player_id__in=player_ids, position__lte=get_max_results_limit())
+        .values_list("player_id", "result__league", "result__date")
+        .order_by("-result__date")
+    )
+    recent: dict[str, list[str]] = {}
+    peak: dict[str, int] = {}
+    unknown = len(league_order)
+    for pid, league, _ in rows:
+        rank = _LEAGUE_RANK.get(league, unknown)
+        peak[pid] = min(peak.get(pid, unknown), rank)
+        played = recent.setdefault(pid, [])
+        if len(played) < RECENT_TOURNEYS:
+            played.append(league)
+    labels: dict[str, str] = {}
+    for pid, played in recent.items():
+        counts = Counter(played)
+        current = min(counts, key=lambda league: (-counts[league], _LEAGUE_RANK.get(league, unknown)))
+        if peak[pid] < _LEAGUE_RANK.get(current, unknown):
+            labels[pid] = f"{current} (peak {league_order[peak[pid]]})"
+        else:
+            labels[pid] = current
+    return labels
 
 
 def _get_excluded_from_results(player_ids: list[str], include_sus: bool = False) -> set[str]:
@@ -136,19 +178,11 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
             print(f"[search] player_id contains query: {time.perf_counter() - t1c:.3f}s")
 
         # Batch league lookup
-        ids = [pid for pid, _ in unique_pids]
         t1b = time.perf_counter()
-        league_rows = (
-            TourneyRow.objects.filter(player_id__in=ids, position__lte=get_max_results_limit())
-            .values_list("player_id", "result__league")
-            .distinct()
-        )
-        league_map: dict[str, set[str]] = {}
-        for pid, lg in league_rows:
-            league_map.setdefault(pid, set()).add(lg)
+        labels = _league_labels([pid for pid, _ in unique_pids])
         print(f"[search] player_id query: {t1b - t1:.3f}s ({len(unique_pids)} rows)  league batch: {time.perf_counter() - t1b:.3f}s")
 
-        grouped_results = [(pid, nick, ", ".join(sorted(league_map.get(pid, set())))) for pid, nick in unique_pids]
+        grouped_results = [(pid, nick, labels.get(pid, "")) for pid, nick in unique_pids]
         print(f"[search] player_id total: {time.perf_counter() - t0:.3f}s")
         return grouped_results
 
@@ -174,18 +208,10 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                 .values_list("id", "game_instance__player__name")[:page]
             )
             # Batch league lookup — one query for all players instead of N+1
-            p1_ids = [pid for pid, _ in priority1_results]
             t2 = time.perf_counter()
-            p1_league_rows = (
-                TourneyRow.objects.filter(player_id__in=p1_ids, position__lte=get_max_results_limit())
-                .values_list("player_id", "result__league")
-                .distinct()
-            )
-            p1_league_map: dict[str, set[str]] = {}
-            for pid, lg in p1_league_rows:
-                p1_league_map.setdefault(pid, set()).add(lg)
+            p1_labels = _league_labels([pid for pid, _ in priority1_results])
             print(f"[search] p1 name query: {t2 - t1:.3f}s ({len(priority1_results)} rows)  p1 league batch: {time.perf_counter() - t2:.3f}s")
-            priority1_with_league = [(pid, name, ", ".join(sorted(p1_league_map.get(pid, set())))) for pid, name in priority1_results]
+            priority1_with_league = [(pid, name, p1_labels.get(pid, "")) for pid, name in priority1_results]
             all_results.extend(priority1_with_league)
 
         # Priority 2: Nicknames starting with first fragment (if we need more results)
@@ -215,19 +241,11 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                         if len(priority2_results) >= limit:
                             break
 
-            p2_ids = [pid for pid, _ in priority2_results]
             t2b = time.perf_counter()
-            p2_league_rows = (
-                TourneyRow.objects.filter(player_id__in=p2_ids, position__lte=get_max_results_limit())
-                .values_list("player_id", "result__league")
-                .distinct()
-            )
-            p2_league_map: dict[str, set[str]] = {}
-            for pid, lg in p2_league_rows:
-                p2_league_map.setdefault(pid, set()).add(lg)
+            p2_labels = _league_labels([pid for pid, _ in priority2_results])
             print(f"[search] p2 nickname query: {t2b - t2:.3f}s ({len(priority2_results)} rows)  p2 league batch: {time.perf_counter() - t2b:.3f}s")
 
-            priority2_with_league = [(pid, nick, ", ".join(sorted(p2_league_map.get(pid, set())))) for pid, nick in priority2_results]
+            priority2_with_league = [(pid, nick, p2_labels.get(pid, "")) for pid, nick in priority2_results]
             all_results.extend(priority2_with_league)
             existing_player_ids.update(pid for pid, _, _ in priority2_with_league)
 
@@ -245,18 +263,10 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                     .order_by("id")
                     .values_list("id", "game_instance__player__name")[: page - len(all_results)]
                 )
-                p3_ids = [pid for pid, _ in priority3_results]
                 t3b = time.perf_counter()
-                p3_league_rows = (
-                    TourneyRow.objects.filter(player_id__in=p3_ids, position__lte=get_max_results_limit())
-                    .values_list("player_id", "result__league")
-                    .distinct()
-                )
-                p3_league_map: dict[str, set[str]] = {}
-                for pid, lg in p3_league_rows:
-                    p3_league_map.setdefault(pid, set()).add(lg)
+                p3_labels = _league_labels([pid for pid, _ in priority3_results])
                 print(f"[search] p3 name query: {t3b - t3:.3f}s ({len(priority3_results)} rows)  p3 league batch: {time.perf_counter() - t3b:.3f}s")
-                priority3_with_league = [(pid, name, ", ".join(sorted(p3_league_map.get(pid, set())))) for pid, name in priority3_results]
+                priority3_with_league = [(pid, name, p3_labels.get(pid, "")) for pid, name in priority3_results]
                 all_results.extend(priority3_with_league)
                 existing_player_ids.update(pid for pid, _, _ in priority3_with_league)
 
@@ -281,20 +291,12 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                         if len(priority4_results) >= limit:
                             break
 
-                p4_ids = [pid for pid, _ in priority4_results]
                 t4b = time.perf_counter()
-                p4_league_rows = (
-                    TourneyRow.objects.filter(player_id__in=p4_ids, position__lte=get_max_results_limit())
-                    .values_list("player_id", "result__league")
-                    .distinct()
-                )
-                p4_league_map: dict[str, set[str]] = {}
-                for pid, lg in p4_league_rows:
-                    p4_league_map.setdefault(pid, set()).add(lg)
+                p4_labels = _league_labels([pid for pid, _ in priority4_results])
                 print(
                     f"[search] p4 nickname query: {t4b - t4:.3f}s ({len(priority4_results)} rows)  p4 league batch: {time.perf_counter() - t4b:.3f}s"
                 )
-                priority4_with_league = [(pid, nick, ", ".join(sorted(p4_league_map.get(pid, set())))) for pid, nick in priority4_results]
+                priority4_with_league = [(pid, nick, p4_labels.get(pid, "")) for pid, nick in priority4_results]
                 all_results.extend(priority4_with_league)
 
         # Sort name search results by nickname (case-insensitive)
