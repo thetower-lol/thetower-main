@@ -29,6 +29,12 @@ ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 OCR_NEAR_MATCH_MAX = int(os.getenv("WEB_OCR_NEAR_MATCH_MAX", "2"))
 MAX_UPLOAD_BYTES = int(os.getenv("WEB_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 
+# Pixel ceiling for stored screenshots. Anything larger is downscaled before it is saved.
+# OCR cost grows far faster than pixel count — prod timings run ~10 s at 2.6 Mpx but
+# 1000-1700 s at 12.2 Mpx — so the cap is what keeps OCR bounded, not the byte limit.
+# A phone screenshot is typically 2-3 Mpx, so 6 Mpx leaves normal uploads untouched.
+MAX_IMAGE_PIXELS = int(os.getenv("WEB_MAX_IMAGE_PIXELS", str(6_000_000)))
+
 REVIEW_DB_PATH = UPLOAD_DIR / "review_queue.db"
 
 # Terminal statuses (submissions that are complete and should not be re-actioned)
@@ -572,6 +578,46 @@ def get_image_shard(stem: str) -> str:
 
 def get_image_storage_path(stem: str, extension: str = ".png") -> Path:
     return UPLOAD_DIR / get_image_shard(stem) / f"{stem}{extension}"
+
+
+def normalize_verification_image(image_bytes: bytes) -> bytes:
+    """Validate an uploaded screenshot, downscale it if oversized, and re-encode it as PNG.
+
+    Every upload path needs the same three things: proof the bytes really are an image,
+    a cap on the pixel count so OCR stays bounded, and a normalised PNG that carries no
+    EXIF/XMP or arbitrary chunks. Downscaling preserves aspect ratio and only applies
+    above MAX_IMAGE_PIXELS, so ordinary phone screenshots are re-encoded unchanged.
+
+    Args:
+        image_bytes: The raw uploaded bytes.
+
+    Returns:
+        PNG-encoded bytes, downscaled to at most MAX_IMAGE_PIXELS.
+
+    Raises:
+        UnidentifiedImageError: The bytes are not a readable image.
+        OSError: Truncated image data, or Pillow refusing a decompression bomb.
+    """
+    import io
+
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(image_bytes))
+    img.load()  # force full decode — raises if the bytes are not a valid image
+
+    pixels = img.width * img.height
+    if pixels > MAX_IMAGE_PIXELS:
+        scale = (MAX_IMAGE_PIXELS / pixels) ** 0.5
+        new_size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
+        # Palette and bilevel images have no meaningful interpolation; promote them first.
+        if img.mode in ("P", "1"):
+            img = img.convert("RGB")
+        logger.info("Downscaling oversized screenshot: %dx%d (%.1f Mpx) -> %dx%d", img.width, img.height, pixels / 1e6, new_size[0], new_size[1])
+        img = img.resize(new_size, Image.LANCZOS)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def save_verification_image(stem: str, image_bytes: bytes, extension: str = ".png") -> Path:
