@@ -16,7 +16,6 @@ from thetower.backend.tourney_results.constants import (
 )
 from thetower.backend.tourney_results.data import (
     get_details,
-    get_id_lookup,
     get_patches,
     is_banned,
     is_shun,
@@ -34,7 +33,6 @@ from thetower.backend.tourney_results.tourney_utils import check_all_live_entry
 from thetower.web.historical.search import compute_search
 from thetower.web.util import escape_df_html, get_options
 
-id_mapping = get_id_lookup()
 hidden_features = os.environ.get("HIDDEN_FEATURES")
 
 
@@ -136,20 +134,11 @@ def compute_player_lookup():
         df_copy = player_df.copy()
         # Convert patch objects to strings
         df_copy["patch"] = df_copy["patch"].apply(str)
+        # the wave colour is already a per-row column; one pass over it replaces a frame scan per row
+        wave_colors = [f"color: {color}" for color in df_copy["wave_role_color"]]
         return (
             df_copy[["name", "wave", "#", "date", "patch", "battle", "league"]]
-            .style.apply(
-                lambda row: [
-                    None,
-                    f"color: {player_df[player_df['date'] == row.date].wave_role_color.iloc[0]}",
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ],
-                axis=1,
-            )
+            .style.apply(lambda _: wave_colors, subset=["wave"])
             .map(color_position, subset=["#"])
             .format(format_wave, subset=["wave"])
         )
@@ -373,7 +362,8 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
         # Handle missing relic gracefully
         relic_url = ""
 
-    tourney_join = "✅" if check_all_live_entry(player_df.iloc[0].id) else "⛔"
+    joined_tourney = bool(check_all_live_entry(player_df.iloc[0].id))
+    tourney_join = "✅" if joined_tourney else "⛔"
 
     # Get creator code from the player's KnownPlayer via GameInstance
     creator_code = ""
@@ -401,7 +391,7 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
         unsafe_allow_html=True,
     )
 
-    render_player_action_links(info_tab, player_id, bool(check_all_live_entry(player_df.iloc[0].id)))
+    render_player_action_links(info_tab, player_id, joined_tourney)
 
 
 def write_for_each_patch(patch_tab, player_df):
@@ -424,7 +414,7 @@ def write_for_each_patch(patch_tab, player_df):
                 "max_wave": max_wave,
                 "tourney_name": max_wave_data["name"],
                 "date": max_wave_data.date,
-                "battle_conditions": ", ".join(max_wave_data.bcs.values_list("shortcut", flat=True)),
+                "battle_conditions": ", ".join(bc.shortcut for bc in max_wave_data.bcs),
             }
         )
 
@@ -434,7 +424,7 @@ def write_for_each_patch(patch_tab, player_df):
                 "max_position": max_pos,
                 "tourney_name": max_pos_data["name"],
                 "date": max_pos_data.date,
-                "battle_conditions": ", ".join(max_pos_data.bcs.values_list("shortcut", flat=True)),
+                "battle_conditions": ", ".join(bc.shortcut for bc in max_pos_data.bcs),
             }
         )
 

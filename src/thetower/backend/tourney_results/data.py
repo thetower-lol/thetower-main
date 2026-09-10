@@ -676,9 +676,17 @@ def get_results_for_window(window: RoleWindow, league=champ):
     return TourneyResult.objects.filter(date__gte=window.start_date, league=league, public=True).order_by("-date")
 
 
-@ttl_cache(maxsize=128, ttl=60)
-def get_patch_for_result(date: datetime) -> Patch:
-    return Patch.objects.get(start_date__lte=date, end_date__gte=date)
+@ttl_cache(maxsize=4096, ttl=60)
+def get_patch_for_result(date: datetime.date) -> Patch:
+    """The patch covering a result date, scanned from the cached patch list.
+
+    A player view asks once per row; the old per-date ``Patch.objects.get`` combined with a 128-entry
+    cache meant one query per row for anyone with more than 128 tourneys.
+    """
+    for patch in get_patches():
+        if patch.start_date <= date <= patch.end_date:
+            return patch
+    raise Patch.DoesNotExist(f"No patch covers {date}")
 
 
 def get_tourneys(
@@ -746,12 +754,15 @@ def get_details(rows: QuerySet[TourneyRow]) -> pd.DataFrame:
     lookup = get_player_id_lookup()
     approved_lookup = get_player_id_approved_lookup()
 
+    # Two queries for every result's conditions, materialised as lists: the previous lazy queryset per
+    # result was re-evaluated by each consumer on every row.
     conditions_mapping = {
-        result.id: BattleCondition.objects.filter(results__id=result.id) for result in TourneyResult.objects.filter(id__in=df.result_id.unique())
+        result.id: list(result.conditions.all())
+        for result in TourneyResult.objects.filter(id__in=df.result_id.unique()).prefetch_related("conditions")
     }
 
     patches = [get_patch_for_result(date) for date in df.date]
-    bcs = [conditions_mapping.get(id_) for id_ in df.result_id]
+    bcs = [conditions_mapping.get(id_, []) for id_ in df.result_id]
 
     df["real_name"] = [lookup.get(id, name) for id, name in zip(df.id, df.tourney_name)]
     df["verified"] = ["✓" if approved_lookup.get(id) else "" for id, name in zip(df.id, df.tourney_name)]
