@@ -140,24 +140,25 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
         # Single query: player IDs starting with the search term. A range on the uppercased term lets SQLite
         # seek the player_id index; istartswith became a LIKE that scanned every row (the nickname passes
         # below use the same trick).
+        # Rows come newest first per player so the nickname shown is the current one; a blank nickname
+        # only wins when the player never had another. A 12+ character prefix matches few players, and
+        # the cap keeps a pathological prefix from pulling the whole table.
         t1 = time.perf_counter()
-        pid_results = list(
+        pid_rows = (
             TourneyRow.objects.filter(
                 player_id__gte=search_term,
                 player_id__lt=_next_prefix(search_term),
                 position__lte=get_max_results_limit(),
             )
             .values_list("player_id", "nickname")
-            .order_by("player_id")
-            .distinct()[:page]
+            .order_by("player_id", "-result__date")[:5000]
         )
-        # Dedup to one row per player_id
-        seen: set[str] = set()
-        unique_pids: list[tuple[str, str]] = []
-        for pid, nick in pid_results:
-            if pid not in seen:
-                seen.add(pid)
-                unique_pids.append((pid, nick))
+        nick_by_pid: dict[str, str] = {}
+        for pid, nick in pid_rows:
+            if pid not in nick_by_pid or (not nick_by_pid[pid] and nick):
+                nick_by_pid[pid] = nick
+        unique_pids: list[tuple[str, str]] = list(nick_by_pid.items())[:page]
+        seen: set[str] = set(nick_by_pid)
 
         # Advanced: also search player IDs containing the term (not just startswith)
         if advanced_search and len(unique_pids) < page:
