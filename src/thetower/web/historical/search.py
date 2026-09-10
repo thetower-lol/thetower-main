@@ -23,7 +23,7 @@ from thetower.backend.tourney_results.models import TourneyRow
 # filters on the highest cap configured across leagues.
 from thetower.backend.tourney_results.results_config import get_max_results_limit
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
-from thetower.web.util import add_player_id, add_to_comparison
+from thetower.web.util import SEARCH_ID_KEY, SEARCH_NAME_KEY, add_player_id, add_to_comparison
 
 
 def _next_prefix(s: str) -> str:
@@ -333,8 +333,8 @@ def compute_search(player=False, comparison=False):
         name_label = "Enter beginning of the player name"
         id_label = "Enter beginning of the player id to be queried"
 
-    real_name_part = name_col.text_input(name_label)
-    player_id_part = id_col.text_input(id_label)
+    real_name_part = name_col.text_input(name_label, key=SEARCH_NAME_KEY)
+    player_id_part = id_col.text_input(id_label, key=SEARCH_ID_KEY)
 
     # Determine which search to perform
     search_term = ""

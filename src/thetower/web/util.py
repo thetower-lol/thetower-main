@@ -191,11 +191,20 @@ def gantt(df):
     return fig
 
 
+# Keys of the two search boxes in historical/search.py, so callbacks can clear them.
+SEARCH_NAME_KEY = "search_name_part"
+SEARCH_ID_KEY = "search_id_part"
+
+
 def add_player_id(player_id):
     st.session_state.player_id = player_id
 
 
 def add_to_comparison(player_id, nicknames):
+    # Clear the search boxes so the next player can be typed straight away; a callback runs before the
+    # widgets are rebuilt, which is the one place Streamlit lets a widget's value be set.
+    st.session_state[SEARCH_NAME_KEY] = ""
+    st.session_state[SEARCH_ID_KEY] = ""
     if "comparison" in st.session_state:
         st.session_state.comparison.add(player_id)
         st.session_state.addee_map[player_id] = nicknames
