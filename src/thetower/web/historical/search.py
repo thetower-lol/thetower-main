@@ -137,11 +137,14 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
         # Normalize to uppercase to align with stored player IDs
         search_term = search_term.upper()
 
-        # Single query: player IDs starting with the search term
+        # Single query: player IDs starting with the search term. A range on the uppercased term lets SQLite
+        # seek the player_id index; istartswith became a LIKE that scanned every row (the nickname passes
+        # below use the same trick).
         t1 = time.perf_counter()
         pid_results = list(
             TourneyRow.objects.filter(
-                player_id__istartswith=search_term,
+                player_id__gte=search_term,
+                player_id__lt=_next_prefix(search_term),
                 position__lte=get_max_results_limit(),
             )
             .values_list("player_id", "nickname")
