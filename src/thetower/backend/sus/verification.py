@@ -35,6 +35,13 @@ MAX_UPLOAD_BYTES = int(os.getenv("WEB_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 # A phone screenshot is typically 2-3 Mpx, so 6 Mpx leaves normal uploads untouched.
 MAX_IMAGE_PIXELS = int(os.getenv("WEB_MAX_IMAGE_PIXELS", str(6_000_000)))
 
+# How long a submission may sit in `pending` — accepted, but never given a result — before it
+# is failed and the submitter released. `pending` is not a terminal status, so Guards 1 and 2
+# treat it as an active claim: until it resolves, that account cannot submit again and nobody
+# can claim that Tower ID. A submission that dies before OCR returns (process restart, a pass
+# that never finished) would otherwise hold both locks forever.
+PENDING_STALE_SECONDS = int(os.getenv("WEB_PENDING_STALE_SECONDS", str(24 * 60 * 60)))
+
 REVIEW_DB_PATH = UPLOAD_DIR / "review_queue.db"
 
 # Terminal statuses (submissions that are complete and should not be re-actioned)
@@ -1962,13 +1969,48 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str, resolved_n
 # ---------------------------------------------------------------------------
 
 
+def fail_stale_pending_submissions(stale_threshold_seconds: int = PENDING_STALE_SECONDS) -> int:
+    """Fail submissions that have sat in `pending` past the threshold without ever getting a result.
+
+    A `pending` row is one the caller created before handing off to process_verification().
+    If that never wrote a status back — the process restarted mid-OCR, or an early return
+    left the row untouched — nothing else will ever move it: it is not in the mod queue,
+    startup only re-syncs its Discord embed, and there is no retry. Meanwhile Guards 1 and 2
+    read it as an active claim and lock both the submitter and the Tower ID.
+
+    Failing them releases both locks and tells the submitter (via the Discord embed and their
+    submission history) that they can try again.
+
+    Returns number failed.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return 0
+
+    cutoff_ts = int(time.time()) - stale_threshold_seconds
+    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+        stale_stems = [row[0] for row in conn.execute("SELECT stem FROM submissions WHERE status = 'pending' AND created_at < ?", (cutoff_ts,))]
+
+    count = 0
+    for stem in stale_stems:
+        # fail_submission() writes the status, the event, and the platform notification,
+        # and no-ops if something resolved the row between the query and here.
+        if fail_submission(stem, failed_by="system", final_outcome="stale_pending_timeout"):
+            count += 1
+
+    if count:
+        logger.info("Failed %d submissions stuck in pending for over %d seconds", count, stale_threshold_seconds)
+    return count
+
+
 def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 3600) -> int:
-    """Escalate submissions stuck in user_ocr_choice for >threshold seconds (updated with new status values and near-match support).
+    """Sweep submissions that have been left behind, in two passes.
 
-    Timeout threshold:
-        - user_ocr_choice (near-match): 1 hour default (3600 seconds)
+    1. user_ocr_choice (near-match awaiting the user) for >stale_threshold_seconds
+       (1 hour default) is escalated to near_match_timeout for mod review.
+    2. `pending` (never got a result at all) for >PENDING_STALE_SECONDS (24 hours default)
+       is failed, via fail_stale_pending_submissions().
 
-    Returns number escalated.
+    Returns the total number of submissions actioned across both passes.
     """
     if not REVIEW_DB_PATH.exists():
         return 0
@@ -1983,9 +2025,6 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 3600)
                AND created_at < ?""",
             (cutoff_ts,),
         ).fetchall()
-
-        if not rows:
-            return 0
 
         count = 0
         escalated_stems = []
@@ -2010,13 +2049,15 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 3600)
             except Exception:
                 pass
 
-        logger.info("Auto-escalated %d user_ocr_choice submissions to near_match_timeout", count)
+        if count:
+            logger.info("Auto-escalated %d user_ocr_choice submissions to near_match_timeout", count)
 
     # Trigger Discord sync for each escalated submission so the log embed reflects the new status
     for stem in escalated_stems:
         log_submission_update(stem)
 
-    return count
+    # Second pass: submissions that never got a result at all.
+    return count + fail_stale_pending_submissions()
 
 
 # ---------------------------------------------------------------------------
