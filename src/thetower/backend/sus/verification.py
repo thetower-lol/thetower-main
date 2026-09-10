@@ -995,6 +995,54 @@ def abandon_submission(stem: str, abandoned_by: str | None = None, final_outcome
     return True
 
 
+def requeue_submission(stem: str, requeued_by: str | None = None) -> dict[str, Any]:
+    """Re-run processing for a submission whose first attempt never produced a usable result.
+
+    For the case where the screenshot is fine but the run that should have read it was lost —
+    a restart mid-OCR, a pass that timed out, or a stale-pending timeout that has since failed
+    the row. The stored screenshot is re-analysed and the submission continues from whatever
+    that produces, as if it had just been submitted.
+
+    Already-approved submissions are refused: re-running one could act on a player record a
+    second time. Anything else, including failed and abandoned rows, may be requeued.
+
+    Args:
+        stem: Submission identifier
+        requeued_by: Platform identifier of the actor (e.g. "discord:123456789") or None
+
+    Returns:
+        The process_verification() result dict, or {"status": "error", "message": ...} if the
+        submission cannot be requeued.
+    """
+    row = get_submission(stem)
+    if not row:
+        return {"status": "error", "message": "Submission not found"}
+
+    if row.get("status") in ("approved", "passed"):
+        return {"status": "error", "message": f"Submission is already {row['status']} — requeueing could re-apply it"}
+
+    image_path = find_verification_image(stem)
+    if not image_path:
+        return {"status": "error", "message": "Screenshot is no longer on disk"}
+
+    update_submission(stem, status="pending", ocr_player_id="")
+    add_event(stem, {"type": "requeued", "ts": int(time.time()), **({"by": requeued_by} if requeued_by else {})})
+    logger.info("Requeued submission %s by %s", stem, requeued_by)
+
+    result = process_verification(
+        image_path,
+        row["submitted_player_id"],
+        stem,
+        row["platform"],
+        row["account_id"],
+        row.get("submitter_name") or "",
+        submission_source=row.get("submission_source") or "web",
+        id_change_reason=row.get("id_change_reason") or None,
+    )
+    logger.info("Requeue of %s finished with status=%s", stem, result.get("status"))
+    return result
+
+
 def fail_submission(stem: str, failed_by: str | None = None, final_outcome: str | None = None) -> bool:
     """Mark a submission as failed (validation error or system-detected block).
 
