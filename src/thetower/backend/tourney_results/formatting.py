@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numbers
 import os
 from functools import partial
 from operator import ge, le
@@ -34,6 +35,10 @@ def detailed_format(color, which, how_many):
 
 
 def color_strata(wave, stratas, colors, operator, formatting_function):
+    if not isinstance(wave, numbers.Number):
+        # e.g. "—" placeholder for banned/unplaced rows
+        return None
+
     for strata, color in zip(stratas[::-1], colors[::-1]):
         if operator(wave, strata):
             return formatting_function(color)
