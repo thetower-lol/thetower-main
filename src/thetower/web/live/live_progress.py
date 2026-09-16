@@ -64,11 +64,6 @@ def live_progress():
     )
     st.plotly_chart(fig, width="stretch")
 
-    if os.environ.get("HIDDEN_FEATURES"):
-        players_table = tdf[["display_name", "player_id"]].drop_duplicates().sort_values("display_name").reset_index(drop=True)
-        players_table = players_table.rename(columns={"display_name": "Name", "player_id": "Player ID"})
-        st.dataframe(players_table, width="stretch", hide_index=True)
-
     # Get reference data for fill-up calculation
     pdf = get_reference_tourney_df(league)
 
@@ -105,6 +100,13 @@ def live_progress():
             yaxis_ticksuffix="%",
         )
         st.plotly_chart(fig, width="stretch")
+
+    if os.environ.get("HIDDEN_FEATURES"):
+        with st.expander("Debug data..."):
+            players_table = tdf[["display_name", "player_id"]].drop_duplicates().sort_values("display_name").reset_index(drop=True)
+            players_table = players_table.rename(columns={"display_name": "Name", "player_id": "Player ID"})
+            st.write("Player ids used:")
+            st.dataframe(players_table, width="stretch", hide_index=True)
 
     # Log execution time
     t2_stop = perf_counter()
