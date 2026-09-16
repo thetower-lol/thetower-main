@@ -224,13 +224,16 @@ class Results:
             indices += ["id", "sus_me"]
 
             def styling(row):
+                # Match by id, not position: banned/unplaced rows have position replaced with "—"
+                matched_df = self.df[self.df["id"] == row["id"]]
+                wave_color = matched_df.wave_role_color.iloc[0] if not matched_df.empty else "#FFF"
                 return [
                     None,
                     None,
                     None,  # f"color: {filtered_df[filtered_df['position']==row['#']].name_role_color.iloc[0]}",
                     None,
                     None,
-                    f"color: {self.df[self.df['position'] == row['#']].wave_role_color.iloc[0]}",
+                    f"color: {wave_color}",
                     None,
                     None,
                     None,
