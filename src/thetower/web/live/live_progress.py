@@ -1,5 +1,6 @@
 import datetime
 import logging
+import os
 from time import perf_counter
 
 import pandas as pd
@@ -62,6 +63,11 @@ def live_progress():
         xaxis_tickformat=time_fmt,
     )
     st.plotly_chart(fig, width="stretch")
+
+    if os.environ.get("HIDDEN_FEATURES"):
+        players_table = tdf[["display_name", "player_id"]].drop_duplicates().sort_values("display_name").reset_index(drop=True)
+        players_table = players_table.rename(columns={"display_name": "Name", "player_id": "Player ID"})
+        st.dataframe(players_table, width="stretch", hide_index=True)
 
     # Get reference data for fill-up calculation
     pdf = get_reference_tourney_df(league)
