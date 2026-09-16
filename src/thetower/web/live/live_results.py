@@ -109,7 +109,10 @@ def live_results():
 
     with cols[0]:
         st.write("Current result (ordered)")
+        show_player_ids = st.toggle("Show player IDs", value=False, key=f"show_player_ids_{league}")
         display_cols = ["#", "name", "real_name", "wave"]
+        if show_player_ids:
+            display_cols = display_cols + ["player_id"]
         # TODO: ?results=full is an unpublished workaround for authorized users to see the complete
         # table. A guessable query param leaks total participation — replace with something more
         # secure (e.g. gate behind HIDDEN_FEATURES or real auth).
