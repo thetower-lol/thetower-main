@@ -5,16 +5,11 @@ import os
 import time
 from pathlib import Path
 
-import django
 import schedule
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "thetower.backend.towerdb.settings")
-django.setup()
 
 from thetower.backend.env_config import get_csv_data
 
 from .constants import leagues
-from .dev_bracket import ban_dev_bracket_players
 from .leaderboard_fetch import (
     count_rows,
     fetch_leaderboard,
@@ -25,6 +20,18 @@ from .leaderboard_fetch import (
 )
 
 logging.basicConfig(level=logging.INFO)
+
+# Dev-bracket auto-bans need Django (the moderation records). The gatherer must keep fetching
+# snapshots without it, so a failed setup only disables the bans until the next restart.
+try:
+    import django
+
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "thetower.backend.towerdb.settings")
+    django.setup()
+    from .dev_bracket import ban_dev_bracket_players
+except Exception:
+    logging.warning("Django is not available; dev-bracket auto-bans are disabled until the next restart", exc_info=True)
+    ban_dev_bracket_players = None
 
 
 def get_last_date():
@@ -66,13 +73,14 @@ def execute(league):
         raw_path = keep_raw_response(raw, file_path)
         logging.warning(f"{dropped} rows of the {league} response were dropped while parsing; raw response kept at {raw_path}")
 
-    try:
-        banned = ban_dev_bracket_players(df, league)
-    except Exception:
-        logging.exception(f"Dev-bracket auto-ban failed for {league}; snapshot was stored regardless")
-    else:
-        if banned:
-            logging.info(f"Auto-banned {len(banned)} dev-bracket player(s) in {league}: {', '.join(banned)}")
+    if ban_dev_bracket_players is not None:
+        try:
+            banned = ban_dev_bracket_players(df, league)
+        except Exception:
+            logging.exception(f"Dev-bracket auto-ban failed for {league}; snapshot was stored regardless")
+        else:
+            if banned:
+                logging.info(f"Auto-banned {len(banned)} dev-bracket player(s) in {league}: {', '.join(banned)}")
 
     return True
 
