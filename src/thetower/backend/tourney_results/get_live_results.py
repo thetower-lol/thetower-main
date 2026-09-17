@@ -1,14 +1,20 @@
 #!/tourney/tourney_venv/bin/python
 import datetime
 import logging
+import os
 import time
 from pathlib import Path
 
+import django
 import schedule
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "thetower.backend.towerdb.settings")
+django.setup()
 
 from thetower.backend.env_config import get_csv_data
 
 from .constants import leagues
+from .dev_bracket import ban_dev_bracket_players
 from .leaderboard_fetch import (
     count_rows,
     fetch_leaderboard,
@@ -59,6 +65,14 @@ def execute(league):
     if dropped > 0:
         raw_path = keep_raw_response(raw, file_path)
         logging.warning(f"{dropped} rows of the {league} response were dropped while parsing; raw response kept at {raw_path}")
+
+    try:
+        banned = ban_dev_bracket_players(df, league)
+    except Exception:
+        logging.exception(f"Dev-bracket auto-ban failed for {league}; snapshot was stored regardless")
+    else:
+        if banned:
+            logging.info(f"Auto-banned {len(banned)} dev-bracket player(s) in {league}: {', '.join(banned)}")
 
     return True
 

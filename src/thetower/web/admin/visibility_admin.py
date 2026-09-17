@@ -13,14 +13,16 @@ def _requeue_all_tournaments() -> int:
 def main() -> None:
     st.title("Moderation Visibility")
     st.markdown("""
-        Two decisions, stored in `visibility.json` under the data directory and read by every site process,
-        the placement generators and the bot.
+        Three decisions, stored in `visibility.json` under the data directory and read by every site process,
+        the placement generators, the live data gatherer and the bot.
 
         **Placement** is about the data: whether sus and shunned players receive a position at import and on
         recalculation. Changing it queues every tournament for repositioning.
 
         **Public display** is about the viewer: whether the public site and the bot hide sus and shunned
         players. The hidden and admin sites always show everyone, with a badge on the player page.
+
+        **Automation** is about the live data gatherer: whether it bans developer test accounts as they appear.
         """)
 
     config = visibility.get_visibility()
@@ -36,10 +38,18 @@ def main() -> None:
         hide_shun = st.checkbox("Hide shunned players", value=config["public"]["hide_shun"])
         st.caption("Hard- and soft-banned players are always hidden on the public site and in the bot.")
 
+        st.subheader("Automation (live data gatherer)")
+        ban_dev_bracket = st.checkbox("Ban players found in the DEVDEVDEVDEV bracket", value=config["automation"]["ban_dev_bracket"])
+        st.caption(
+            "Each live leaderboard fetch hard-bans any player id in the developers' test bracket that is not already banned "
+            "(reason 'dev', source Automated, no Zendesk ticket). Rows stay in the data."
+        )
+
         if st.form_submit_button("Save"):
             new_config = {
                 "placement": {"exclude_sus": exclude_sus, "exclude_shun": exclude_shun},
                 "public": {"hide_sus": hide_sus, "hide_shun": hide_shun},
+                "automation": {"ban_dev_bracket": ban_dev_bracket},
             }
             visibility.save_visibility(new_config)
             if new_config["placement"] != config["placement"]:

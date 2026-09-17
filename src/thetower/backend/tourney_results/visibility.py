@@ -3,8 +3,9 @@
 ``<DJANGO_DATA>/visibility.json``::
 
     {
-      "placement": {"exclude_sus": false, "exclude_shun": false},
-      "public":    {"hide_sus": false,    "hide_shun": false}
+      "placement":  {"exclude_sus": false, "exclude_shun": false},
+      "public":     {"hide_sus": false,    "hide_shun": false},
+      "automation": {"ban_dev_bracket": false}
     }
 
 ``placement`` decides whether sus and shunned players receive positions at import and on
@@ -14,6 +15,10 @@ means repositioning every tournament. Hard-banned players never receive a positi
 ``public`` decides whether the public site and the bot hide sus and shunned players. Banned
 players (hard or soft) are always hidden there. The hidden site has no section: it shows every
 player and badges them.
+
+``automation`` holds switches for moderation the live-data gatherer performs on its own. Today
+that is one: ``ban_dev_bracket`` hard-bans every player the live leaderboard places in the
+developers' test bracket (see ``dev_bracket``).
 
 Which profile a process uses is decided by the HIDDEN_FEATURES environment variable it already
 runs with. Callers that want the public answer regardless of their own process, such as the bot,
@@ -47,6 +52,7 @@ PLACEMENT_KEYS = frozenset({"create_tourney_rows", "reposition"})
 DEFAULTS: Dict[str, Dict[str, bool]] = {
     "placement": {"exclude_sus": False, "exclude_shun": False},
     "public": {"hide_sus": False, "hide_shun": False},
+    "automation": {"ban_dev_bracket": False},
 }
 
 _LOCK = threading.Lock()
@@ -180,6 +186,11 @@ def placement_excludes(kind: str) -> bool:
 def public_shows(kind: str) -> bool:
     """Whether the public profile (public site and bot) shows players of this kind."""
     return not get_visibility()["public"][f"hide_{kind}"]
+
+
+def auto_ban_dev_bracket() -> bool:
+    """Whether the live-data gatherer bans players it finds in the developers' test bracket."""
+    return bool(get_visibility()["automation"]["ban_dev_bracket"])
 
 
 def include_enabled_for(kind: str, page: str) -> bool:
