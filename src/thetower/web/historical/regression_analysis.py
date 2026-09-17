@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from thetower.backend.env_config import get_csv_data
+from thetower.backend.tourney_results.archive_utils import STRING_COLUMN_DTYPES
 from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.league_rules import get_league_rules
 from thetower.backend.tourney_results.models import PatchNew as Patch
@@ -52,7 +53,7 @@ def _fetch_patch_data(league: str, patch: Patch, key_places: list[int]) -> list[
         if tourney_date < patch.start_date or tourney_date > patch.end_date:
             continue
 
-        df = pd.read_csv(f)
+        df = pd.read_csv(f, dtype=STRING_COLUMN_DTYPES)
         if df.empty or "bracket" not in df.columns:
             continue
 
