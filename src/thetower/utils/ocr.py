@@ -64,6 +64,14 @@ _VERSION_RE = re.compile(
 # Matches the "ID:" label at the start of the ID line
 _ID_LINE_RE = re.compile(r"\bID[\s:;]+", re.IGNORECASE)
 
+# The "copy id" icon sits within a character width of the id on the Settings screen, so
+# Tesseract routinely runs it into the same word and emits a glyph or two past the id
+# ("...765E9EiB"). _HEX_FIXES then launders those into hex digits, so requiring the whole
+# token to validate discards a candidate whose id was in fact read correctly. Match the
+# leading hex run instead: greedy up to the 16 characters the game emits, but still short
+# enough to accept the shorter ids is_valid_tower_id() allows.
+_HEX_RUN_RE = re.compile(r"[0-9A-F]{13,16}")
+
 # ---------------------------------------------------------------------------
 # Cost limits
 # ---------------------------------------------------------------------------
@@ -250,7 +258,9 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
             if pid:
                 candidate_votes[pid] += 1
 
-        player_id: Optional[str] = candidate_votes.most_common(1)[0][0] if candidate_votes else None
+        # Break ties toward the longer candidate: a truncated read is the common runner-up,
+        # and every id the game issues is 16 characters.
+        player_id: Optional[str] = max(candidate_votes.items(), key=lambda item: (item[1], len(item[0])))[0] if candidate_votes else None
 
         return OcrResult(
             has_valid_labels=has_valid_labels,
@@ -313,10 +323,10 @@ def _parse_id_from_text(text: str) -> Optional[str]:
             continue
         candidate = re.sub(r"^.*?\bID[\s:;]+", "", line, flags=re.IGNORECASE).strip()
         candidate = candidate.split()[0] if candidate.split() else candidate
-        fixed = _fix_hex(candidate)
+        run = _HEX_RUN_RE.match(_fix_hex(candidate))
         # Use centralized validation that matches web verification and services
-        if is_valid_tower_id(fixed):
-            return fixed
+        if run and is_valid_tower_id(run.group(0)):
+            return run.group(0)
     return None
 
 
