@@ -24,10 +24,11 @@ def quantile_analysis():
     # Use common UI setup
     options, league, is_mobile = setup_common_ui()
 
-    render_data_status(league, "live_placement_cache")
-
     # Get quantile data from cache
     quantile_df, tourney_start_date, latest_time = get_quantile_analysis_data(league)
+
+    # These curves are the cache, so the data time shown is the snapshot it was built from.
+    render_data_status(league, "live_placement_cache", latest_time)
 
     # Check for player ID and get player data if available
     player_data = None

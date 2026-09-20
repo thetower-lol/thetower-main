@@ -28,11 +28,12 @@ def live_placement_analysis():
     # Use common UI setup, hide league selector for auto-detect
     options, league, is_mobile = setup_common_ui(show_league_selector=False)
 
-    # Show data refresh and shun status upfront so users see it even if cache isn't ready
-    refresh_timestamp = render_data_status(league, "live_placement_cache")
-
     # Get placement analysis data (plus tourney start date)
-    df, latest_time, bracket_creation_times, tourney_start_date = get_placement_analysis_data(league)
+    df, latest_time, bracket_creation_times, tourney_start_date, cache_snapshot_time = get_placement_analysis_data(league)
+
+    # Placements below are computed from the latest snapshot; only the bracket creation times come
+    # from the cache, so a lagging cache is a footnote rather than a reason to withhold the page.
+    refresh_timestamp = render_data_status(league, "live_placement_cache", cache_snapshot_time, "Bracket creation times")
 
     # Process display names to handle duplicates
     df = process_display_names(df)
@@ -141,7 +142,7 @@ def live_placement_analysis():
 
         for lg in ALL_LEAGUES:
             try:
-                df_tmp, _, _, _ = get_placement_analysis_data(lg)
+                df_tmp, _, _, _, _ = get_placement_analysis_data(lg)
                 df_tmp = process_display_names(df_tmp)
                 # Partial match on player_id
                 match_df = df_tmp[df_tmp["player_id"].str.contains(pid_search, na=False, regex=False)]
@@ -172,7 +173,7 @@ def live_placement_analysis():
             target_league = all_matches[0][2]
             if target_league != league:
                 # Reload data for the correct league
-                df, latest_time, bracket_creation_times, tourney_start_date = get_placement_analysis_data(target_league)
+                df, latest_time, bracket_creation_times, tourney_start_date, _ = get_placement_analysis_data(target_league)
                 df = process_display_names(df)
                 league = target_league
             # Set selected_player to continue with analysis
@@ -193,7 +194,7 @@ def live_placement_analysis():
 
         for lg in ALL_LEAGUES:
             try:
-                df_tmp, _, _, _ = get_placement_analysis_data(lg)
+                df_tmp, _, _, _, _ = get_placement_analysis_data(lg)
                 df_tmp = process_display_names(df_tmp)
                 match_df = df_tmp[df_tmp["player_id"] == selected_id_from_session]
                 if not match_df.empty:
@@ -206,7 +207,7 @@ def live_placement_analysis():
         if found_player and found_league:
             if found_league != league:
                 # Reload data for the correct league
-                df, latest_time, bracket_creation_times, tourney_start_date = get_placement_analysis_data(found_league)
+                df, latest_time, bracket_creation_times, tourney_start_date, _ = get_placement_analysis_data(found_league)
                 df = process_display_names(df)
                 league = found_league
             selected_player = found_player
@@ -236,7 +237,7 @@ def live_placement_analysis():
 
         for lg in ALL_LEAGUES:
             try:
-                df_tmp, _, _, _ = get_placement_analysis_data(lg)
+                df_tmp, _, _, _, _ = get_placement_analysis_data(lg)
                 df_tmp = process_display_names(df_tmp)
                 match_df = df_tmp[
                     (df_tmp["real_name"].str.lower().str.contains(name_lower, na=False, regex=False))
@@ -269,7 +270,7 @@ def live_placement_analysis():
             target_league = all_matches[0][2]
             if target_league != league:
                 # Reload data for the correct league
-                df, latest_time, bracket_creation_times, tourney_start_date = get_placement_analysis_data(target_league)
+                df, latest_time, bracket_creation_times, tourney_start_date, _ = get_placement_analysis_data(target_league)
                 df = process_display_names(df)
                 league = target_league
             # Get display name

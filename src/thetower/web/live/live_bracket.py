@@ -1,5 +1,4 @@
 import logging
-import os
 from pathlib import Path
 from time import perf_counter
 
@@ -12,17 +11,15 @@ from thetower.backend.tourney_results.formatting import BASE_URL, format_wave, m
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
-    format_time_ago,
     get_bracket_overview,
     get_bracket_timeline,
-    get_data_refresh_timestamp,
     get_latest_bracket_filtered_df,
     initialize_bracket_state,
     process_bracket_selection,
     process_display_names,
     require_tournament_data,
 )
-from thetower.web.live.ui_components import setup_common_ui
+from thetower.web.live.ui_components import render_data_status, setup_common_ui
 from thetower.web.util import add_player_id, fmt_dt
 
 
@@ -35,24 +32,7 @@ def live_bracket():
     # Use common UI setup, hide league selector for auto-detect
     options, league, is_mobile = setup_common_ui(show_league_selector=False)
 
-    # Get data refresh timestamp
-    refresh_timestamp = get_data_refresh_timestamp(league)
-    if refresh_timestamp:
-        time_ago = format_time_ago(refresh_timestamp)
-        st.caption(f"📊 Data last refreshed: {time_ago} ({fmt_dt(refresh_timestamp)})")
-        # Indicate whether shunned players are included for this page (only on hidden site)
-        hidden_features = os.environ.get("HIDDEN_FEATURES")
-        if hidden_features:
-            try:
-                include_shun = include_shun_enabled_for("live_bracket")
-                include_sus = include_sus_enabled_for("live_bracket")
-                st.caption(f"🔍 Including shunned players: {'Yes' if include_shun else 'No'}")
-                st.caption(f"🔍 Including sus players: {'Yes' if include_sus else 'No'}")
-            except Exception:
-                # Don't break the page if the config can't be read
-                pass
-    else:
-        st.caption("📊 Data refresh time: Unknown")
+    render_data_status(league, "live_bracket")
 
     # Latest snapshot (anti-snipe filtered) covers membership checks and selection;
     # the matched bracket's timeline is expanded separately once a bracket is chosen.

@@ -1,3 +1,4 @@
+import datetime
 import os
 
 import streamlit as st
@@ -50,23 +51,45 @@ def setup_common_ui(show_league_selector: bool = True):
     return options, league, is_mobile
 
 
-def render_data_status(league: str, page_key: str):
-    """Render the data-refresh timestamp and shun-inclusion captions.
+def render_data_status(
+    league: str, page_key: str, cache_snapshot_time: datetime.datetime | None = None, cache_label: str | None = None
+) -> datetime.datetime | None:
+    """Render the data timestamp, cache-lag and shun-inclusion captions.
 
-    Shared by all live-data pages.  Returns the ``refresh_timestamp`` so callers
-    that need it for fallback logic (e.g. live_placement_analysis) can reuse it.
+    Shared by all live-data pages. ``cache_snapshot_time`` is the snapshot the page's cache was
+    built from. Without ``cache_label`` the page is served entirely from that cache, so that is the
+    time shown as the data time -- what users are looking at, not what the newest snapshot on disk
+    would give them. With a label (e.g. "Bracket creation times") only that part comes from the
+    cache, and it gets its own line under the live data time.
+
+    The generator finishes about a minute after each snapshot lands, so a cache one snapshot behind
+    is routine and stays quiet. Further behind gets a heads-up next to the data, not an error in
+    place of it. The admin page also sees the newest snapshot on disk beside the cache's.
+
+    Returns the timestamp shown so callers that need it for fallback logic can reuse it.
     """
-    from thetower.web.live.data_ops import format_time_ago, get_data_refresh_timestamp
+    from thetower.web.live.data_ops import format_time_ago, get_data_refresh_timestamp, snapshots_behind
 
-    refresh_timestamp = get_data_refresh_timestamp(league)
-    if refresh_timestamp:
-        time_ago = format_time_ago(refresh_timestamp)
-        st.caption(f"📊 Data last refreshed: {time_ago} ({fmt_dt(refresh_timestamp)})")
+    disk_timestamp = get_data_refresh_timestamp(league)
+    shown = cache_snapshot_time if cache_snapshot_time is not None and cache_label is None else disk_timestamp
+    if shown:
+        st.caption(f"📊 Data last refreshed: {format_time_ago(shown)} ({fmt_dt(shown)})")
     else:
         st.caption("📊 Data refresh time: Unknown")
 
+    behind = snapshots_behind(league, cache_snapshot_time) if cache_snapshot_time is not None else 0
+    if cache_label and cache_snapshot_time is not None:
+        st.caption(f"📊 {cache_label} from snapshot: {fmt_dt(cache_snapshot_time)}")
+    if behind > 1:
+        st.caption(f"⏳ {cache_label or 'Data'} {behind} checkpoints behind live data — catching up.")
+
     if os.environ.get("HIDDEN_FEATURES"):
         try:
+            if cache_snapshot_time is not None:
+                st.caption(
+                    f"🔍 Latest snapshot on disk: {fmt_dt(disk_timestamp) or 'none'}. "
+                    f"Showing cache built from snapshot: {fmt_dt(cache_snapshot_time)} ({behind} behind)"
+                )
             include_shun = include_shun_enabled_for(page_key)
             include_sus = include_sus_enabled_for(page_key)
             st.caption(f"🔍Including shunned players: {'Yes' if include_shun else 'No'}")
@@ -74,4 +97,4 @@ def render_data_status(league: str, page_key: str):
         except Exception:
             pass
 
-    return refresh_timestamp
+    return shown

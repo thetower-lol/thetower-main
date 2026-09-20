@@ -12,15 +12,14 @@ from thetower.backend.tourney_results.shun_config import include_shun_enabled_fo
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.historical.proximal_utils import get_proximal_players
 from thetower.web.live.data_ops import (
-    format_time_ago,
-    get_data_refresh_timestamp,
     get_latest_bracket_filtered_df,
     get_peer_live_data,
     latest_snapshot_key,
     process_display_names,
     require_tournament_data,
 )
-from thetower.web.util import add_player_id, fmt_dt
+from thetower.web.live.ui_components import render_data_status
+from thetower.web.util import add_player_id
 
 logger = logging.getLogger(__name__)
 
@@ -163,10 +162,7 @@ def peer_watch():
     found_ids = set(peer_live_df["player_id"].unique())
     missing_ids = [pid for pid in peer_ids if pid not in found_ids]
 
-    # Show data freshness
-    refresh_timestamp = get_data_refresh_timestamp(focal_league)
-    if refresh_timestamp:
-        st.caption(f"📊 Data last refreshed: {format_time_ago(refresh_timestamp)} ({fmt_dt(refresh_timestamp)})")
+    render_data_status(focal_league, "peer_watch")
 
     if peer_live_df.empty:
         st.warning(f"None of the {len(peer_ids)} peers are currently participating in the live tournament.")

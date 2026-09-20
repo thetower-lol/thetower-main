@@ -43,6 +43,24 @@ CACHE_TTL_SECONDS = 300  # 5 minutes cache duration
 SNAPSHOT_CACHE_TTL_SECONDS = 1800
 
 
+class StaleCacheError(ValueError):
+    """The cache exists but has no usable contents yet, so the page has nothing to show."""
+
+
+def snapshots_since(all_files, cache_snapshot_time):
+    """Snapshots that landed after the one a cache was built from, oldest first.
+
+    The generator rewrites one cache file per league in place, so there is always exactly one
+    cache and it is always the newest one finished. Pages therefore serve it unconditionally and
+    use this to say how far behind it is: empty means current, one entry is the ordinary minute
+    between a snapshot landing and the generator finishing, more than that is worth flagging.
+    A cache with no recorded snapshot has, as far as anyone can tell, missed all of them.
+    """
+    if cache_snapshot_time is None:
+        return list(all_files)
+    return [snap for snap in all_files if get_time(snap) > cache_snapshot_time]
+
+
 def is_caching_disabled():
     """Check if caching should be disabled by looking for the control file."""
     root_dir = Path(__file__).parent.parent.parent
@@ -471,8 +489,13 @@ def _placement_frame(df_latest: pd.DataFrame) -> pd.DataFrame:
     return df_latest[df_latest["bracket"].isin(fullish_brackets)].copy()
 
 
-@cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
 def get_placement_analysis_data(league: str):
+    """Placement analysis data, cached until a snapshot lands or the placement cache is rewritten."""
+    return _get_placement_analysis_data_cached(league, placement_cache_key(league))
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_placement_analysis_data_cached(league: str, cache_key: str):
     """
     Get processed data specifically for placement analysis.
 
@@ -549,10 +572,10 @@ def get_placement_analysis_data(league: str):
                             f"get_placement_analysis_data: payload snapshot name={payload_snapshot_name}, latest snapshot name={last_snapshot_name}"
                         )
 
-                        if payload_snapshot_name != last_snapshot_name:
-                            logging.warning("get_placement_analysis_data: cache snapshot does not match latest CSV; refusing to use stale cache")
-                            # Surface an actionable message to the UI via ValueError
-                            raise ValueError("Live Placement Analysis is lagging behind live data.  Please wait while we catch up.")
+                        cache_snapshot_time = get_time(Path(payload_snapshot_name)) if payload_snapshot_name else None
+                        missed = snapshots_since(all_files, cache_snapshot_time)
+                        if missed:
+                            logging.info(f"get_placement_analysis_data: cache is {len(missed)} snapshot(s) behind {last_snapshot_name}")
                         # Parse bracket_creation_times (stored as ISO strings) back to datetimes
                         raw_times = payload.get("bracket_creation_times", {}) or {}
                         bracket_creation_times = {
@@ -569,10 +592,19 @@ def get_placement_analysis_data(league: str):
                         latest_time = df["datetime"].max()
                         logging.debug(f"get_placement_analysis_data: filtered df.shape={getattr(df, 'shape', None)}, latest_time={latest_time}")
 
+                        # Brackets that first appear after the cache was built have no creation time in
+                        # it. They were created no earlier than the first snapshot the cache missed, which
+                        # is exactly right in the usual case of the cache being one snapshot behind.
+                        unseen = set(df["bracket"].unique()) - set(bracket_creation_times)
+                        if unseen:
+                            created = get_time(missed[0]) if missed else last_time
+                            logging.debug(f"get_placement_analysis_data: dating {len(unseen)} brackets the cache has not seen at {created}")
+                            bracket_creation_times.update({bracket: created for bracket in unseen})
+
                         logging.debug(f"Using placement cache for {league} {tourney_date}")
                         # Return the tourney start date (the cache is keyed by start date)
                         tourney_start_date = found_date or tourney_date
-                        return df, latest_time, bracket_creation_times, tourney_start_date
+                        return df, latest_time, bracket_creation_times, tourney_start_date, cache_snapshot_time
                     else:
                         logging.debug("get_placement_analysis_data: cache include_shun/include_sus mismatch; rejecting cache")
                 except Exception:
@@ -603,7 +635,7 @@ def get_placement_analysis_data(league: str):
                         df["real_name"] = df["real_name"].astype("str")
                         latest_time = df["datetime"].max()
                         logging.debug(f"get_placement_analysis_data: archive fallback succeeded, df.shape={df.shape}")
-                        return df, latest_time, bracket_creation_times, found_date
+                        return df, latest_time, bracket_creation_times, found_date, None
                     else:
                         logging.debug("get_placement_analysis_data: archive fallback cache include_shun/include_sus mismatch")
                 except Exception:
@@ -801,8 +833,13 @@ def get_bracket_stats(df):
     return stats
 
 
-@cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
 def get_quantile_analysis_data(league: str):
+    """Quantile analysis data, cached until a snapshot lands or the placement cache is rewritten."""
+    return _get_quantile_analysis_data_cached(league, placement_cache_key(league))
+
+
+@cache_data_if_enabled(ttl=SNAPSHOT_CACHE_TTL_SECONDS)
+def _get_quantile_analysis_data_cached(league: str, cache_key: str):
     """
     Get pre-computed quantile data for placement analysis.
 
@@ -862,7 +899,7 @@ def get_quantile_analysis_data(league: str):
                         quantile_data = payload.get("quantile_data")
                         if not quantile_data or not quantile_data.get("data"):
                             logging.warning("get_quantile_analysis_data: cache exists but has no quantile_data")
-                            raise ValueError("Quantile analysis cache is being generated. Please wait a moment and refresh.")
+                            raise StaleCacheError("Quantile analysis cache is being generated. Please wait a moment and refresh.")
 
                         # Verify cache snapshot matches latest
                         payload_snapshot = payload.get("snapshot_iso")
@@ -879,9 +916,10 @@ def get_quantile_analysis_data(league: str):
                             f"get_quantile_analysis_data: payload snapshot name={payload_snapshot_name}, latest snapshot name={last_snapshot_name}"
                         )
 
-                        if payload_snapshot_name != last_snapshot_name:
-                            logging.warning("get_quantile_analysis_data: cache snapshot does not match latest CSV")
-                            raise ValueError("Quantile analysis is catching up with live data. Please wait a moment and refresh.")
+                        cache_snapshot_time = get_time(Path(payload_snapshot_name)) if payload_snapshot_name else None
+                        missed = snapshots_since(all_files, cache_snapshot_time)
+                        if missed:
+                            logging.info(f"get_quantile_analysis_data: cache is {len(missed)} snapshot(s) behind {last_snapshot_name}")
 
                         # Convert quantile data to DataFrame
                         data = quantile_data.get("data", {})
@@ -896,19 +934,22 @@ def get_quantile_analysis_data(league: str):
 
                         if not results:
                             logging.warning("get_quantile_analysis_data: quantile_data exists but no valid results")
-                            raise ValueError("Quantile analysis cache is empty. Please wait for data generation.")
+                            raise StaleCacheError("Quantile analysis cache is empty. Please wait for data generation.")
 
                         quantile_df = pd.DataFrame(results)
 
-                        # Get latest timestamp from a quick CSV read
-                        df_latest = get_latest_live_df(league, include_shun, include_sus, banned_ids=live_banned_ids())
-                        latest_time = df_latest["datetime"].max()
+                        # The quantiles come out of the cache, so they are as of the snapshot the cache
+                        # was built from -- not the newest snapshot on disk. Report that, and let the page
+                        # compare it against the live data to decide whether the gap is worth a notice.
+                        latest_time = cache_snapshot_time
 
                         tourney_start_date = found_date or tourney_date
                         logging.debug(f"Using quantile cache for {league} {tourney_start_date}")
                         return quantile_df, tourney_start_date, latest_time
                     else:
                         logging.debug("get_quantile_analysis_data: cache include_shun/include_sus mismatch; rejecting cache")
+                except StaleCacheError:
+                    raise
                 except Exception:
                     logging.exception(f"Failed to read/parse quantile cache {cache_file}")
             else:
@@ -941,8 +982,8 @@ def get_quantile_analysis_data(league: str):
                                         results.append({"rank": rank, "quantile": q, "waves": wave_value})
                             if results:
                                 quantile_df = pd.DataFrame(results)
-                                df_latest = get_latest_live_df(league, include_shun, include_sus, banned_ids=live_banned_ids())
-                                latest_time = df_latest["datetime"].max()
+                                fallback_snapshot = payload.get("snapshot_iso")
+                                latest_time = get_time(Path(fallback_snapshot)) if fallback_snapshot else None
                                 logging.debug(f"get_quantile_analysis_data: archive fallback succeeded for {found_date}")
                                 return quantile_df, found_date, latest_time
                             else:
@@ -1011,6 +1052,18 @@ def update_bracket_index(new_index, max_index, league):
     """Update bracket navigation index with bounds checking"""
     bracket_key = f"current_bracket_idx_{league}"
     st.session_state[bracket_key] = max(0, min(new_index, max_index))
+
+
+def snapshots_behind(league: str, cache_snapshot_time: datetime.datetime | None) -> int:
+    """How many live snapshots have landed since the cache a page is serving was built."""
+    if cache_snapshot_time is None:
+        return 0
+    try:
+        snaps = list_snapshots(_get_snapshot_path(league))
+    except Exception as exc:
+        logging.warning(f"Failed to measure cache lag for {league}: {exc}")
+        return 0
+    return len(snapshots_since(snaps, cache_snapshot_time))
 
 
 @cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
@@ -1114,6 +1167,23 @@ def latest_snapshot_key(league: str) -> str:
     except Exception:
         pass
     return "no-data"
+
+
+def placement_cache_key(league: str) -> str:
+    """Token that changes when a snapshot lands or the placement cache file is rewritten.
+
+    The placement and quantile loaders combine the newest snapshot with the cache the generator
+    wrote for it, so their entries must invalidate on either event: a snapshot landing, and the
+    generator finishing about a minute later.
+    """
+    key = latest_snapshot_key(league)
+    try:
+        caches = sorted(_get_archive_path(league).glob("*_placement_cache.json"), key=lambda p: p.name)
+        if caches:
+            key = f"{key}|{caches[-1].name}|{caches[-1].stat().st_mtime_ns}"
+    except Exception:
+        pass
+    return key
 
 
 def _load_archive_df(league: str) -> tuple[pd.DataFrame, list]:
