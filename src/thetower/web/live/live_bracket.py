@@ -356,18 +356,22 @@ def live_bracket():
     st.plotly_chart(fig, width="stretch")
 
     # Process and display latest data
-    # Create a copy and use loc for setting index
+    # Create a copy and use loc for the datetime conversion
     ldf = tdf[tdf.datetime == last_moment].copy()
     ldf.loc[:, "datetime"] = pd.to_datetime(ldf["datetime"])
     ldf = ldf.reset_index(drop=True)
-    ldf.index = pd.RangeIndex(start=1, stop=len(ldf) + 1)
+    # Tie-aware placement, the same rank the bot reports: players on the same wave share the best
+    # position. The row number this replaces gave tied players consecutive placements, and which of
+    # them came out on top was down to the sort's arbitrary tie order, so it could change snapshot
+    # to snapshot without anyone's wave moving.
+    ldf["#"] = ldf["wave"].rank(method="min", ascending=False).astype(int)
     ldf = process_display_names(ldf)
 
     # Use loc for safer column selection
-    display_df = ldf.loc[:, ["player_id", "name", "real_name", "wave"]]
+    display_df = ldf.loc[:, ["#", "player_id", "name", "real_name", "wave"]]
 
-    # Create table HTML
-    styled = display_df.style.format(make_player_url, subset=["player_id"]).format(format_wave, subset=["wave"])
+    # Create table HTML; the index is hidden because the "#" column carries the placement now
+    styled = display_df.style.format(make_player_url, subset=["player_id"]).format(format_wave, subset=["wave"]).hide(axis="index")
     st.write(styled.to_html(escape=False), unsafe_allow_html=True)
 
     css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
