@@ -18,6 +18,7 @@ from thetower.web.live.data_ops import (
     process_bracket_selection,
     process_display_names,
     require_tournament_data,
+    tie_positions,
 )
 from thetower.web.live.ui_components import render_data_status, setup_common_ui
 from thetower.web.util import add_player_id, fmt_dt
@@ -360,11 +361,7 @@ def live_bracket():
     ldf = tdf[tdf.datetime == last_moment].copy()
     ldf.loc[:, "datetime"] = pd.to_datetime(ldf["datetime"])
     ldf = ldf.reset_index(drop=True)
-    # Tie-aware placement, the same rank the bot reports: players on the same wave share the best
-    # position. The row number this replaces gave tied players consecutive placements, and which of
-    # them came out on top was down to the sort's arbitrary tie order, so it could change snapshot
-    # to snapshot without anyone's wave moving.
-    ldf["#"] = ldf["wave"].rank(method="min", ascending=False).astype(int)
+    ldf["#"] = tie_positions(ldf["wave"])
     ldf = process_display_names(ldf)
 
     # Use loc for safer column selection

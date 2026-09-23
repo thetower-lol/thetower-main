@@ -12,6 +12,7 @@ from thetower.web.live.data_ops import (
     get_live_standings,
     get_reference_tourney_df,
     require_tournament_data,
+    tie_positions,
 )
 from thetower.web.live.ui_components import render_data_status, setup_common_ui
 
@@ -41,17 +42,7 @@ def live_results():
     prior_joined_ids: set[str] = set()
     if not prior_snapshot_df.empty:
         prior_df = prior_snapshot_df.sort_values("wave", ascending=False).reset_index(drop=True)
-        p_current, p_borrow, p_last_wave = 0, 1, None
-        p_pos_list: list[int] = []
-        for wave in prior_df["wave"]:
-            if p_last_wave is not None and wave == p_last_wave:
-                p_borrow += 1
-            else:
-                p_current += p_borrow
-                p_borrow = 1
-            p_pos_list.append(p_current)
-            p_last_wave = wave
-        prior_df["_pos"] = p_pos_list
+        prior_df["_pos"] = tie_positions(prior_df["wave"])
         prior_positions = dict(zip(prior_df["player_id"], prior_df["_pos"]))
         prior_waves = dict(zip(prior_df["player_id"], prior_df["wave"]))
         prior_joined_ids = set(prior_df["player_id"])
@@ -150,21 +141,8 @@ def live_results():
         pdf["joined"] = [_join_status(pid) for pid in pdf.id]
         pdf = pdf.rename(columns={"wave": "wave_last"})
 
-        # Calculate positions with tie handling (same wave = same rank)
         pdf = pdf.sort_values("wave_last", ascending=False).reset_index(drop=True)
-        positions = []
-        current = 0
-        borrow = 1
-        last_wave = None
-        for wave in pdf["wave_last"]:
-            if last_wave is not None and wave == last_wave:
-                borrow += 1
-            else:
-                current += borrow
-                borrow = 1
-            positions.append(current)
-            last_wave = wave
-        pdf.index = positions
+        pdf.index = tie_positions(pdf["wave_last"])
 
         topx = canvas.selectbox("top x", [1000, 500, 200, 100, 50, 25], key=f"topx_{league}")
         join_filter = canvas.selectbox("Filter", ["all players", "newly joined", "needing to get in"], key=f"join_filter_{league}")
@@ -193,14 +171,13 @@ def live_results():
             display_df = top_x_df
 
         final_df = display_df[["real_name", "wave_last", "joined"]].copy()
-        final_df.insert(0, "#", final_df.index)
+        final_df.insert(0, "#", final_df.index)  # the placement, before reset_index drops it
         final_df = final_df.reset_index(drop=True)
-        final_df.index = final_df.index + 1
-        show_cols = ["real_name", "wave_last", "joined"] if join_filter == "all players" else ["#", "real_name", "wave_last", "joined"]
         canvas.dataframe(
-            final_df[show_cols],
+            final_df[["#", "real_name", "wave_last", "joined"]],
             height=600,
             width="stretch",
+            hide_index=True,
             column_config={"#": st.column_config.NumberColumn("#")},
         )
 

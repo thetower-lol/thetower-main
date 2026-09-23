@@ -17,6 +17,7 @@ from thetower.web.live.data_ops import (
     latest_snapshot_key,
     process_display_names,
     require_tournament_data,
+    tie_positions,
 )
 from thetower.web.live.ui_components import render_data_status
 from thetower.web.util import add_player_id
@@ -194,14 +195,15 @@ def peer_watch():
     last_moment = peer_live_df["datetime"].max()
     latest_df = peer_live_df[peer_live_df["datetime"] == last_moment].copy()
     latest_df = latest_df.sort_values("wave", ascending=False).reset_index(drop=True)
-    latest_df.index = pd.RangeIndex(start=1, stop=len(latest_df) + 1)
+    latest_df["#"] = tie_positions(latest_df["wave"])
     latest_df = process_display_names(latest_df)
 
-    display_cols = [c for c in ["player_id", "display_name", "wave", "league", "datetime"] if c in latest_df.columns]
+    display_cols = ["#"] + [c for c in ["player_id", "display_name", "wave", "league", "datetime"] if c in latest_df.columns]
     display_df = latest_df.loc[:, display_cols]
 
     css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-    styled = display_df.style.format(make_player_url, subset=["player_id"]).format(format_wave, subset=["wave"])
+    # The index is hidden because the "#" column carries the placement now
+    styled = display_df.style.format(make_player_url, subset=["player_id"]).format(format_wave, subset=["wave"]).hide(axis="index")
     st.write(styled.to_html(escape=False), unsafe_allow_html=True)
     with open(css_path, "r") as infile:
         st.write(f"<style>{infile.read()}</style>", unsafe_allow_html=True)

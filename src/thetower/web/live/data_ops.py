@@ -304,23 +304,21 @@ def _get_latest_standings_snapshot(league: str, shun: bool, sus: bool, snapshot_
     """Cached body of get_latest_standings_df; snapshot_key exists only to key the cache."""
     ldf = get_latest_live_df(league, shun, sus, banned_ids=live_banned_ids())
     ldf = ldf.sort_values("wave", ascending=False).reset_index(drop=True)
-    ldf.index = _tie_positions(ldf["wave"])
+    ldf.index = tie_positions(ldf["wave"])
     return ldf
 
 
-def _tie_positions(waves) -> list[int]:
-    """Tie-aware positions for a wave series sorted descending: tied players share the first position of their group."""
-    positions: list[int] = []
-    current, borrow, last_wave = 0, 1, None
-    for wave in waves:
-        if last_wave is not None and wave == last_wave:
-            borrow += 1
-        else:
-            current += borrow
-            borrow = 1
-        positions.append(current)
-        last_wave = wave
-    return positions
+def tie_positions(waves) -> list[int]:
+    """Tie-aware placements: players on the same wave share the best position of their group.
+
+    The one placement rule for every live view. It is what ``calculate_positions`` writes to the
+    standings at import and what the bot reports, so a player's number is the same wherever they
+    read it. Numbering a table's rows 1..N instead splits a tie group across consecutive
+    placements, and which member comes out on top is down to the sort's arbitrary tie order.
+
+    Positions come back in the order of the rows handed in, so the caller need not sort first.
+    """
+    return pd.Series(waves).rank(method="min", ascending=False).astype(int).tolist()
 
 
 def _get_prior_snapshot(league: str, shun: bool, sus: bool) -> pd.DataFrame:
