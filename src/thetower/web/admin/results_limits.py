@@ -104,7 +104,19 @@ def _render_participation_section() -> None:
         st.warning("No rows found for this date.")
         return
 
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    rows.append(
+        {
+            "League": "Total",
+            "Participants": sum(row["Participants"] for row in rows),
+            "≈ Brackets": sum(row["≈ Brackets"] for row in rows),
+            "Public": "",
+            "Current cap": None,
+            "Cap hides total?": "",
+        }
+    )
+    df = pd.DataFrame(rows).astype({"Current cap": "Int64"})
+
+    st.dataframe(df, hide_index=True, width="stretch")
 
 
 def main() -> None:
