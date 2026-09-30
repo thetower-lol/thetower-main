@@ -31,6 +31,12 @@ def _next_prefix(s: str) -> str:
     return s[:-1] + chr(ord(s[-1]) + 1)
 
 
+# Unpublished results do not exist as far as the public site is concerned: no nickname, id or league label may
+# come from one. The hidden site reviews results before publishing, so it searches them all.
+_PUBLIC_ONLY = not os.environ.get("HIDDEN_FEATURES")
+_PUBLISHED = {"result__public": True} if _PUBLIC_ONLY else {}
+_PUBLISHED_SQL = " AND result_id IN (SELECT id FROM tourney_results_tourneyresult WHERE public)" if _PUBLIC_ONLY else ""
+
 RECENT_TOURNEYS = 4  # even on purpose: an odd window just echoes the most recent tourney for a strict alternator
 _LEAGUE_RANK = {league: rank for rank, league in enumerate(league_order)}  # 0 = top league
 
@@ -47,7 +53,7 @@ def _league_labels(player_ids: list[str]) -> dict[str, str]:
     if not player_ids:
         return {}
     rows = (
-        TourneyRow.objects.filter(player_id__in=player_ids, position__lte=get_max_results_limit())
+        TourneyRow.objects.filter(player_id__in=player_ids, position__lte=get_max_results_limit(), **_PUBLISHED)
         .values_list("player_id", "result__league", "result__date")
         .order_by("-result__date")
     )
@@ -149,6 +155,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                 player_id__gte=search_term,
                 player_id__lt=_next_prefix(search_term),
                 position__lte=get_max_results_limit(),
+                **_PUBLISHED,
             )
             .values_list("player_id", "nickname")
             .order_by("player_id", "-result__date")[:5000]
@@ -167,6 +174,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                 TourneyRow.objects.filter(
                     player_id__icontains=search_term,
                     position__lte=get_max_results_limit(),
+                    **_PUBLISHED,
                 )
                 .exclude(player_id__istartswith=search_term)
                 .values_list("player_id", "nickname")
@@ -230,7 +238,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                 cursor.execute(
                     "SELECT player_id, nickname FROM tourney_results_tourneyrow "
                     "WHERE UPPER(nickname) >= %s AND UPPER(nickname) < %s "
-                    "AND position <= %s LIMIT %s",
+                    f"AND position <= %s{_PUBLISHED_SQL} LIMIT %s",
                     [lo, hi, get_max_results_limit(), limit * 20],
                 )
                 raw = cursor.fetchall()
@@ -279,7 +287,7 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
                 limit = page - len(all_results)
                 conditions = " AND ".join(["UPPER(nickname) LIKE %s"] * len(fragments))
                 params: list = [f"%{frag.upper()}%" for frag in fragments] + [get_max_results_limit(), limit * 20]
-                sql = f"SELECT player_id, nickname FROM tourney_results_tourneyrow WHERE {conditions} AND position <= %s LIMIT %s"
+                sql = f"SELECT player_id, nickname FROM tourney_results_tourneyrow WHERE {conditions} AND position <= %s{_PUBLISHED_SQL} LIMIT %s"
 
                 t4 = time.perf_counter()
                 with connection.cursor() as cursor:
