@@ -11,6 +11,7 @@ from thetower.backend.tourney_results.formatting import BASE_URL, format_wave, m
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
+    entry_excluded_ids,
     get_bracket_overview,
     get_bracket_timeline,
     get_latest_bracket_filtered_df,
@@ -22,6 +23,13 @@ from thetower.web.live.data_ops import (
 )
 from thetower.web.live.ui_components import get_league_for_player, render_data_status, setup_common_ui
 from thetower.web.util import add_player_id, fmt_dt
+
+
+def _display_name(player_id: str) -> str:
+    """Known name for an id this site may show; the bare id for one it hides (banned, or sus/shun per the toggles)."""
+    if player_id in entry_excluded_ids():
+        return player_id
+    return get_player_id_lookup().get(player_id, player_id)
 
 
 @require_tournament_data
@@ -45,9 +53,7 @@ def live_bracket():
 
     except (IndexError, ValueError):
         if options.current_player_id:
-            # Get player's known name
-            lookup = get_player_id_lookup()
-            known_name = lookup.get(options.current_player_id, options.current_player_id)
+            known_name = _display_name(options.current_player_id)
             st.error(f"{known_name} ({options.current_player_id}) hasn't participated in this tournament.")
         else:
             st.error("No tournament data available.")
@@ -60,8 +66,7 @@ def live_bracket():
         if not player_in_filtered_data:
             # Player either doesn't exist or is in a partial bracket during entry period
             # Don't disclose which to prevent sniping
-            lookup = get_player_id_lookup()
-            known_name = lookup.get(options.current_player_id, options.current_player_id)
+            known_name = _display_name(options.current_player_id)
             st.error(f"{known_name} ({options.current_player_id}) hasn't participated in this tournament.")
             return
 
@@ -290,9 +295,7 @@ def live_bracket():
                         pass
             return
         elif selected_player_id:
-            # Get player's known name
-            lookup = get_player_id_lookup()
-            known_name = lookup.get(selected_player_id, selected_player_id)
+            known_name = _display_name(selected_player_id)
             st.error(f"{known_name} (#{selected_player_id}) hasn't participated in this tournament.")
             return
         else:
@@ -332,9 +335,7 @@ def live_bracket():
                         pass
             return
         elif selected_player_id:
-            # Get player's known name
-            lookup = get_player_id_lookup()
-            known_name = lookup.get(selected_player_id, selected_player_id)
+            known_name = _display_name(selected_player_id)
             st.error(f"{known_name} (#{selected_player_id}) hasn't participated in this tournament.")
             return
         else:
