@@ -20,7 +20,7 @@ from thetower.web.live.data_ops import (
     require_tournament_data,
     tie_positions,
 )
-from thetower.web.live.ui_components import render_data_status, setup_common_ui
+from thetower.web.live.ui_components import get_league_for_player, render_data_status, setup_common_ui
 from thetower.web.util import add_player_id, fmt_dt
 
 
@@ -109,8 +109,16 @@ def live_bracket():
 
     # Handle selection methods via text inputs
     if selected_id_from_session:
-        # Player ID selected from multi-match list - use it for cross-league search
+        # Player ID selected from the cross-league multi-match list. The Select button stores only
+        # the ID, so the page is still on its default league; reload the player's own league.
         selected_player_id = selected_id_from_session
+        player_league = get_league_for_player(selected_player_id)
+        if player_league and player_league != league:
+            league = player_league
+            df = get_latest_bracket_filtered_df(league, include_shun, include_sus)
+            bracket_order, fullish_brackets = get_bracket_overview(league, include_shun, include_sus)
+            _fullish = set(fullish_brackets)
+            bracket_order = [b for b in bracket_order if b in _fullish]
     elif options.current_player:
         selected_real_name = options.current_player
     elif options.current_player_id:
