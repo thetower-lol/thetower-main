@@ -158,6 +158,15 @@ def _excluded_ids(shun: bool, sus: bool) -> set:
     return excluded
 
 
+def entry_excluded_ids() -> set:
+    """Ids that do not count as entered on this site, for check_live_entry / check_all_live_entry.
+
+    The same set the live tables hide: bans per the site policy, plus sus and shunned players
+    unless the toggles include them. On the hidden site that is empty.
+    """
+    return _excluded_ids(include_shun_enabled_for("live"), include_sus_enabled_for("live"))
+
+
 def get_bracket_overview(league: str, shun: bool = False, sus: bool = False) -> tuple[list, list]:
     """
     Bracket ordering and fullish-bracket list for a league, from the delta archive.
