@@ -31,6 +31,7 @@ from thetower.backend.tourney_results.results_config import get_max_results_limi
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import check_all_live_entry
 from thetower.web.historical.search import compute_search
+from thetower.web.live.data_ops import live_banned_ids
 from thetower.web.util import escape_df_html, get_options
 
 hidden_features = os.environ.get("HIDDEN_FEATURES")
@@ -362,7 +363,7 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
         # Handle missing relic gracefully
         relic_url = ""
 
-    joined_tourney = bool(check_all_live_entry(player_df.iloc[0].id))
+    joined_tourney = bool(check_all_live_entry(player_df.iloc[0].id, excluded_ids=live_banned_ids()))
     tourney_join = "✅" if joined_tourney else "⛔"
 
     # Get creator code from the player's KnownPlayer via GameInstance

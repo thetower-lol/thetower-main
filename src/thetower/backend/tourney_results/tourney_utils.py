@@ -546,9 +546,8 @@ def check_live_entry(league: str, player_id: str, fast: bool = False, excluded_i
                 )
                 return False
 
-            # Player found in raw data; check sus/banned exclusion once (matches shun=True behaviour)
-            excluded_ids = get_sus_ids() | get_banned_ids()
-            if player_id in excluded_ids:
+            # Player found in raw data; check the exclusion set once
+            if player_id in _entry_exclusions(excluded_ids):
                 return False
         else:
             t_glob = t_read = perf_counter()
@@ -574,18 +573,20 @@ def check_live_entry(league: str, player_id: str, fast: bool = False, excluded_i
         return False
 
 
-def check_all_live_entry(player_id: str) -> bool:
+def check_all_live_entry(player_id: str, excluded_ids: set | None = None) -> bool:
     """Check if player has entered any live tournament.
 
     Args:
         player_id: Player ID to check
+        excluded_ids: Ids that do not count as entered, passed through to check_live_entry.
+            None keeps its default of sus plus hard-banned ids.
 
     Returns:
         True if player has entered any tournament, False otherwise
     """
     t1_start = perf_counter()
     for league in leagues:
-        if check_live_entry(league, player_id, fast=True):
+        if check_live_entry(league, player_id, fast=True, excluded_ids=excluded_ids):
             t1_stop = perf_counter()
             logging.info(f"check_all_live_entry({player_id}): found in {league}, total={1000*(t1_stop-t1_start):.0f}ms")
             return True
