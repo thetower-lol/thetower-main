@@ -154,19 +154,20 @@ def compute_comparison(player_id=None, canvas=st):
 
         canvas.code(f"https://{BASE_URL}/comparison?" + urlencode({"compare": users}, doseq=True))
 
-    player_ids = PlayerId.objects.filter(id__in=users).select_related("game_instance__player")
+    # Banned players are hidden from the public site regardless of the sus/shun toggles; sus per the toggle.
+    # The same set is subtracted from the final id list below, so an id given in the URL cannot bypass it.
+    hidden_ids = set() if hidden_features else get_all_banned_ids()
     if not include_sus_enabled_for("comparison"):
-        player_ids = player_ids.exclude(id__in=sus_ids)
-    # Banned players are hidden from the public site regardless of the sus/shun toggles
-    banned_ids = set() if hidden_features else get_all_banned_ids()
-    if banned_ids:
-        player_ids = player_ids.exclude(id__in=banned_ids)
+        hidden_ids = hidden_ids | sus_ids
+    player_ids = PlayerId.objects.filter(id__in=users).select_related("game_instance__player")
+    if hidden_ids:
+        player_ids = player_ids.exclude(id__in=hidden_ids)
     # Get all game instances from the player_ids
     game_instances = [pid.game_instance for pid in player_ids if pid.game_instance]
     # Get all known players from these game instances
     known_players = {gi.player for gi in game_instances if gi.player}
     # Get all PlayerIds across all game instances for these players
-    all_player_ids = (set(PlayerId.objects.filter(game_instance__player__in=known_players).values_list("id", flat=True)) | set(users)) - banned_ids
+    all_player_ids = (set(PlayerId.objects.filter(game_instance__player__in=known_players).values_list("id", flat=True)) | set(users)) - hidden_ids
 
     # Cross-league query: uses the highest per-league cap rather than per-league bounds.
     hidden_query = {} if hidden_features else {"result__public": True, "position__lt": get_max_results_limit()}
