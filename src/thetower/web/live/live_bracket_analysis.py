@@ -37,17 +37,14 @@ def bracket_analysis():
 
     render_data_status(league, "live_bracket_analysis")
 
-    # Latest snapshot standings — everything on this page derives from them. Brackets still
-    # filling while entry is open are left out, as on every other live page.
+    # Latest snapshot standings — everything on this page derives from them. Only fullish brackets
+    # (>= 28 players) count, before and after entry closes: a bracket that never filled would always
+    # win "lowest total" and "lowest median".
     include_shun = include_shun_enabled_for("live_bracket_analysis")
     include_sus = include_sus_enabled_for("live_bracket_analysis")
     ldf = get_latest_bracket_filtered_df(league, include_shun, include_sus).sort_values("wave", ascending=False)
-
-    # Sidebar option to include single-player brackets
-    show_singles = st.sidebar.checkbox("Show full fidelity", value=False)
-    if not show_singles:
-        bracket_sizes = ldf.groupby("bracket", observed=True)["wave"].transform("count")
-        ldf = ldf[bracket_sizes > 1]
+    bracket_sizes = ldf.groupby("bracket", observed=True)["player_id"].transform("nunique")
+    ldf = ldf[bracket_sizes >= 28]
 
     if ldf.empty:
         st.info("No brackets have filled yet.")
