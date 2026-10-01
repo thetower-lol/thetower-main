@@ -12,10 +12,18 @@ from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
     get_bracket_stats,
     get_cached_plot_data,
-    get_latest_standings_df,
+    get_latest_bracket_filtered_df,
     require_tournament_data,
+    tie_positions,
 )
 from thetower.web.live.ui_components import render_data_status, setup_common_ui
+
+
+def show_bracket_table(ldf: pd.DataFrame, bracket_id: str) -> None:
+    """Render one bracket's players numbered by their place within the bracket."""
+    bracket_df = ldf[ldf.bracket == bracket_id][["real_name", "wave", "datetime"]]
+    bracket_df.insert(0, "#", tie_positions(bracket_df["wave"]))
+    st.dataframe(bracket_df, hide_index=True)
 
 
 @require_tournament_data
@@ -29,16 +37,21 @@ def bracket_analysis():
 
     render_data_status(league, "live_bracket_analysis")
 
-    # Latest snapshot standings — everything on this page derives from them
+    # Latest snapshot standings — everything on this page derives from them. Brackets still
+    # filling while entry is open are left out, as on every other live page.
     include_shun = include_shun_enabled_for("live_bracket_analysis")
     include_sus = include_sus_enabled_for("live_bracket_analysis")
-    ldf = get_latest_standings_df(league, include_shun, include_sus)
+    ldf = get_latest_bracket_filtered_df(league, include_shun, include_sus).sort_values("wave", ascending=False)
 
     # Sidebar option to include single-player brackets
     show_singles = st.sidebar.checkbox("Show full fidelity", value=False)
     if not show_singles:
         bracket_sizes = ldf.groupby("bracket", observed=True)["wave"].transform("count")
         ldf = ldf[bracket_sizes > 1]
+
+    if ldf.empty:
+        st.info("No brackets have filled yet.")
+        return
 
     # Get bracket statistics
     bracket_stats = get_bracket_stats(ldf)
@@ -82,17 +95,17 @@ def bracket_analysis():
 
     with cols[0]:
         st.write(f"Highest total waves: {bracket_stats['highest_total']}")
-        st.dataframe(ldf[ldf.bracket == bracket_stats["highest_total"]][["real_name", "wave", "datetime"]])
+        show_bracket_table(ldf, bracket_stats["highest_total"])
 
         st.write(f"Lowest total waves: {bracket_stats['lowest_total']}")
-        st.dataframe(ldf[ldf.bracket == bracket_stats["lowest_total"]][["real_name", "wave", "datetime"]])
+        show_bracket_table(ldf, bracket_stats["lowest_total"])
 
     with cols[1]:
         st.write(f"Highest median waves: {bracket_stats['highest_median']}")
-        st.dataframe(ldf[ldf.bracket == bracket_stats["highest_median"]][["real_name", "wave", "datetime"]])
+        show_bracket_table(ldf, bracket_stats["highest_median"])
 
         st.write(f"Lowest median waves: {bracket_stats['lowest_median']}")
-        st.dataframe(ldf[ldf.bracket == bracket_stats["lowest_median"]][["real_name", "wave", "datetime"]])
+        show_bracket_table(ldf, bracket_stats["lowest_median"])
 
     # --- Salt Ranking ---
     st.markdown("---")
@@ -109,7 +122,7 @@ def bracket_analysis():
             wave = bracket_stats["hardest_promotion_wave"]
             st.write(f"**Hardest Promotion** — last-promoted wave: **{wave}**")
             st.caption(f"Bracket: {bracket_id}")
-            st.dataframe(ldf[ldf.bracket == bracket_id][["real_name", "wave", "datetime"]])
+            show_bracket_table(ldf, bracket_id)
         else:
             st.info("Not enough data for promotion bracket (need at least 4 players per bracket).")
 
@@ -121,7 +134,7 @@ def bracket_analysis():
             wave = bracket_stats["hardest_relegation_wave"]
             st.write(f"**Hardest Relegation** — first-demoted wave: **{wave}**")
             st.caption(f"Bracket: {bracket_id}")
-            st.dataframe(ldf[ldf.bracket == bracket_id][["real_name", "wave", "datetime"]])
+            show_bracket_table(ldf, bracket_id)
         else:
             st.info("Not enough data for relegation bracket (need at least 25 players per bracket).")
 
@@ -140,7 +153,7 @@ def bracket_analysis():
             wave = bracket_stats["easiest_promotion_wave"]
             st.write(f"**Easiest Promotion** — last-promoted wave: **{wave}**")
             st.caption(f"Bracket: {bracket_id}")
-            st.dataframe(ldf[ldf.bracket == bracket_id][["real_name", "wave", "datetime"]])
+            show_bracket_table(ldf, bracket_id)
         else:
             st.info("Not enough data for promotion bracket (need at least 4 players per bracket).")
 
@@ -152,7 +165,7 @@ def bracket_analysis():
             wave = bracket_stats["easiest_relegation_wave"]
             st.write(f"**Easiest Relegation** — first-demoted wave: **{wave}**")
             st.caption(f"Bracket: {bracket_id}")
-            st.dataframe(ldf[ldf.bracket == bracket_id][["real_name", "wave", "datetime"]])
+            show_bracket_table(ldf, bracket_id)
         else:
             st.info("Not enough data for relegation bracket (need at least 25 players per bracket).")
 
