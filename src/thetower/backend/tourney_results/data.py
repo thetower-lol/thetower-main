@@ -697,6 +697,7 @@ def get_tourneys(
     ids: list[int] | None = None,
     filter_banned: bool = False,
     include_unplaced: bool = False,
+    apply_public_cap: bool = True,
 ) -> pd.DataFrame:
     """Rows for the given results, position-bounded and optionally without sus or banned players.
 
@@ -705,11 +706,14 @@ def get_tourneys(
     include_unplaced also returns rows that hold no position (-1: banned, or sus/shunned when the
     config excludes them at placement time), listed after the placed rows of each tournament; the
     hidden site's results table passes it so a ban does not erase a player from the table.
+    apply_public_cap clamps the position window to the leagues' public results limits unless the
+    process is the hidden site. The bot passes False: it loads whole tournaments so roles see every
+    placing, and withholds unpublished positions itself when it displays them.
     """
     hidden_features = os.environ.get("HIDDEN_FEATURES")
     upper_limit = offset + limit
 
-    if not hidden_features:
+    if apply_public_cap and not hidden_features:
         result_leagues = {result.league for result in tourney_results}
         cutoff = max(get_results_limit(league) for league in result_leagues) if result_leagues else how_many_results_public_site
         upper_limit = min(upper_limit, cutoff)
