@@ -17,8 +17,7 @@ message = state.get("message") or DEFAULT_MESSAGE
 _web_dir = Path(__file__).parent
 _logo_path = _web_dir / "static" / "images" / "TT.png"
 if _logo_path.exists():
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
+    with st.container(horizontal_alignment="center"):
         st.image(str(_logo_path), width=400)
 
 st.markdown(f"## 🔧 {header}")

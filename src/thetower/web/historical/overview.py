@@ -359,8 +359,7 @@ def compute_overview(options: Options) -> None:
     # Display logo header with top anchor
     logo_path = Path(__file__).parent.parent / "static" / "images" / "TT.png"
     if logo_path.exists():
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
+        with st.container(horizontal_alignment="center"):
             st.markdown("<a id='top'></a>", unsafe_allow_html=True)
             st.image(str(logo_path), width=400)
 
