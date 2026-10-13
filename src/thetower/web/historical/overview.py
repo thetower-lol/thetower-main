@@ -57,7 +57,6 @@ def render_tournament_countdown():
 <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.2);">
     <div style="font-size: 0.85rem; color: #f0f0f0; margin-bottom: 0.3rem;">{top_league} Battle Conditions:</div>
     <div style="font-size: 0.95rem; color: white; font-weight: 500;">{bc_names}</div>
-    <a href="bcs" target="_self" style="font-size: 0.8rem; color: #ffd700; text-decoration: underline; margin-top: 0.3rem; display: inline-block;">View all league BCs →</a>
 </div>"""
             except Exception:
                 pass  # Silently fail BC prediction
@@ -159,8 +158,14 @@ body{{margin:0;padding:0;font-family:sans-serif;}}
 }})();
 </script>
 </body></html>""",
-            height=310 if bcs_html else 230,
+            height=290 if bcs_html else 230,
         )
+
+        if bcs_html:
+            # Outside the iframe: components.html is a sandboxed iframe, so a link inside it can only
+            # navigate the iframe itself (the whole app ends up nested inside the countdown box)
+            with st.container(horizontal_alignment="center"):
+                st.page_link("live/bcs.py", label="View all league BCs →")
 
     except Exception as e:
         st.warning(f"⚠️ Could not load tournament countdown: {str(e)}")
