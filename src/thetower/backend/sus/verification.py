@@ -170,6 +170,7 @@ def get_user_context(platform: str, account_id: str, submitted_player_id: str, i
         - intent: str | None - User's intent (id_change_reason)
         - is_self_service: bool - True if intent allows self-service (no mod review)
         - is_scenario_b: bool - True if existing user with intent (Scenario B from design doc)
+        - needs_new_instance: bool - True if a linked player with no clean game instance submits a new ID without intent
     """
     from thetower.backend.sus.constants import IdChangeReason
 
@@ -181,6 +182,10 @@ def get_user_context(platform: str, account_id: str, submitted_player_id: str, i
 
     # New user: no existing IDs at all
     is_new_user = not has_existing_ids and not already_has_this_id
+
+    # Linked player whose game instances are all banned: the bot shows them the new-user form, and
+    # auto_complete_if_eligible puts the new ID on a fresh game instance.
+    needs_new_instance = id_change_reason is None and not already_has_this_id and account_needs_new_instance(platform, account_id)
 
     # Self-service: intent allows auto-complete without mod review
     is_self_service = id_change_reason in SELF_SERVICE_INTENTS
@@ -195,6 +200,7 @@ def get_user_context(platform: str, account_id: str, submitted_player_id: str, i
         "intent": id_change_reason,
         "is_self_service": is_self_service,
         "is_scenario_b": is_scenario_b,
+        "needs_new_instance": needs_new_instance,
     }
 
 
@@ -245,7 +251,7 @@ def determine_initial_status(ocr_result: dict[str, Any], submitted_player_id: st
 
     # Rule 1b: OCR disabled → treat as exact match (trust user input)
     if error_category == "ocr_disabled":
-        if is_self_service or user_context["is_new_user"]:
+        if is_self_service or user_context["is_new_user"] or user_context["needs_new_instance"]:
             # Self-service or new user: auto-complete (caller will handle)
             return {
                 "status": "ocr_unavailable",  # Track that OCR was unavailable
@@ -294,7 +300,7 @@ def determine_initial_status(ocr_result: dict[str, Any], submitted_player_id: st
 
     # Rule 3: OCR exact match → auto-complete or Intent review
     if ocr_player_id == submitted_player_id:
-        if is_self_service or user_context["is_new_user"]:
+        if is_self_service or user_context["is_new_user"] or user_context["needs_new_instance"]:
             # Self-service or new user: auto-complete immediately
             return {
                 "status": "ocr_processing",  # Not used, caller will auto-complete
@@ -371,6 +377,7 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
 
     Checks if submission is eligible for auto-complete:
     - New user (no old_player_id) → create player, mark approved
+    - Linked player with no clean game instance (no old_player_id) → new instance, retire the banned ones, mark approved
     - Existing user with REFRESH_VERIFICATION → mark approved (player already exists)
     - Existing user with NEW_GAME_INSTANCE → create new instance, mark approved
     - Existing user with mod-review intent → return ineligible (requires Intent review)
@@ -402,17 +409,33 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
     if not verified_player_id:
         return {"eligible": False, "status": row["status"], "message": "No verified_player_id set (OCR not verified yet)"}
 
-    # Rule 4a: New user → auto-complete
+    # Rule 4a: New user, or linked player with no clean game instance → auto-complete
     if not old_player_id:
-        logger.info("Auto-completing new user submission: stem=%s verified_id=%s", stem, verified_player_id)
+        from thetower.backend.sus.models import LinkedAccount
+
+        has_link = LinkedAccount.objects.filter(platform=platform, account_id=account_id, active=True).exists()
+        new_instance = has_link and account_needs_new_instance(platform, account_id)
+        if has_link and not new_instance:
+            # Linked player with a clean game instance must go through an ID-change intent instead.
+            logger.warning("Auto-complete refused: linked account %s:%s has a clean game instance but no intent, stem=%s", platform, account_id, stem)
+            update_submission(stem, status="failed", final_outcome="failed")
+            add_event(stem, {"type": "failed", "ts": int(time.time()), "reason": "intent_required"})
+            return {"eligible": True, "status": "failed", "message": "Failed: intent_required"}
+
+        if new_instance:
+            # Every existing instance is banned: retire them (still counted by ban checks, hidden from the
+            # user and the role-source picker) and make the new ID's instance primary and the role source.
+            logger.info("Auto-completing linked player with no clean instance as new game instance: stem=%s verified_id=%s", stem, verified_player_id)
+        else:
+            logger.info("Auto-completing new user submission: stem=%s verified_id=%s", stem, verified_player_id)
         try:
             result = create_or_update_player(
                 platform,
                 account_id,
                 submitter_name,
                 verified_player_id,
-                update_role_source=False,
-                action_type=None,  # New user
+                update_role_source=new_instance,
+                action_type="new_instance_retire_old" if new_instance else None,
                 old_player_id=None,
             )
 
@@ -470,6 +493,9 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
                 return {"eligible": True, "status": "failed", "message": f"Failed: {result['error']}"}
 
             update_submission(stem, status="approved", final_outcome="approved")
+            if new_instance:
+                add_event(stem, {"type": "approved", "ts": int(time.time()), "new_instance": True, "retired_banned_instances": True})
+                return {"eligible": True, "status": "approved", "message": "New game instance created, banned instances retired"}
             add_event(stem, {"type": "approved", "ts": int(time.time()), "new_user": True})
             return {"eligible": True, "status": "approved", "message": "New user verified"}
 
@@ -2267,6 +2293,22 @@ def player_has_existing_ids(platform: str, account_id: str, new_player_id: str =
     return True
 
 
+def account_needs_new_instance(platform: str, account_id: str) -> bool:
+    """Return True if this account is linked to a player that has no clean (unbanned) game instance.
+
+    Such a player is treated as unverified by the bot, so a new ID they submit goes on a fresh game
+    instance rather than through an ID-change intent. Whether that is allowed at all is the bot's
+    ``ban_is_account_wide`` check at submission time.
+    """
+    from thetower.backend.sus.models import LinkedAccount
+    from thetower.backend.sus.services import player_ban_state
+
+    link = LinkedAccount.objects.filter(platform=platform, account_id=account_id, active=True).select_related("player").first()
+    if not link:
+        return False
+    return not player_ban_state(link.player, account_wide=False)["clean_instances"]
+
+
 def player_already_has_id(platform: str, account_id: str, player_id: str) -> bool:
     """Return True if this account already has this specific player_id verified."""
     from thetower.backend.sus.models import LinkedAccount, PlayerId
@@ -2479,6 +2521,8 @@ def process_verification(
 
         # Phase 2: Get user context (pure function)
         user_context = get_user_context(platform, account_id, player_id, id_change_reason)
+        if user_context["needs_new_instance"]:
+            add_event(stem, {"type": "linked_no_clean_instance", "ts": int(time.time())})
 
         # Phase 3: Determine initial status (pure function, implements Rules 1-3)
         status_decision = determine_initial_status(ocr_result, player_id, user_context)

@@ -658,6 +658,62 @@ def check_ban_status(platform: str, account_id: str, new_player_id: str) -> dict
     }
 
 
+def player_ban_state(player, account_wide: bool, ban_ids: set[str] | None = None) -> dict[str, Any]:
+    """Classify a player's game instances by ban status and decide whether the account is blocked.
+
+    A game instance is one game save; its Tower IDs are the IDs that save has had, so an active ban
+    on any one of them bans the whole instance. Which ID is primary does not matter, and inactive
+    (retired) instances count too. Instances with no Tower IDs are neither clean nor banned.
+
+    ``blocked`` answers "should this account be denied the verified role and verification?":
+
+    - ``account_wide=False``: blocked only when the player has a banned instance and no clean one.
+    - ``account_wide=True``: blocked when any instance is banned.
+
+    Args:
+        player: The ``KnownPlayer`` to classify.
+        account_wide: The bot's ``ban_is_account_wide`` setting.
+        ban_ids: Active ban Tower IDs, when the caller already has them (avoids a query per player in loops).
+
+    Returns:
+        dict with:
+            'clean_instances': list[GameInstance] — instances with Tower IDs and no active ban.
+            'banned_instances': list[GameInstance] — instances with at least one actively banned Tower ID.
+            'banned_ids': list[str] — the actively banned Tower IDs across all instances.
+            'blocked': bool — see above.
+    """
+    from thetower.backend.sus.models import ModerationRecord
+
+    if ban_ids is None:
+        ban_ids = ModerationRecord.get_active_moderation_ids("ban")
+
+    clean_instances = []
+    banned_instances = []
+    banned_ids: list[str] = []
+    for instance in player.game_instances.all():
+        instance_ids = [pid.id for pid in instance.player_ids.all()]
+        if not instance_ids:
+            continue
+        instance_banned_ids = [pid for pid in instance_ids if pid in ban_ids]
+        if instance_banned_ids:
+            banned_instances.append(instance)
+            banned_ids.extend(instance_banned_ids)
+        else:
+            clean_instances.append(instance)
+
+    if account_wide:
+        blocked = bool(banned_instances)
+    else:
+        blocked = bool(banned_instances) and not clean_instances
+
+    return {
+        "clean_instances": clean_instances,
+        "banned_instances": banned_instances,
+        "banned_ids": banned_ids,
+        "blocked": blocked,
+    }
+
+
 def get_instance_primary_id(instance_id: int) -> str | None:
     """Return the primary Tower ID for a game instance, or None if not found.
 
