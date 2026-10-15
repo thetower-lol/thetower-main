@@ -173,7 +173,7 @@ def create_or_update_player(
             player.game_instances.update(primary=False)
             existing_names = player.game_instances.values_list("name", flat=True)
             max_num = max(
-                (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)$", name)] if m),
+                (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)\b", name)] if m),
                 default=0,
             )
             primary_instance = GameInstance.objects.create(
@@ -222,7 +222,7 @@ def create_or_update_player(
             # Create new primary instance
             existing_names = player.game_instances.values_list("name", flat=True)
             max_num = max(
-                (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)$", name)] if m),
+                (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)\b", name)] if m),
                 default=0,
             )
             primary_instance = GameInstance.objects.create(
@@ -400,9 +400,13 @@ def rename_game_instance(instance_id: int, new_name: str) -> dict[str, Any]:
         return {"status": "error", "message": "Name too long (max 50 characters)"}
 
     try:
-        updated = GameInstance.objects.filter(id=instance_id).update(name=new_name)
-        if not updated:
+        instance = GameInstance.objects.filter(id=instance_id).first()
+        if instance is None:
             return {"status": "error", "message": "Game instance not found"}
+        # Names identify instances to the player and mods, so keep them unique per player
+        if GameInstance.objects.filter(player_id=instance.player_id, name__iexact=new_name).exclude(id=instance_id).exists():
+            return {"status": "error", "message": "Another of your game instances already has that name"}
+        GameInstance.objects.filter(id=instance_id).update(name=new_name)
         logger.info("Renamed game instance: instance=%d name=%r", instance_id, new_name)
         return {"status": "ok", "name": new_name}
     except Exception as exc:
