@@ -346,6 +346,16 @@ class ModerationRecord(models.Model):
     # Notes and context
     reason = models.TextField(null=True, blank=True, max_length=1000, help_text="Reason for this moderation action")
 
+    # Verification exemption (bans only): the ban stays in force for results, but verification and the
+    # verified role ignore it, e.g. when the game devs banned an old account after recreating it for the player
+    ignore_for_verification = models.BooleanField(
+        default=False, help_text="Ban stays active for results but does not count when deciding whether the player is banned for verification"
+    )
+    ignore_for_verification_by_discord_id = models.CharField(
+        max_length=20, null=True, blank=True, help_text="Discord ID of the bot owner who last changed the verification exemption"
+    )
+    ignore_for_verification_at = models.DateTimeField(null=True, blank=True, help_text="When the verification exemption was last changed")
+
     # Zendesk ticket creation queue fields
     needs_zendesk_ticket = models.BooleanField(default=True, help_text="Moderation record needs a Zendesk ticket created")
     zendesk_ticket_id = models.IntegerField(null=True, blank=True, help_text="Zendesk ticket ID once created")
@@ -620,6 +630,19 @@ class ModerationRecord(models.Model):
         """Get tower_ids with active moderation of specified type"""
         return set(
             cls.objects.filter(moderation_type=moderation_type, resolved_at__isnull=True).values_list("tower_id", flat=True)  # Active = not resolved
+        )
+
+    @classmethod
+    def get_verification_ban_ids(cls):
+        """Get tower_ids whose active bans count for verification and the verified role.
+
+        Same as get_active_moderation_ids("ban") minus bans flagged ignore_for_verification; a tower_id
+        with another active, unflagged ban still counts.
+        """
+        return set(
+            cls.objects.filter(moderation_type=cls.ModerationType.BAN, resolved_at__isnull=True, ignore_for_verification=False).values_list(
+                "tower_id", flat=True
+            )
         )
 
     def _queue_recalculation(self):

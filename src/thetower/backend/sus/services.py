@@ -635,7 +635,7 @@ def check_ban_status(platform: str, account_id: str, new_player_id: str) -> dict
     """
     from thetower.backend.sus.models import LinkedAccount, ModerationRecord
 
-    ban_ids = ModerationRecord.get_active_moderation_ids("ban")
+    ban_ids = ModerationRecord.get_verification_ban_ids()
     new_id_banned = new_player_id in ban_ids
 
     previously_banned_ids: list[str] = []
@@ -663,7 +663,8 @@ def player_ban_state(player, account_wide: bool, ban_ids: set[str] | None = None
 
     A game instance is one game save; its Tower IDs are the IDs that save has had, so an active ban
     on any one of them bans the whole instance. Which ID is primary does not matter, and inactive
-    (retired) instances count too. Instances with no Tower IDs are neither clean nor banned.
+    (retired) instances count too. Instances with no Tower IDs are neither clean nor banned. Bans flagged
+    ignore_for_verification are left out.
 
     ``blocked`` answers "should this account be denied the verified role and verification?":
 
@@ -673,7 +674,8 @@ def player_ban_state(player, account_wide: bool, ban_ids: set[str] | None = None
     Args:
         player: The ``KnownPlayer`` to classify.
         account_wide: The bot's ``ban_is_account_wide`` setting.
-        ban_ids: Active ban Tower IDs, when the caller already has them (avoids a query per player in loops).
+        ban_ids: Ban Tower IDs that count for verification (ModerationRecord.get_verification_ban_ids()), when the
+            caller already has them (avoids a query per player in loops).
 
     Returns:
         dict with:
@@ -685,7 +687,7 @@ def player_ban_state(player, account_wide: bool, ban_ids: set[str] | None = None
     from thetower.backend.sus.models import ModerationRecord
 
     if ban_ids is None:
-        ban_ids = ModerationRecord.get_active_moderation_ids("ban")
+        ban_ids = ModerationRecord.get_verification_ban_ids()
 
     clean_instances = []
     banned_instances = []
