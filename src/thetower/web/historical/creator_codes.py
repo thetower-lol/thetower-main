@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from thetower.backend.sus.models import KnownPlayer, PlayerId
-from thetower.backend.tourney_results.data import get_sus_ids
+from thetower.backend.tourney_results.data import get_banned_ids
 
 STORE_URL = "https://store.techtreegames.com/thetower/"
 COLUMNS = ["Player", "Creator code"]
@@ -15,18 +15,18 @@ COLUMNS = ["Player", "Creator code"]
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_creator_codes() -> pd.DataFrame:
-    """One row per player with a creator code; players without a primary tower id, or whose primary id is sus, are left out."""
+    """One row per player with a creator code; players without a primary tower id, or whose primary game instance is banned, are left out."""
     players = list(KnownPlayer.objects.exclude(creator_code__isnull=True).exclude(creator_code="").values("id", "name", "creator_code"))
     primary_ids = dict(
         PlayerId.objects.filter(game_instance__player__in=[p["id"] for p in players], game_instance__primary=True, primary=True).values_list(
             "game_instance__player_id", "id"
         )
     )
-    sus_ids = set(get_sus_ids())
+    banned_ids = set(get_banned_ids())
     rows = [
         {"Player": p["name"] or "", "Creator code": p["creator_code"].strip()}
         for p in players
-        if p["id"] in primary_ids and primary_ids[p["id"]] not in sus_ids
+        if p["id"] in primary_ids and primary_ids[p["id"]] not in banned_ids
     ]
     table = pd.DataFrame(rows, columns=COLUMNS)
     return table.sort_values("Creator code", key=lambda codes: codes.str.lower()).reset_index(drop=True)
