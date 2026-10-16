@@ -8,15 +8,14 @@ import streamlit as st
 
 from thetower.backend.sus.models import KnownPlayer, PlayerId
 from thetower.backend.tourney_results.data import get_sus_ids
-from thetower.backend.tourney_results.formatting import make_player_url
 
 STORE_URL = "https://store.techtreegames.com/thetower/"
-COLUMNS = ["Player", "Creator code", "id"]
+COLUMNS = ["Player", "Creator code"]
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_creator_codes() -> pd.DataFrame:
-    """One row per player with a creator code, listed under their primary tower id; sus players are left out."""
+    """One row per player with a creator code; players without a primary tower id, or whose primary id is sus, are left out."""
     players = list(KnownPlayer.objects.exclude(creator_code__isnull=True).exclude(creator_code="").values("id", "name", "creator_code"))
     primary_ids = dict(
         PlayerId.objects.filter(game_instance__player__in=[p["id"] for p in players], game_instance__primary=True, primary=True).values_list(
@@ -25,7 +24,7 @@ def load_creator_codes() -> pd.DataFrame:
     )
     sus_ids = set(get_sus_ids())
     rows = [
-        {"Player": p["name"] or "", "Creator code": p["creator_code"].strip(), "id": primary_ids[p["id"]]}
+        {"Player": p["name"] or "", "Creator code": p["creator_code"].strip()}
         for p in players
         if p["id"] in primary_ids and primary_ids[p["id"]] not in sus_ids
     ]
@@ -49,8 +48,7 @@ def get_creator_codes():
 
     table["Player"] = table["Player"].map(escape)
     table["Creator code"] = table["Creator code"].map(lambda code: f"<span style='color:#cd4b3d; font-weight:bold;'>{escape(code)}</span>")
-    to_be_displayed = table.style.format(make_player_url, subset=["id"])
-    st.write(to_be_displayed.to_html(escape=False, index=False), unsafe_allow_html=True)
+    st.write(table.style.hide(axis="index").to_html(escape=False), unsafe_allow_html=True)
 
 
 get_creator_codes()
