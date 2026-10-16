@@ -53,6 +53,7 @@ if st.session_state.get("options") is None:
 home_info_pages = [
     _page("historical/overview.py", title="Overview", icon="🏠", url_path="overview"),
     _page("discord_bot.py", title="Discord Bot", icon="🆕", url_path="discordbot"),
+    _page("historical/creator_codes.py", title="Creator Codes", icon="🏪", url_path="creatorcodes"),
     _page("historical/about.py", title="About", icon="👴", url_path="about"),
 ]
 
@@ -74,7 +75,6 @@ player_statistics_pages = [
     _page("historical/player.py", title="Individual Player Stats", icon="⛹️", url_path="player"),
     _page("historical/comparison.py", title="Player Comparison", icon="🔃", url_path="comparison"),
     _page("historical/namechangers.py", title="Namechangers", icon="💩", url_path="namechangers"),
-    _page("historical/creator_codes.py", title="Creator Codes", icon="🏪", url_path="creatorcodes"),
 ]
 
 historical_data_pages = [
