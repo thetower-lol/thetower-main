@@ -74,6 +74,7 @@ player_statistics_pages = [
     _page("historical/player.py", title="Individual Player Stats", icon="⛹️", url_path="player"),
     _page("historical/comparison.py", title="Player Comparison", icon="🔃", url_path="comparison"),
     _page("historical/namechangers.py", title="Namechangers", icon="💩", url_path="namechangers"),
+    _page("historical/creator_codes.py", title="Creator Codes", icon="🏪", url_path="creatorcodes"),
 ]
 
 historical_data_pages = [
