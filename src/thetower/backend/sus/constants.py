@@ -21,7 +21,7 @@ REASON_DESCRIPTIONS = {
     IdChangeReason.NEW_GAME_INSTANCE: "I play on multiple devices and want to link them together",
     IdChangeReason.GAME_CHANGED_ID: "The game assigned me a new ID, but I have results on my old ID too",
     IdChangeReason.FIXING_TYPO: "I entered the wrong ID when verifying. My old ID has no real data",
-    IdChangeReason.STARTING_FRESH: "I have a new game account and want to use this ID. Please retire/hide my old ID",
+    IdChangeReason.STARTING_FRESH: "I have a new game account and want to use this ID. Please retire my old ID",
     IdChangeReason.REFRESH_VERIFICATION: "Updating verification screenshot for existing Tower ID",
 }
 
