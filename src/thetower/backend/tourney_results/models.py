@@ -2,13 +2,19 @@ import datetime
 
 from colorfield.fields import ColorField
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.functions import Upper
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
 from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from ..sus.models import KnownPlayer
 from .constants import leagues_choices, wave_border_choices
+
+# end_date of the newest patch: it runs until another patch is added (see recompute_patch_end_dates).
+PATCH_OPEN_END = datetime.date(9999, 12, 31)
 
 
 class PatchNew(models.Model):
@@ -19,10 +25,21 @@ class PatchNew(models.Model):
     version_patch = models.SmallIntegerField(blank=False, null=False, help_text="The yy in 0.xx.yy version.", default=0)
     interim = models.BooleanField(blank=False, null=False, default=False, help_text="Maybe it's just an interim version between the patches?")
     start_date = models.DateField(blank=False, null=False, help_text="First tourney when patch was enforced.")
-    end_date = models.DateField(blank=False, null=False, help_text="Last tourney when patch was in use.")
+    end_date = models.DateField(
+        blank=False,
+        null=False,
+        default=PATCH_OPEN_END,
+        editable=False,
+        help_text="Derived from the start dates: the day before the next patch starts, or 9999-12-31 for the newest patch.",
+    )
 
     def __str__(self):
         return f"0.{self.version_minor}.{self.version_patch}{'' if not self.interim else ' interim'}"
+
+    def clean(self):
+        # End dates are derived from the start order, so two patches cannot share a start date.
+        if PatchNew.objects.filter(start_date=self.start_date).exclude(pk=self.pk).exists():
+            raise ValidationError({"start_date": "Another patch already starts on this date."})
 
     def __gt__(self, other):
         if self.version_minor > other.version_minor:
@@ -54,6 +71,22 @@ class PatchNew(models.Model):
                     return True
 
         return False
+
+
+def recompute_patch_end_dates() -> None:
+    """Set every patch's end_date to the day before the next patch starts; the newest is open-ended."""
+    patches = list(PatchNew.objects.order_by("start_date", "pk").values_list("pk", "start_date", "end_date"))
+    for (pk, start, end), following in zip(patches, patches[1:] + [None]):
+        derived = max(start, following[1] - datetime.timedelta(days=1)) if following else PATCH_OPEN_END
+        if end != derived:
+            PatchNew.objects.filter(pk=pk).update(end_date=derived)
+
+
+@receiver(post_save, sender=PatchNew)
+@receiver(post_delete, sender=PatchNew)
+def _patch_changed(sender, raw=False, **kwargs):
+    if not raw:  # fixture loads set end_date themselves
+        recompute_patch_end_dates()
 
 
 class Role(models.Model):
