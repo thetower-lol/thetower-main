@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 STREAMLIT_TARGET_DIR = Path("/opt/thetower")
 VERSION_MARKER = STREAMLIT_TARGET_DIR / ".thetower_version"
-LOCK_FILE = Path("/tmp/thetower_init_streamlit.lock")
+# /run/lock is the standard (tmpfs) home for lock files and, unlike /tmp, is not made per-service by PrivateTmp=,
+# so the public and hidden sites keep sharing this lock.
+LOCK_FILE = Path("/run/lock/thetower_init_streamlit.lock")
 
 
 def setup_streamlit():
