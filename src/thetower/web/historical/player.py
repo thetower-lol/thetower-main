@@ -11,7 +11,6 @@ import streamlit as st
 from thetower.backend.sus.models import PlayerId
 from thetower.backend.tourney_results.constants import (
     Graph,
-    all_relics,
     leagues,
 )
 from thetower.backend.tourney_results.data import (
@@ -32,6 +31,7 @@ from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import check_all_live_entry
 from thetower.web.historical.search import compute_search
 from thetower.web.live.data_ops import entry_excluded_ids
+from thetower.web.towermedia import avatar_img, relic_img
 from thetower.web.util import escape_df_html, get_options
 
 hidden_features = os.environ.get("HIDDEN_FEATURES")
@@ -343,25 +343,8 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
             unsafe_allow_html=True,
         )
 
-    # avatar = player_df.iloc[0].avatar
-    relic = player_df.iloc[0].relic
-
-    # if avatar in [35, 36, 39, 42, 44, 45, 46]:
-    #     extension = "webp"
-    # else:
-    #     extension = "png"
-
-    # avatar_string = f"<img src='./app/static/Tower_Skins/{avatar}.{extension}' width=100>" if avatar > 0 else ""
-    avatar_string = ""
-
-    # Check if the relic exists in all_relics dictionary to avoid KeyError
-    if relic in all_relics:
-        # title = f"title='{all_relics[relic][0]}, {all_relics[relic][2]} {all_relics[relic][3]}'"
-        # relic_url = f"<img src='./app/static/Tower_Relics/{all_relics[relic][1]}' width=100, {title}>" if relic >= 0 else ""
-        relic_url = ""
-    else:
-        # Handle missing relic gracefully
-        relic_url = ""
+    avatar_string = avatar_img(player_df.iloc[0].avatar, size=100)
+    relic_url = relic_img(player_df.iloc[0].relic, size=100)
 
     joined_tourney = bool(check_all_live_entry(player_df.iloc[0].id, excluded_ids=entry_excluded_ids()))
     tourney_join = "✅" if joined_tourney else "⛔"

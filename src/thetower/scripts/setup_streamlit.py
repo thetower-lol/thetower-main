@@ -7,6 +7,7 @@ from the installed package to /opt/thetower/, ensuring Streamlit services
 have access to pages.py and config. Idempotent: skips extraction if version
 hasn't changed.
 """
+
 import fcntl
 import logging
 import shutil
@@ -21,6 +22,32 @@ VERSION_MARKER = STREAMLIT_TARGET_DIR / ".thetower_version"
 # /run/lock is the standard (tmpfs) home for lock files and, unlike /tmp, is not made per-service by PrivateTmp=,
 # so the public and hidden sites keep sharing this lock.
 LOCK_FILE = Path("/run/lock/thetower_init_streamlit.lock")
+
+
+def link_towermedia(web_dir: Path) -> None:
+    """Point static/towermedia at the TTGtowermedia checkout's media/ folder (set via TOWERMEDIA).
+
+    Only media/ is linked: media_lookup.json, which maps IDs to the random file names, must never be
+    reachable through Streamlit's static serving.  Runs on every start so a TOWERMEDIA change applies
+    without a version bump; with TOWERMEDIA unset the link is removed and the site shows no icons.
+    """
+    from thetower.backend.env_config import get_towermedia_dir
+    from thetower.web.towermedia import STATIC_SUBDIR
+
+    link = web_dir / "static" / STATIC_SUBDIR
+    root = get_towermedia_dir()
+    target = root / "media" if root else None
+    if link.is_symlink():
+        if target and link.readlink() == target:
+            return
+        link.unlink()
+    if target is None:
+        return
+    if not target.is_dir():
+        logger.warning(f"TOWERMEDIA media folder not found at {target}; relic and skin icons disabled")
+        return
+    link.symlink_to(target, target_is_directory=True)
+    logger.info(f"Linked {link} -> {target}")
 
 
 def setup_streamlit():
@@ -59,6 +86,7 @@ def setup_streamlit():
                 web_dst_check = STREAMLIT_TARGET_DIR / "src" / "thetower" / "web"
                 if existing_version == installed_version and web_dst_check.exists():
                     logger.info(f"Streamlit pages already up-to-date (version {installed_version})")
+                    link_towermedia(web_dst_check)
                     return 0
 
             # Get the thetower package location
@@ -105,6 +133,8 @@ def setup_streamlit():
 
             # Write version marker
             VERSION_MARKER.write_text(installed_version)
+
+            link_towermedia(web_dst)
 
             logger.info("✓ Streamlit pages extracted successfully")
             return 0

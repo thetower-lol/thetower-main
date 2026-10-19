@@ -75,3 +75,5 @@ include_shun.json
 
 # Generated
 src/thetower/_version.py
+# TTGtowermedia link created by setup_streamlit (TOWERMEDIA); the media itself lives in the private repo
+src/thetower/web/static/towermedia

@@ -58,6 +58,19 @@ def get_bot_config_data() -> Path | None:
     return Path(val) if val else None
 
 
+def get_towermedia_dir() -> Path | None:
+    """
+    Get the TOWERMEDIA environment variable as a Path.
+
+    Points at a checkout of the private TTGtowermedia repo (relic and tower-skin icons).
+
+    Returns:
+        Path to the checkout, or None if not set (icons are then not shown).
+    """
+    val = os.getenv("TOWERMEDIA")
+    return Path(val) if val else None
+
+
 def get_r2_config() -> dict:
     """Get and validate all required Cloudflare R2 environment variables.
 

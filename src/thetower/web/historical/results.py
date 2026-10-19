@@ -1,6 +1,5 @@
 import datetime
 import os
-import re
 from pathlib import Path
 from typing import Optional
 
@@ -9,7 +8,6 @@ import streamlit as st
 from thetower.backend.tourney_results.constants import (
     Graph,
     Options,
-    all_relics,
     how_many_results_hidden_site,
     sus_person,
 )
@@ -19,6 +17,7 @@ from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.results_config import get_results_limit
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
+from thetower.web.towermedia import avatar_img, relic_img
 from thetower.web.util import escape_df_html, get_league_selection, get_options
 
 
@@ -116,29 +115,6 @@ class Results:
                         to_be_displayed.loc[to_be_displayed[to_be_displayed.position == position].index[0], "real_name"] + medal
                     )
 
-        def make_avatar(avatar_id):
-            all_avatars = {
-                int(re.findall(r"\d+", item.name.split(".")[0])[0]) for item in (Path("components") / "static" / "Tower_Skins").glob("*.*")
-            }
-
-            if avatar_id == -1 or avatar_id not in all_avatars:
-                return ""
-
-            if avatar_id in [35, 36, 39, 42, 44, 45, 46]:
-                extension = "webp"
-            else:
-                extension = "png"
-
-            # return f"<img src='./app/static/Tower_Skins/{avatar_id}.{extension}' style='width:32px; height:32px; object-fit:contain'>"
-            return ""
-
-        def make_relic(relic_id):
-            if relic_id == -1 or relic_id not in all_relics:
-                return ""
-
-            # return f"<img src='./app/static/Tower_Relics/{all_relics[relic_id][1]}' width='32' title='{all_relics[relic_id][0]}, {all_relics[relic_id][2]} {all_relics[relic_id][3]}'"
-            return ""
-
         to_be_displayed["real_name"] = [
             sus_person if id_ in self.sus_ids else name for id_, name in zip(to_be_displayed.id, to_be_displayed.real_name)
         ]
@@ -153,8 +129,8 @@ class Results:
                 f"🚫 {name}" if id_ in banned_ids else name for id_, name in zip(to_be_displayed.id, to_be_displayed.real_name)
             ]
             to_be_displayed["position"] = ["—" if position < 1 else position for position in to_be_displayed.position]
-        to_be_displayed["avatar"] = to_be_displayed.avatar.map(make_avatar)
-        to_be_displayed["relic"] = to_be_displayed.relic.map(make_relic)
+        to_be_displayed["avatar"] = to_be_displayed.avatar.map(avatar_img)
+        to_be_displayed["relic"] = to_be_displayed.relic.map(relic_img)
 
         to_be_displayed = to_be_displayed.rename(columns={"position": "#", "verified": "✓", "avatar": "⬡"})
         to_be_displayed["real_name"] = [make_player_url(name, id=id_) for name, id_ in zip(to_be_displayed.real_name, to_be_displayed.id)]
