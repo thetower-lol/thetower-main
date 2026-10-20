@@ -170,8 +170,10 @@ class LinkedAccount(models.Model):
         return f"{self.get_platform_display()}: {self.account_id}"
 
     def effective_reddit_flair(self) -> str:
-        """The Reddit flair choice in force: "none" and "role" only count while a role is granted, otherwise rank."""
-        if self.reddit_flair_role.strip() and self.reddit_flair in (self.RedditFlair.NONE, self.RedditFlair.ROLE):
+        """The Reddit flair choice in force: anyone may choose "none"; "role" only counts while a role is granted, otherwise rank."""
+        if self.reddit_flair == self.RedditFlair.NONE:
+            return self.reddit_flair
+        if self.reddit_flair == self.RedditFlair.ROLE and self.reddit_flair_role.strip():
             return self.reddit_flair
         return self.RedditFlair.RANK
 
