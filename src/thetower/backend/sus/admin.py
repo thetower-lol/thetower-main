@@ -269,7 +269,17 @@ class LinkedAccountInline(nested_admin.NestedTabularInline):
     verbose_name = "Linked Social Account"
     verbose_name_plural = "Linked Social Accounts"
     extra = 1
-    fields = ("platform", "account_id", "display_name", "verified", "verified_at", "primary", "role_source_instance")
+    fields = (
+        "platform",
+        "account_id",
+        "display_name",
+        "verified",
+        "verified_at",
+        "primary",
+        "role_source_instance",
+        "reddit_flair",
+        "reddit_flair_role",
+    )
     readonly_fields = ("verified_at",)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):

@@ -142,6 +142,24 @@ class LinkedAccount(models.Model):
         help_text="Which game instance provides Discord roles for this account. Null = no roles assigned.",
     )
 
+    class RedditFlair(models.TextChoices):
+        RANK = "rank", "Tournament rank"
+        NONE = "none", "None (keep my own)"
+        ROLE = "role", "Granted role"
+
+    reddit_flair = models.CharField(
+        max_length=8,
+        choices=RedditFlair.choices,
+        default=RedditFlair.RANK,
+        help_text="Reddit accounts only: which flair the subreddit's flair app gives this account (set by the player)",
+    )
+    reddit_flair_role = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Reddit accounts only: special flair granted by the bot owner, e.g. 'Mod'; must match a flair template's text in the subreddit",
+    )
+
     class Meta:
         unique_together = [("platform", "account_id")]
         indexes = [
@@ -150,6 +168,12 @@ class LinkedAccount(models.Model):
 
     def __str__(self):
         return f"{self.get_platform_display()}: {self.account_id}"
+
+    def effective_reddit_flair(self) -> str:
+        """The Reddit flair choice in force: "none" and "role" only count while a role is granted, otherwise rank."""
+        if self.reddit_flair_role.strip() and self.reddit_flair in (self.RedditFlair.NONE, self.RedditFlair.ROLE):
+            return self.reddit_flair
+        return self.RedditFlair.RANK
 
     def get_role_instance(self):
         """Get the GameInstance that determines this account's roles. Returns None if no roles should be assigned."""
