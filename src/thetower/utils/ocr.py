@@ -90,6 +90,14 @@ _OCR_REFERENCE_PIXELS = int(os.getenv("OCR_REFERENCE_PIXELS", str(3_000_000)))
 # does not catch. A pass that times out contributes nothing rather than hanging the caller.
 _TESSERACT_TIMEOUT_SECONDS = int(os.getenv("OCR_TESSERACT_TIMEOUT", "60"))
 
+# Tesseract starts an OpenMP thread per core for every invocation. Callers already run
+# analyses side by side, so each one fanning out across every core oversubscribes the box:
+# on 2026-10-21 ten concurrent passes ran 40 threads on 4 cores and nearly all of them hit
+# the timeout above. One thread per process is Tesseract's own advice for parallel use.
+# pytesseract spawns the binary with this process's environment, so setting it here
+# reaches every pass; an explicit value in the service environment still wins.
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+
 # OCR character correction map for hex strings
 _HEX_FIXES = str.maketrans(
     {
