@@ -287,7 +287,9 @@ def auto_link_secondary_provider(
 ) -> bool:
     """Link a secondary social account to the player already linked via the primary platform.
 
-    Called after OAuth when a user connects a second provider while already verified.
+    Called after OAuth when a user connects a second provider while already verified. The new account starts
+    with the role source instance of the logged-in primary account it was linked through; when that has none,
+    the player's primary game instance, else any active one.
     Safe to call even if the link already exists — returns False in that case.
 
     Returns True if a new LinkedAccount was created, False if not needed.
@@ -307,6 +309,11 @@ def auto_link_secondary_provider(
     if existing:
         return False  # Already linked somewhere, leave it alone
 
+    role_source_instance_id = primary_link.role_source_instance_id
+    if not role_source_instance_id:
+        instance = player.game_instances.filter(active=True).order_by("-primary", "id").first()
+        role_source_instance_id = instance.id if instance else None
+
     LinkedAccount.objects.create(
         player=player,
         platform=secondary_platform,
@@ -314,8 +321,16 @@ def auto_link_secondary_provider(
         display_name=secondary_display_name,
         verified=True,
         verified_at=timezone.now(),
+        role_source_instance_id=role_source_instance_id,
     )
-    logger.info("Auto-linked %s %s to player pk=%d via %s", secondary_platform, secondary_account_id, player.pk, primary_platform)
+    logger.info(
+        "Auto-linked %s %s to player pk=%d via %s (role source instance %s)",
+        secondary_platform,
+        secondary_account_id,
+        player.pk,
+        primary_platform,
+        role_source_instance_id,
+    )
     return True
 
 
