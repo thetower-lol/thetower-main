@@ -50,6 +50,8 @@ CATALOGUE = frozenset(
         "instance.retired",
         "instance.reactivated",
         "instance.deleted",
+        # stem, actor: a verification submission changed; its Discord messages need refreshing
+        "verification.updated",
     }
 )
 
