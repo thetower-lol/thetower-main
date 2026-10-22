@@ -628,12 +628,13 @@ def remove_account_link(linked_account_id: int) -> dict[str, Any]:
         return {"status": "error", "message": str(exc)}
 
 
-def toggle_linked_account_active(linked_account_id: int, active: bool) -> dict[str, Any]:
+def toggle_linked_account_active(linked_account_id: int, active: bool, reason: str | None = None) -> dict[str, Any]:
     """Activate or retire a linked Discord account.
 
     Args:
         linked_account_id: LinkedAccount primary key
         active: True to activate, False to retire
+        reason: Who made the change and how (e.g. "bot: disabled by discord:123"), for the history row and link log
 
     Returns dict with 'status' ('ok' or 'error') and 'account_id', 'player_pk' on success.
     """
@@ -642,6 +643,8 @@ def toggle_linked_account_active(linked_account_id: int, active: bool) -> dict[s
     try:
         account = LinkedAccount.objects.select_related("player").get(id=linked_account_id)
         account.active = active
+        if reason:
+            account._change_reason = reason[:100]
         account.save(update_fields=["active"])
         logger.info(
             "Toggled linked account active: linked_account=%d account_id=%s active=%s",
