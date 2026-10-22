@@ -411,6 +411,14 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
     if not verified_player_id:
         return {"eligible": False, "status": row["status"], "message": "No verified_player_id set (OCR not verified yet)"}
 
+    # An ID change claiming a Tower ID whose player has no active links: a mod decides whether to merge the players
+    if _escalate_to_merge_review(stem, row):
+        return {
+            "eligible": False,
+            "status": "mod_intent_review",
+            "message": "Tower ID belongs to an unlinked player — escalated to mod review for merge",
+        }
+
     # Rule 4a: New user, or linked player with no clean game instance → auto-complete
     if not old_player_id:
         from thetower.backend.sus.models import LinkedAccount
@@ -2071,6 +2079,102 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str, resolved_n
 
 
 # ---------------------------------------------------------------------------
+# Player merge review
+# ---------------------------------------------------------------------------
+
+# ID-change intents that drop the old ID: a merge retires the duplicate player's instances for these
+_MERGE_RETIRES_INSTANCES = {"fixing_typo", "starting_fresh"}
+
+
+def _escalate_to_merge_review(stem: str, row: dict | None) -> bool:
+    """Make an ID change a player-merge review when its Tower ID belongs to another player with no active links
+    (services.find_merge_target). Returns True when it did."""
+    from thetower.backend.sus.constants import IdChangeReason
+    from thetower.backend.sus.services import find_merge_target
+
+    if not row or not row.get("verified_player_id") or not row.get("old_player_id"):
+        return False
+    if row.get("id_change_reason") == IdChangeReason.REFRESH_VERIFICATION.value:
+        return False
+    target_pk = find_merge_target(row["platform"], row["account_id"], row["verified_player_id"])
+    if target_pk is None:
+        return False
+
+    update_submission(stem, status="mod_intent_review", review_reason="merge_player")
+    add_event(stem, {"type": "merge_escalated", "ts": int(time.time()), "target_player_pk": target_pk})
+    log_submission_update(stem)
+    logger.info("Merge escalated to mod intent review: stem=%s target_player=%d", stem, target_pk)
+    return True
+
+
+def mod_approve_merge(stem: str, resolved_by: str, resolved_name: str | None = None, owner_override: bool = False) -> dict[str, Any]:
+    """Approve a merge_player review: the submitter's player merges into the player holding the claimed Tower ID.
+
+    Args:
+        stem: Submission identifier
+        resolved_by: Mod identifier (Discord user id, or platform:account_id)
+        resolved_name: Mod display name
+        owner_override: The bot owner approved, which may merge a player carrying a website login or creator code
+
+    Returns dict with 'status' ('ok', 'already_complete' or 'error') and 'message'. A refused merge leaves the
+    submission open, so someone allowed to can still approve it.
+    """
+    from thetower.backend.sus.models import LinkedAccount
+    from thetower.backend.sus.services import find_merge_target, merge_players
+
+    row = get_submission(stem)
+    if not row:
+        return {"status": "error", "message": "Submission not found"}
+    if row.get("status") in _TERMINAL_STATUSES:
+        return {"status": "already_complete", "current_status": row["status"], "message": f"This verification is already {row['status']}"}
+    if row.get("review_reason") != "merge_player":
+        return {"status": "error", "message": "This submission is not a player merge review"}
+
+    verified_player_id = row["verified_player_id"]
+    target_pk = find_merge_target(row["platform"], row["account_id"], verified_player_id)
+    if target_pk is None:
+        return {"status": "error", "message": "The ID's player has an active link again, or the submitter is no longer linked; nothing merged"}
+    absorbed_pk = LinkedAccount.objects.get(platform=row["platform"], account_id=row["account_id"], active=True).player_id
+
+    mod = resolved_by if ":" in resolved_by else f"discord:{resolved_by}"
+    result = merge_players(
+        absorbed_pk,
+        target_pk,
+        verified_player_id,
+        retire_moved_instances=row.get("id_change_reason") in _MERGE_RETIRES_INSTANCES,
+        reason=f"verification #{row.get('id')}: player merge by {mod}",
+        owner_override=owner_override,
+    )
+    if result["status"] != "ok":
+        add_event(stem, {"type": "merge_refused", "ts": int(time.time()), "mod": resolved_by, "code": result["code"], "message": result["message"]})
+        return {"status": "error", "code": result["code"], "message": result["message"]}
+
+    update_submission(
+        stem,
+        status="approved",
+        mod_verdict="merge_player",
+        mod_resolved_by=resolved_by,
+        mod_resolved_name=resolved_name,
+        final_outcome="approved",
+    )
+    add_event(
+        stem,
+        {
+            "type": "mod_merge_complete",
+            "ts": int(time.time()),
+            "mod": resolved_by,
+            "absorbed_player_pk": absorbed_pk,
+            "target_player_pk": target_pk,
+            "moved_instances": result["moved_instances"],
+            "moved_accounts": result["moved_accounts"],
+            "snapshot": result["snapshot"],
+        },
+    )
+    log_submission_update(stem, actor=resolved_by)
+    return {"status": "ok", "message": f"Player #{absorbed_pk} merged into #{target_pk}", "target_player_pk": target_pk}
+
+
+# ---------------------------------------------------------------------------
 # Stale escalation
 # ---------------------------------------------------------------------------
 
@@ -2484,6 +2588,10 @@ def process_verification(
 
         # Notify Discord (and any other registered platforms) of the status change
         log_submission_update(stem)
+
+        # Straight to Intent review: a claimed Tower ID whose player has no active links makes it a merge review
+        if update_fields["status"] == "mod_intent_review":
+            _escalate_to_merge_review(stem, get_submission(stem))
 
         logger.info(
             "OCR complete for %s %s: status=%s ocr_id=%s version=%s",

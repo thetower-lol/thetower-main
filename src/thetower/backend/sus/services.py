@@ -4,6 +4,7 @@ Shared backend logic for creating/updating player records and linking social acc
 Used by both thetower-bot (Discord verification) and thetower-web (web verification).
 """
 
+import json
 import logging
 import re
 from typing import Any
@@ -658,6 +659,185 @@ def toggle_linked_account_active(linked_account_id: int, active: bool, reason: s
     except Exception as exc:
         logger.exception("toggle_linked_account_active failed: linked_account=%d", linked_account_id)
         return {"status": "error", "message": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Player merge: a person's duplicate KnownPlayer joins their original one
+# ---------------------------------------------------------------------------
+
+
+class _MergeAborted(Exception):
+    """Raised inside the merge transaction to roll it back with an error for the caller."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def find_merge_target(platform: str, account_id: str, tower_id: str) -> int | None:
+    """The KnownPlayer this account's player should merge into, or None.
+
+    That is the player holding *tower_id* when it is not the account's own player and has no active link on any
+    platform: typically its owner lost the Discord account they verified with and was verified afresh under a new
+    one. Only a moderator can decide the two are the same person (see merge_players).
+    """
+    from thetower.backend.sus.models import LinkedAccount, PlayerId
+
+    link = LinkedAccount.objects.filter(platform=platform, account_id=str(account_id), active=True).first()
+    owner_pk = PlayerId.objects.filter(id=tower_id.strip().upper()).values_list("game_instance__player_id", flat=True).first()
+    if link is None or owner_pk is None or owner_pk == link.player_id:
+        return None
+    if LinkedAccount.objects.filter(player_id=owner_pk, active=True).exists():
+        return None
+    return owner_pk
+
+
+def _next_instance_number(player) -> int:
+    names = player.game_instances.values_list("name", flat=True)
+    return max((int(m.group(1)) for name in names if name for m in [re.match(r"^Instance (\d+)\b", name)] if m), default=0) + 1
+
+
+def _merge_snapshot(player) -> dict[str, Any]:
+    """Everything a merge moves off *player*, as JSON-ready data, so the merge can be audited or undone by hand."""
+    from django.forms.models import model_to_dict
+
+    from thetower.backend.tourney_results.models import NameDayWinner
+
+    snapshot = {
+        "player": model_to_dict(player),
+        "instances": [
+            {**model_to_dict(instance), "tower_ids": [model_to_dict(pid) for pid in instance.player_ids.all()]}
+            for instance in player.game_instances.all()
+        ],
+        "accounts": [model_to_dict(account) for account in player.linked_accounts.all()],
+        "name_day_wins": list(NameDayWinner.objects.filter(winner=player).values_list("id", flat=True)),
+    }
+    return json.loads(json.dumps(snapshot, default=str))
+
+
+def merge_players(
+    absorbed_pk: int, target_pk: int, tower_id: str, retire_moved_instances: bool, reason: str, owner_override: bool = False
+) -> dict[str, Any]:
+    """Merge a person's duplicate KnownPlayer into their original one, then delete the duplicate.
+
+    A moderator has ruled that both are the same person, so one social account still means one person. The
+    duplicate's game instances (with their Tower IDs and moderation records) and linked accounts move to the
+    original; its name-day wins follow. Moved instances are renamed when their name is taken, and retired when
+    *retire_moved_instances* (the duplicate's IDs were a typo or are being replaced). Moved accounts whose role
+    source was retired get the instance holding *tower_id*. The original keeps its own name, creator code and
+    Django user, taking the duplicate's only where it has none; a duplicate carrying either of the last two needs
+    *owner_override*.
+
+    Nothing is deleted but the emptied duplicate, and only once nothing points at it. Every save carries *reason*
+    into its history row; the snapshot returned describes what the duplicate held.
+
+    Returns {"status": "ok", "snapshot", "moved_instances", "moved_accounts"} or {"status": "error", "code",
+    "message"}; on error nothing was changed.
+    """
+    from django.db import transaction
+    from django.db.models import Q
+
+    from thetower.backend.sus.models import KnownPlayer, PlayerId
+    from thetower.backend.tourney_results.models import NameDayWinner
+
+    reason = reason[:100]
+    try:
+        with transaction.atomic():
+            absorbed = KnownPlayer.objects.filter(pk=absorbed_pk).first()
+            target = KnownPlayer.objects.filter(pk=target_pk).first()
+            if absorbed is None or target is None or absorbed.pk == target.pk:
+                raise _MergeAborted("not_found", "Both players must exist and differ")
+            target_pid = PlayerId.objects.filter(id=tower_id.strip().upper(), game_instance__player=target).select_related("game_instance").first()
+            if target_pid is None:
+                raise _MergeAborted("tower_id_moved", f"{tower_id} no longer belongs to player #{target.pk}")
+            for field, label in (("django_user_id", "website login"), ("creator_code", "creator code")):
+                theirs, ours = getattr(absorbed, field), getattr(target, field)
+                if theirs and ours and theirs != ours:
+                    raise _MergeAborted("conflict", f"Both players have a {label}; merge them in the Django admin")
+                if theirs and not owner_override:
+                    raise _MergeAborted("needs_owner", f"Player #{absorbed.pk} has a {label}; only the bot owner can merge it")
+
+            snapshot = _merge_snapshot(absorbed)
+
+            # Game instances, with their Tower IDs (the deprecated direct player link follows them)
+            taken = {name.lower() for name in target.game_instances.values_list("name", flat=True) if name}
+            moved_instances = []
+            for instance in list(absorbed.game_instances.all()):
+                instance.player = target
+                instance.primary = False
+                if retire_moved_instances:
+                    instance.active = False
+                if not instance.name or instance.name.lower() in taken:
+                    instance.name = f"Instance {_next_instance_number(target)}"
+                taken.add(instance.name.lower())
+                instance._change_reason = reason
+                instance.save()
+                moved_instances.append(instance.pk)
+            note = f"Moved from player #{absorbed.pk} to #{target.pk} ({reason})"
+            for pid in PlayerId.objects.filter(Q(player=absorbed) | Q(game_instance_id__in=moved_instances)):
+                if pid.player_id == absorbed.pk:
+                    pid.player = target
+                pid.notes = f"{pid.notes}\n{note}" if pid.notes else note
+                pid._change_reason = reason
+                pid.save()
+
+            # Linked accounts: the new one the person verified with, and any retired ones
+            retired = set(moved_instances) if retire_moved_instances else set()
+            moved_accounts = []
+            for account in list(absorbed.linked_accounts.all()):
+                account.player = target
+                if account.role_source_instance_id is None or account.role_source_instance_id in retired:
+                    account.role_source_instance = target_pid.game_instance
+                # An active account takes "primary" from a retired one; otherwise the original's primary stays
+                target_primary = target.linked_accounts.filter(platform=account.platform, primary=True)
+                if account.primary and (target_primary.filter(active=True).exists() or (not account.active and target_primary.exists())):
+                    account.primary = False
+                save_with_reason(account, reason)
+                moved_accounts.append(f"{account.platform}:{account.account_id}")
+
+            NameDayWinner.objects.filter(winner=absorbed).update(winner=target)
+
+            # The original keeps its own details and fills gaps from the duplicate (a Django user can't be on both)
+            fill = {
+                field: getattr(absorbed, field)
+                for field in ("name", "creator_code", "django_user")
+                if getattr(absorbed, field) and not getattr(target, field)
+            }
+            if absorbed.django_user_id:
+                absorbed.django_user = None
+                absorbed._change_reason = reason
+                absorbed.save()
+            if fill:
+                for field, value in fill.items():
+                    setattr(target, field, value)
+                target._change_reason = reason
+                target.save()
+
+            # Anything still pointing at the duplicate (history tables aside) would be cascade-deleted with it
+            for relation in KnownPlayer._meta.related_objects:
+                model = relation.related_model
+                if hasattr(model, "instance_type"):  # simple_history row: keeps the old id on purpose
+                    continue
+                if model._base_manager.filter(**{relation.field.name: absorbed}).exists():
+                    raise _MergeAborted("still_referenced", f"{model.__name__} rows still point at player #{absorbed.pk}")
+
+            absorbed._change_reason = reason
+            absorbed.delete()
+    except _MergeAborted as exc:
+        logger.warning("Player merge #%s -> #%s refused: %s", absorbed_pk, target_pk, exc.message)
+        return {"status": "error", "code": exc.code, "message": exc.message}
+
+    logger.info(
+        "Merged player #%d into #%d: instances=%s accounts=%s retired=%s (%s)",
+        absorbed_pk,
+        target_pk,
+        moved_instances,
+        moved_accounts,
+        retire_moved_instances,
+        reason,
+    )
+    return {"status": "ok", "snapshot": snapshot, "moved_instances": moved_instances, "moved_accounts": moved_accounts}
 
 
 # ---------------------------------------------------------------------------

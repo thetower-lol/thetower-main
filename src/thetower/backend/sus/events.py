@@ -133,7 +133,10 @@ def _game_instance_saved(sender, instance, created=False, raw=False, **kwargs) -
     payload = {"instance": instance.pk, "known_player": instance.player_id}
     if created:
         emit("instance.created", **payload)
-    elif _changed(instance, "active"):
+        return
+    if _changed(instance, "player_id"):
+        emit("instance.moved", **payload, previous_known_player=instance._event_previous["player_id"])
+    if _changed(instance, "active"):
         emit("instance.reactivated" if instance.active else "instance.retired", **payload)
 
 

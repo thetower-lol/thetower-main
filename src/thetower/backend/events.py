@@ -45,8 +45,9 @@ CATALOGUE = frozenset(
         "tower_id.added",
         "tower_id.moved",
         "tower_id.removed",
-        # instance, known_player
+        # instance, known_player (moved also: previous_known_player)
         "instance.created",
+        "instance.moved",
         "instance.retired",
         "instance.reactivated",
         "instance.deleted",
