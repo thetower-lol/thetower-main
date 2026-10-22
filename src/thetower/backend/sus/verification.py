@@ -15,6 +15,8 @@ import re
 import secrets
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -753,10 +755,26 @@ def find_verification_image(stem: str) -> Path | None:
 # ---------------------------------------------------------------------------
 
 
+@contextmanager
+def _review_db() -> Iterator[sqlite3.Connection]:
+    """Open the review database for one unit of work: commit (roll back on error), then always close.
+
+    ``with sqlite3.connect(...) as conn`` only ends the transaction and leaves the connection open. Its
+    statement cache refers back to it, so only the cycle collector frees it, and a process polling this
+    database (the web verify page) piled up hundreds of open file handles in between.
+    """
+    conn = sqlite3.connect(str(REVIEW_DB_PATH))
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
+
 def ensure_db() -> None:
     """Create submissions table (idempotent). Drops old tables on first run. Migrates schema as needed."""
     REVIEW_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         # Check if submissions table already exists
         table_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='submissions'").fetchone() is not None
 
@@ -926,7 +944,7 @@ def create_submission(
     ids: dict = {} if platform == "web" else {platform: account_id}
     ids.update(additional_platform_ids or {})
     now = int(time.time())
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         cursor = conn.execute(
             """INSERT OR IGNORE INTO submissions
                (stem, platform, account_id, platform_ids, submitter_name, submission_source,
@@ -959,7 +977,7 @@ def get_submission(stem: str) -> dict | None:
     """Return a single submission row as a dict, or None."""
     if not REVIEW_DB_PATH.exists():
         return None
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM submissions WHERE stem = ?", (stem,)).fetchone()
     return dict(row) if row else None
@@ -969,7 +987,7 @@ def get_submission_by_id(sub_id: int) -> dict | None:
     """Return a submission row by integer primary key."""
     if not REVIEW_DB_PATH.exists():
         return None
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM submissions WHERE id = ?", (sub_id,)).fetchone()
     return dict(row) if row else None
@@ -998,7 +1016,7 @@ def get_submission_history(platform: str, account_id: str, limit: int = 10) -> l
         "mod_intent_review",
     )
 
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         placeholders = ",".join("?" * len(active_statuses))
         rows = conn.execute(
@@ -1020,7 +1038,7 @@ def update_submission(stem: str, **fields) -> None:
     now = int(time.time())
     set_clauses = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values()) + [now, stem]
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.execute(
             f"UPDATE submissions SET {set_clauses}, updated_at = ? WHERE stem = ?",
             values,
@@ -1191,7 +1209,7 @@ def add_event(stem: str, event: dict) -> None:
     """Append an event dict to the events JSON array atomically."""
     if not REVIEW_DB_PATH.exists():
         return
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         row = conn.execute("SELECT events FROM submissions WHERE stem = ?", (stem,)).fetchone()
         if not row:
             return
@@ -1220,7 +1238,7 @@ def save_pending_discord_refresh(stem: str, mod_user: str, error: str) -> None:
         error: Error message from the failed attempt
     """
     ensure_db()
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.execute(
             """INSERT INTO pending_discord_refreshes (stem, mod_user, error, created_at)
                VALUES (?, ?, ?, ?)""",
@@ -1243,7 +1261,7 @@ def get_pending_discord_refreshes(limit: int = 100) -> list[dict]:
     """
     if not REVIEW_DB_PATH.exists():
         return []
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """SELECT * FROM pending_discord_refreshes
@@ -1261,7 +1279,7 @@ def delete_pending_discord_refresh(refresh_id: int) -> None:
         refresh_id: Primary key of the pending refresh record
     """
     ensure_db()
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.execute("DELETE FROM pending_discord_refreshes WHERE id = ?", (refresh_id,))
     logger.debug(f"Deleted pending Discord refresh ID {refresh_id}")
 
@@ -1273,7 +1291,7 @@ def increment_pending_discord_refresh_retry_count(refresh_id: int) -> None:
         refresh_id: Primary key of the pending refresh record
     """
     ensure_db()
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.execute("UPDATE pending_discord_refreshes SET retry_count = retry_count + 1 WHERE id = ?", (refresh_id,))
 
 
@@ -1287,7 +1305,7 @@ def get_pending_submission(platform: str, account_id: str) -> dict | None:
     """
     if not REVIEW_DB_PATH.exists():
         return None
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """SELECT * FROM submissions
@@ -1303,7 +1321,7 @@ def get_pending_submission_for_player_id(submitted_player_id: str) -> dict | Non
     """Return any non-terminal submission for a given Tower ID (no platform filter)."""
     if not REVIEW_DB_PATH.exists():
         return None
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """SELECT * FROM submissions
@@ -1373,7 +1391,7 @@ def get_mod_queue(
     where = " AND ".join(clauses)
     params.append(limit)
 
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             f"SELECT * FROM submissions WHERE {where} ORDER BY created_at ASC LIMIT ?",
@@ -1391,7 +1409,7 @@ def get_mod_queue_counts() -> dict[str, Any]:
     # Intent review statuses: Intent/action selection needed
     mod_review_statuses = ("near_match_confirmed", "near_match_ocr", "ocr_large_mismatch", "near_match_timeout", "ocr_error", "mod_intent_review")
 
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         placeholders = ",".join("?" * len(mod_review_statuses))
         query = f"SELECT status, COUNT(*) AS n FROM submissions WHERE status IN ({placeholders}) GROUP BY status"
@@ -1413,7 +1431,7 @@ def get_non_terminal_submissions() -> list[dict]:
     TERMINAL_STATES = ("approved", "passed", "rejected", "failed", "abandoned")
     placeholders = ",".join("?" * len(TERMINAL_STATES))
 
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(f"SELECT * FROM submissions WHERE status NOT IN ({placeholders}) ORDER BY created_at DESC", TERMINAL_STATES).fetchall()
 
@@ -1434,7 +1452,7 @@ def get_terminal_submissions_with_notifications() -> list[dict]:
     TERMINAL_STATES = ("approved", "passed", "rejected", "failed", "abandoned")
     placeholders = ",".join("?" * len(TERMINAL_STATES))
 
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             f"""SELECT * FROM submissions
@@ -1464,7 +1482,7 @@ def get_terminal_submissions_never_logged() -> list[dict]:
     TERMINAL_STATES = ("approved", "passed", "rejected", "failed", "abandoned")
     placeholders = ",".join("?" * len(TERMINAL_STATES))
 
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             f"""SELECT * FROM submissions
@@ -1488,7 +1506,7 @@ def get_mod_queue_for_player(player_pk: int) -> list[dict]:
     # OCR review + Intent review statuses
     mod_review_statuses = ("near_match_confirmed", "near_match_ocr", "ocr_large_mismatch", "near_match_timeout", "ocr_error", "mod_intent_review")
 
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         results = []
         placeholders = ",".join("?" * len(mod_review_statuses))
@@ -1529,7 +1547,7 @@ def get_submissions_page(
         params.append(status_filter)
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
     offset = (page - 1) * limit
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         total = conn.execute(f"SELECT COUNT(*) FROM submissions {where_sql}", params).fetchone()[0]
         rows = conn.execute(
@@ -1582,7 +1600,7 @@ def create_account_link(
     ensure_db()
     stem = generate_link_stem()
     now = int(time.time())
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.execute(
             """INSERT INTO account_links
                (stem, initiator_platform, initiator_account_id, initiator_name,
@@ -1622,7 +1640,7 @@ def get_account_link(stem: str) -> dict | None:
     """Return an account link record by stem, or None if not found."""
     if not REVIEW_DB_PATH.exists():
         return None
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM account_links WHERE stem = ?", (stem,)).fetchone()
     return dict(row) if row else None
@@ -1632,7 +1650,7 @@ def get_pending_link(target_platform: str, target_account_id: str) -> dict | Non
     """Return the most recent pending link request targeting a given account, or None."""
     if not REVIEW_DB_PATH.exists():
         return None
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """SELECT * FROM account_links
@@ -1668,7 +1686,7 @@ def resolve_account_link(stem: str, new_status: str, resolved_by: str | None = N
     if not REVIEW_DB_PATH.exists():
         return False
     now = int(time.time())
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         existing = conn.execute("SELECT status FROM account_links WHERE stem = ?", (stem,)).fetchone()
         if not existing:
             logger.warning("resolve_account_link: stem %s not found", stem)
@@ -1692,7 +1710,7 @@ def cancel_pending_links_by_initiator(initiator_platform: str, initiator_account
     if not REVIEW_DB_PATH.exists():
         return 0
     now = int(time.time())
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         result = conn.execute(
             """UPDATE account_links SET status = 'cancelled', updated_at = ?
                WHERE initiator_platform = ? AND initiator_account_id = ? AND status = 'pending'""",
@@ -1716,7 +1734,7 @@ def get_outgoing_pending_links(initiator_platform: str, initiator_account_id: st
     """
     if not REVIEW_DB_PATH.exists():
         return []
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """SELECT stem, target_platform, target_account_id, target_name, created_at
@@ -1736,7 +1754,7 @@ def get_pending_links_for_player(player_pk: int) -> list[dict]:
     """
     if not REVIEW_DB_PATH.exists():
         return []
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """SELECT stem, initiator_platform, initiator_account_id, target_platform,
@@ -2142,7 +2160,7 @@ def fail_stale_pending_submissions(stale_threshold_seconds: int = PENDING_STALE_
         return 0
 
     cutoff_ts = int(time.time()) - stale_threshold_seconds
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         stale_stems = [row[0] for row in conn.execute("SELECT stem FROM submissions WHERE status = 'pending' AND created_at < ?", (cutoff_ts,))]
 
     count = 0
@@ -2172,7 +2190,7 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 3600)
     cutoff_ts = int(time.time()) - stale_threshold_seconds
     now = int(time.time())
 
-    with sqlite3.connect(str(REVIEW_DB_PATH)) as conn:
+    with _review_db() as conn:
         # Find rows that need escalation (near-match user_ocr_choice that timed out)
         rows = conn.execute(
             """SELECT stem, status, id_change_reason FROM submissions
