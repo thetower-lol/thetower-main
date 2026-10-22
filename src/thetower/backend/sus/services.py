@@ -454,13 +454,19 @@ def copy_role_source_to_accounts(player_pk: int, source_instance_id: int, target
 
     Returns dict with 'status' ('ok' or 'error'), 'updated' count.
     """
+    from thetower.backend.events import emit
     from thetower.backend.sus.models import GameInstance, LinkedAccount
 
     try:
         instance = GameInstance.objects.filter(id=source_instance_id).first()
         if not instance:
             return {"status": "error", "message": "Game instance not found"}
-        updated = LinkedAccount.objects.filter(id__in=target_account_ids, player_id=player_pk).update(role_source_instance=instance)
+        accounts = LinkedAccount.objects.filter(id__in=target_account_ids, player_id=player_pk)
+        changed = list(accounts.exclude(role_source_instance=instance).values_list("platform", "account_id"))
+        updated = accounts.update(role_source_instance=instance)
+        # A bulk update fires no signals, so emit the events here
+        for platform, account_id in changed:
+            emit("account.role_source_changed", known_player=player_pk, platform=platform, account_id=account_id, instance=instance.pk)
         logger.info(
             "Copied role source: player=%d instance=%d updated_accounts=%d",
             player_pk,
