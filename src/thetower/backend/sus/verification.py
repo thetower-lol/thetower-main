@@ -784,7 +784,7 @@ def ensure_db() -> None:
             logger.info("Creating submissions table (first run)")
 
         # Drop legacy tables (clean cutover, no migration)
-        for old_table in ("submission_log", "verification_reviews", "mod_notifications"):
+        for old_table in ("submission_log", "verification_reviews", "mod_notifications", "pending_discord_refreshes"):
             dropped = conn.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{old_table}'").fetchone() is not None
             if dropped:
                 conn.execute(f"DROP TABLE {old_table}")
@@ -851,19 +851,6 @@ def ensure_db() -> None:
                 logger.info("Added column: %s", add_col)
             except Exception:
                 pass  # Column already exists
-
-        # Table for tracking failed Discord message refresh attempts (for retry)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS pending_discord_refreshes (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                stem        TEXT    NOT NULL,
-                mod_user    TEXT    NOT NULL,
-                error       TEXT    NOT NULL,
-                created_at  INTEGER NOT NULL,
-                retry_count INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_pending_refresh_stem ON pending_discord_refreshes (stem)")
 
         # Account links table — tracks all Discord account merges/links across platforms.
         # Covers: web merges (instant), Discord request-accept flow, mod actions, and link removals.
@@ -1225,77 +1212,6 @@ def add_event(stem: str, event: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Pending Discord refresh tracking (for retry when bot is unavailable)
-# ---------------------------------------------------------------------------
-
-
-def save_pending_discord_refresh(stem: str, mod_user: str, error: str) -> None:
-    """Save a failed Discord message refresh attempt for later retry.
-
-    Args:
-        stem: Submission identifier
-        mod_user: Moderator who triggered the action
-        error: Error message from the failed attempt
-    """
-    ensure_db()
-    with _review_db() as conn:
-        conn.execute(
-            """INSERT INTO pending_discord_refreshes (stem, mod_user, error, created_at)
-               VALUES (?, ?, ?, ?)""",
-            (stem, mod_user, error, int(time.time())),
-        )
-    logger.info(f"Saved pending Discord refresh for submission {stem} (error: {error})")
-
-
-def get_pending_discord_refreshes(limit: int = 100) -> list[dict]:
-    """Get pending Discord refresh attempts for retry.
-
-    Returns pending refreshes ordered by retry_count ASC (fewest retries first)
-    to prioritize newer/fresher failures.
-
-    Args:
-        limit: Maximum number of pending refreshes to return
-
-    Returns:
-        List of pending refresh dicts with keys: id, stem, mod_user, error, created_at, retry_count
-    """
-    if not REVIEW_DB_PATH.exists():
-        return []
-    with _review_db() as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """SELECT * FROM pending_discord_refreshes
-               ORDER BY retry_count ASC, created_at ASC
-               LIMIT ?""",
-            (limit,),
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def delete_pending_discord_refresh(refresh_id: int) -> None:
-    """Delete a pending Discord refresh after successful retry.
-
-    Args:
-        refresh_id: Primary key of the pending refresh record
-    """
-    ensure_db()
-    with _review_db() as conn:
-        conn.execute("DELETE FROM pending_discord_refreshes WHERE id = ?", (refresh_id,))
-    logger.debug(f"Deleted pending Discord refresh ID {refresh_id}")
-
-
-def increment_pending_discord_refresh_retry_count(refresh_id: int) -> None:
-    """Increment retry count for a pending Discord refresh.
-
-    Args:
-        refresh_id: Primary key of the pending refresh record
-    """
-    ensure_db()
-    with _review_db() as conn:
-        conn.execute("UPDATE pending_discord_refreshes SET retry_count = retry_count + 1 WHERE id = ?", (refresh_id,))
-
-
-# ---------------------------------------------------------------------------
 
 
 def get_pending_submission(platform: str, account_id: str) -> dict | None:
@@ -1417,6 +1333,18 @@ def get_mod_queue_counts() -> dict[str, Any]:
 
     by_status = {row["status"]: row["n"] for row in rows}
     return {"total": sum(by_status.values()), "by_status": by_status}
+
+
+def get_submissions_updated_since(since: int) -> list[str]:
+    """Stems of submissions changed at or after *since* (epoch seconds), oldest change first.
+
+    The bot re-syncs these at startup: their verification.updated events may have been lost while it was down.
+    """
+    if not REVIEW_DB_PATH.exists():
+        return []
+    with _review_db() as conn:
+        rows = conn.execute("SELECT stem FROM submissions WHERE updated_at >= ? ORDER BY updated_at", (since,)).fetchall()
+    return [row[0] for row in rows]
 
 
 def get_non_terminal_submissions() -> list[dict]:
@@ -2234,61 +2162,24 @@ def auto_escalate_stale_pending_submissions(stale_threshold_seconds: int = 3600)
 
 
 # ---------------------------------------------------------------------------
-# Submission Sync — callback registry
+# Submission Sync
 # ---------------------------------------------------------------------------
-
-# Registered sync callbacks: callables that accept (stem, actor) and schedule
-# the Discord log embed update.  Typically one entry (the bot's sync function),
-# but the list supports multiple consumers (e.g. bot + web socket push).
-_sync_callbacks: list = []
-
-
-def register_sync_callback(callback) -> None:
-    """Register a callable to be invoked by log_submission_update().
-
-    The callable should accept (stem: str, actor: str | None) and handle
-    scheduling the async Discord sync on the event loop.  Duplicates are ignored.
-
-    Typically called once during bot startup:
-        verification.register_sync_callback(cog.schedule_discord_sync)
-    """
-    if callback not in _sync_callbacks:
-        _sync_callbacks.append(callback)
-        logger.debug("Registered sync callback: %s (total callbacks: %d)", callback, len(_sync_callbacks))
-    else:
-        logger.debug("Sync callback already registered: %s", callback)
-
-
-def unregister_sync_callback(callback) -> None:
-    """Remove a previously registered sync callback.  No-op if not found."""
-    try:
-        _sync_callbacks.remove(callback)
-        logger.info("unregister_sync_callback: removed %s (remaining callbacks: %d)", callback, len(_sync_callbacks))
-    except ValueError:
-        logger.debug("unregister_sync_callback: callback not found: %s", callback)
 
 
 def log_submission_update(stem: str, actor: str | None = None) -> None:
-    """Notify all registered platforms that a submission has changed state.
+    """Announce that a submission changed, so the bot brings its Discord log and notification messages up to date.
 
-    Calls every callback registered via register_sync_callback().  Each callback
-    is responsible for scheduling the async Discord embed update on its own event
-    loop.  If no callbacks are registered (e.g. in web-only mode), logs a debug
-    message and returns silently.
+    Emits the ``verification.updated`` domain event (thetower.backend.events): from any process, delivered to the
+    bot after the current Django transaction (if any) commits. Best effort; the bot re-syncs submissions changed
+    while it was down when it starts.
 
     Args:
         stem: Submission identifier
         actor: Optional actor who triggered the change (e.g., "discord:123456789")
     """
-    logger.debug("log_submission_update: stem=%s actor=%s callbacks=%d", stem, actor, len(_sync_callbacks))
-    if not _sync_callbacks:
-        logger.warning("log_submission_update: no callbacks registered — Discord embed will NOT update (stem=%s)", stem)
-        return
-    for cb in _sync_callbacks:
-        try:
-            cb(stem, actor)
-        except Exception:
-            logger.exception("log_submission_update: callback %s raised for stem=%s", cb, stem)
+    from thetower.backend.events import emit
+
+    emit("verification.updated", stem=stem, actor=actor)
 
 
 # ---------------------------------------------------------------------------

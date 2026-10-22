@@ -46,10 +46,10 @@ async def get_discord_user(user_id: str) -> dict[str, str] | None:
 
 
 async def refresh_verification_discord_messages(stem: str, mod_user: str) -> str | None:
-    """Request the Discord bot to refresh verification messages for a submission.
+    """Ask the Discord bot to refresh a submission's verification messages now and return the log message's URL.
 
-    This is called after web-based mod actions to ensure Discord embeds update
-    consistently regardless of whether the mod used Discord or the web interface.
+    For the web's manual "Discord refresh" button, which shows the result. Ordinary changes need no call: they emit
+    the verification.updated domain event (verification.log_submission_update).
 
     Communicates directly with the bot's socket server (TCP on Windows, Unix on Linux).
 
@@ -70,43 +70,14 @@ async def refresh_verification_discord_messages(stem: str, mod_user: str) -> str
         response = await _send_socket_request(request)
         if response and response.get("status") == "ok":
             logger.info(f"Successfully refreshed Discord messages for submission {stem}")
-            # Opportunistically process any pending retries on successful send
-            await _process_pending_retries()
             return response.get("discord_url")
-        else:
-            error_msg = response.get("message", response.get("error", "Unknown error")) if response else "No response"
-            logger.warning(f"Failed to refresh Discord messages: {error_msg}")
-            # Save for retry
-            await _save_failed_refresh(stem, mod_user, error_msg)
-            return None
+        error_msg = response.get("message", response.get("error", "Unknown error")) if response else "No response"
+        logger.warning(f"Failed to refresh Discord messages: {error_msg}")
+        return None
     except Exception as e:
         # Log but don't fail the web request if Discord updates fail
         logger.warning(f"Failed to refresh Discord messages for submission {stem}: {e}")
-        # Save for retry
-        await _save_failed_refresh(stem, mod_user, str(e))
         return None
-
-
-async def _save_failed_refresh(stem: str, mod_user: str, error: str) -> None:
-    """Save a failed Discord refresh attempt for later retry.
-
-    Args:
-        stem: Submission identifier
-        mod_user: Moderator identifier
-        error: Error message
-    """
-    from asgiref.sync import sync_to_async
-
-    def save_pending():
-        from thetower.backend.sus import verification
-
-        verification.save_pending_discord_refresh(stem, mod_user, error)
-
-    try:
-        await sync_to_async(save_pending)()
-        logger.info(f"Saved pending Discord refresh for submission {stem}")
-    except Exception as ex:
-        logger.error(f"Failed to save pending Discord refresh: {ex}", exc_info=True)
 
 
 async def _send_socket_request(request: dict[str, Any], timeout: float = 3.0) -> dict[str, Any] | None:
@@ -161,78 +132,3 @@ async def _send_socket_request(request: dict[str, Any], timeout: float = 3.0) ->
     except Exception as e:
         logger.warning(f"Socket client error: {e}")
         return None
-
-
-async def _process_pending_retries(max_retries: int = 10) -> None:
-    """Opportunistically process pending Discord refresh retries.
-
-    Called after a successful refresh to piggyback on successful bot communication.
-    Processes up to max_retries pending refreshes, deleting successful ones and
-    incrementing retry count for failures.
-
-    Args:
-        max_retries: Maximum number of pending refreshes to process in one call
-    """
-    from asgiref.sync import sync_to_async
-
-    def get_pending():
-        from thetower.backend.sus import verification
-
-        return verification.get_pending_discord_refreshes(limit=max_retries)
-
-    try:
-        pending_refreshes = await sync_to_async(get_pending)()
-        if not pending_refreshes:
-            return
-
-        logger.info(f"Processing {len(pending_refreshes)} pending Discord refresh retries")
-
-        for refresh in pending_refreshes:
-            refresh_id = refresh["id"]
-            stem = refresh["stem"]
-            mod_user = refresh["mod_user"]
-
-            request = {"action": "refresh_verification_messages", "stem": stem, "mod_user": mod_user}
-
-            # Inject auth token if configured
-            if DISCORD_BOT_SOCKET_TOKEN:
-                request["token"] = DISCORD_BOT_SOCKET_TOKEN
-
-            try:
-                response = await _send_socket_request(request)
-                if response and response.get("status") == "ok":
-                    # Success - delete from pending queue
-                    def delete_pending():
-                        from thetower.backend.sus import verification
-
-                        verification.delete_pending_discord_refresh(refresh_id)
-
-                    await sync_to_async(delete_pending)()
-                    logger.info(f"Successfully retried Discord refresh for submission {stem} (pending ID {refresh_id})")
-                else:
-                    # Still failing - increment retry count
-                    error_msg = response.get("error", "Unknown error") if response else "No response"
-
-                    def increment_retry():
-                        from thetower.backend.sus import verification
-
-                        verification.increment_pending_discord_refresh_retry_count(refresh_id)
-
-                    await sync_to_async(increment_retry)()
-                    logger.warning(f"Retry failed for submission {stem}: {error_msg}")
-            except Exception as e:
-                # Retry failed - increment retry count
-                def increment_retry():
-                    from thetower.backend.sus import verification
-
-                    verification.increment_pending_discord_refresh_retry_count(refresh_id)
-
-                try:
-                    await sync_to_async(increment_retry)()
-                except Exception as ex:
-                    logger.error(f"Failed to increment retry count for pending refresh {refresh_id}: {ex}")
-                logger.warning(f"Retry failed for submission {stem}: {e}")
-
-    except Exception as e:
-        # Don't fail the main request if retry processing fails
-        logger.error(f"Failed to process pending retries: {e}", exc_info=True)
