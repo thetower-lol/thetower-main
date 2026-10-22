@@ -439,6 +439,7 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
                 update_role_source=new_instance,
                 action_type="new_instance_retire_old" if new_instance else None,
                 old_player_id=None,
+                reason=f"verification #{row.get('id')}",
             )
 
             if "error" in result:
@@ -573,6 +574,7 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
                 update_role_source=False,
                 action_type="new_instance_keep_old",
                 old_player_id=old_player_id,
+                reason=f"verification #{row.get('id')}",
             )
 
             if "error" in result:
@@ -1827,7 +1829,9 @@ def mod_resolve_submission(stem: str, verdict: str, resolved_by: str, player_id:
             submitter_name = row.get("submitter_name", "")
             if platform and account_id:
                 try:
-                    result = create_or_update_player(platform, account_id, submitter_name, player_id_to_create, update_role_source=False)
+                    result = create_or_update_player(
+                        platform, account_id, submitter_name, player_id_to_create, update_role_source=False, reason=f"verification #{row.get('id')}"
+                    )
                     if "error" in result:
                         logger.error("Failed to create player after mod approval for stem %s: %s", stem, result.get("error"))
                         # Revert status to failed
@@ -2016,6 +2020,7 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str, resolved_n
             update_role_source=False,
             action_type=action_type,
             old_player_id=old_player_id,
+            reason=f"verification #{row.get('id')}",
         )
 
         if "error" in result:

@@ -15,6 +15,13 @@ _TOWER_ID_MIN_LEN = 13
 _TOWER_ID_MAX_LEN = 16
 
 
+def save_with_reason(account, reason: str) -> None:
+    """Save a LinkedAccount noting how the change was made: the reason lands on its history row and on the
+    account events the save emits (see sus/events.py), where the bot's link log reads it."""
+    account._change_reason = reason[:100]
+    account.save()
+
+
 def is_valid_tower_id(text: str) -> bool:
     """Return True if text is a valid Tower player ID (13–16 hex characters, case-insensitive)."""
     stripped = text.strip().lower()
@@ -29,6 +36,7 @@ def create_or_update_player(
     update_role_source: bool = True,
     action_type: str | None = None,
     old_player_id: str | None = None,
+    reason: str = "verification",
 ) -> dict[str, Any]:
     """Create or update a player record for a verified social account + Tower ID pair.
 
@@ -57,6 +65,8 @@ def create_or_update_player(
     old_player_id:
         For two-stage mod review (Scenario B): The previously verified Tower ID being replaced/updated.
         Required when action_type is not None.
+    reason:
+        How a new LinkedAccount came about, for its history and link events (see ``save_with_reason``).
 
     Returns
     -------
@@ -105,14 +115,17 @@ def create_or_update_player(
                 # The player's game data is preserved; only the Discord connection is re-established.
                 player = existing_player
                 primary_instance = player.game_instances.filter(primary=True, active=True).first() or player.game_instances.first()
-                LinkedAccount.objects.create(
-                    player=player,
-                    platform=platform,
-                    account_id=account_id,
-                    display_name=author_name,
-                    verified=True,
-                    verified_at=timezone.now(),
-                    role_source_instance=primary_instance,
+                save_with_reason(
+                    LinkedAccount(
+                        player=player,
+                        platform=platform,
+                        account_id=account_id,
+                        display_name=author_name,
+                        verified=True,
+                        verified_at=timezone.now(),
+                        role_source_instance=primary_instance,
+                    ),
+                    f"{reason}: mod-approved relink",
                 )
                 logger.info("Relink: created %s link account_id=%s → player_pk=%d", platform, account_id, player.pk)
                 # Auto-link any orphaned ModerationRecords to the primary instance
@@ -252,14 +265,17 @@ def create_or_update_player(
         player = KnownPlayer.objects.create(name=author_name)
         created = True
         primary_instance = GameInstance.objects.create(player=player, name="Instance 1", primary=True)
-        LinkedAccount.objects.create(
-            player=player,
-            platform=platform,
-            account_id=account_id,
-            display_name=author_name,
-            verified=True,
-            verified_at=timezone.now(),
-            role_source_instance=primary_instance,
+        save_with_reason(
+            LinkedAccount(
+                player=player,
+                platform=platform,
+                account_id=account_id,
+                display_name=author_name,
+                verified=True,
+                verified_at=timezone.now(),
+                role_source_instance=primary_instance,
+            ),
+            f"{reason}: new player",
         )
         PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
 
@@ -284,12 +300,14 @@ def auto_link_secondary_provider(
     secondary_platform: str,
     secondary_account_id: str,
     secondary_display_name: str,
+    how: str = "website",
 ) -> bool:
     """Link a secondary social account to the player already linked via the primary platform.
 
     Called after OAuth when a user connects a second provider while already verified. The new account starts
     with the role source instance of the logged-in primary account it was linked through; when that has none,
-    the player's primary game instance, else any active one.
+    the player's primary game instance, else any active one. *how* (e.g. "website: Link Reddit") starts the
+    reason recorded for the link.
     Safe to call even if the link already exists — returns False in that case.
 
     Returns True if a new LinkedAccount was created, False if not needed.
@@ -314,14 +332,17 @@ def auto_link_secondary_provider(
         instance = player.game_instances.filter(active=True).order_by("-primary", "id").first()
         role_source_instance_id = instance.id if instance else None
 
-    LinkedAccount.objects.create(
-        player=player,
-        platform=secondary_platform,
-        account_id=secondary_account_id,
-        display_name=secondary_display_name,
-        verified=True,
-        verified_at=timezone.now(),
-        role_source_instance_id=role_source_instance_id,
+    save_with_reason(
+        LinkedAccount(
+            player=player,
+            platform=secondary_platform,
+            account_id=secondary_account_id,
+            display_name=secondary_display_name,
+            verified=True,
+            verified_at=timezone.now(),
+            role_source_instance_id=role_source_instance_id,
+        ),
+        f"{how}, logged in as {primary_platform}:{primary_account_id}",
     )
     logger.info(
         "Auto-linked %s %s to player pk=%d via %s (role source instance %s)",
@@ -514,15 +535,16 @@ def accept_account_link(link_stem: str, target_display_name: str = "") -> dict[s
 
         player = KnownPlayer.objects.get(id=link_row["player_pk"])
 
-        new_linked_account, _ = LinkedAccount.objects.update_or_create(
-            platform=link_row["target_platform"],
-            account_id=str(link_row["target_account_id"]),
-            defaults={
-                "player": player,
-                "display_name": target_display_name or link_row.get("target_name", ""),
-                "verified": True,
-                "active": True,
-            },
+        new_linked_account = LinkedAccount.objects.filter(
+            platform=link_row["target_platform"], account_id=str(link_row["target_account_id"])
+        ).first() or LinkedAccount(platform=link_row["target_platform"], account_id=str(link_row["target_account_id"]))
+        new_linked_account.player = player
+        new_linked_account.display_name = target_display_name or link_row.get("target_name", "")
+        new_linked_account.verified = True
+        new_linked_account.active = True
+        save_with_reason(
+            new_linked_account,
+            f"bot: {link_row['link_type']} request from {link_row['initiator_platform']}:{link_row['initiator_account_id']} accepted",
         )
 
         verification.resolve_account_link(link_stem, "completed", resolved_by=f"{link_row['target_platform']}:{link_row['target_account_id']}")

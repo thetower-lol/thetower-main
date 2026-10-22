@@ -52,7 +52,13 @@ def _tower_id_player(tower_id):
 
 
 def _account_payload(account) -> dict:
-    return {"known_player": account.player_id, "platform": str(account.platform), "account_id": account.account_id}
+    # reason: how the change was made, when the writer said (services.save_with_reason); None otherwise
+    return {
+        "known_player": account.player_id,
+        "platform": str(account.platform),
+        "account_id": account.account_id,
+        "reason": getattr(account, "_change_reason", None),
+    }
 
 
 def _account_saved(sender, instance, created=False, raw=False, **kwargs) -> None:
