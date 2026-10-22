@@ -2083,7 +2083,7 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str, resolved_n
 # ---------------------------------------------------------------------------
 
 # ID-change intents that drop the old ID: a merge retires the duplicate player's instances for these
-_MERGE_RETIRES_INSTANCES = {"fixing_typo", "starting_fresh"}
+MERGE_RETIRES_INSTANCES = {"fixing_typo", "starting_fresh"}
 
 
 def _escalate_to_merge_review(stem: str, row: dict | None) -> bool:
@@ -2141,7 +2141,7 @@ def mod_approve_merge(stem: str, resolved_by: str, resolved_name: str | None = N
         absorbed_pk,
         target_pk,
         verified_player_id,
-        retire_moved_instances=row.get("id_change_reason") in _MERGE_RETIRES_INSTANCES,
+        retire_moved_instances=row.get("id_change_reason") in MERGE_RETIRES_INSTANCES,
         reason=f"verification #{row.get('id')}: player merge by {mod}",
         owner_override=owner_override,
     )
