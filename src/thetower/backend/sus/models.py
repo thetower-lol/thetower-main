@@ -535,7 +535,7 @@ class ModerationRecord(models.Model):
                     return {"record": existing_sus, "created": False, "message": f"Player {tower_id} is already marked as suspicious by API"}
                 else:
                     # Manual sus exists - reinforce with API
-                    api_note = f"Reinforced by API (key: {api_key.key_suffix})"
+                    api_note = f"Reinforced by API (key: …{api_key.key_suffix()})"
                     if existing_sus.reason and "Reinforced by API" not in existing_sus.reason:
                         existing_sus.reason = f"{existing_sus.reason}\n{api_note}"
                     elif not existing_sus.reason:
@@ -572,7 +572,7 @@ class ModerationRecord(models.Model):
                     return {"record": existing_ban, "created": False, "message": f"Player {tower_id} is already banned by API"}
                 else:
                     # Manual ban exists - reinforce with API
-                    api_note = f"Reinforced by API (key: {api_key.key_suffix})"
+                    api_note = f"Reinforced by API (key: …{api_key.key_suffix()})"
                     if existing_ban.reason and "Reinforced by API" not in existing_ban.reason:
                         existing_ban.reason = f"{existing_ban.reason}\n{api_note}"
                     elif not existing_ban.reason:
@@ -592,7 +592,7 @@ class ModerationRecord(models.Model):
                 # Resolve any existing sus records first
                 if existing_sus:
                     # Append resolution info to existing reason
-                    resolution_info = f"Automatically resolved due to ban escalation (API key: {api_key.key_suffix})"
+                    resolution_info = f"Automatically resolved due to ban escalation (API key: …{api_key.key_suffix()})"
                     if existing_sus.reason:
                         existing_sus.reason = f"{existing_sus.reason}\n\n{resolution_info}"
                     else:
@@ -623,7 +623,7 @@ class ModerationRecord(models.Model):
             # Other moderation types (shun, soft_ban, etc.)
             if existing_same_type:
                 # Reinforce existing record
-                api_note = f"Reinforced by API (key: {api_key.key_suffix})"
+                api_note = f"Reinforced by API (key: …{api_key.key_suffix()})"
                 if existing_same_type.reason and "Reinforced by API" not in existing_same_type.reason:
                     existing_same_type.reason = f"{existing_same_type.reason}\n{api_note}"
                 elif not existing_same_type.reason:
