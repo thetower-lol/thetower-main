@@ -42,6 +42,17 @@ class KnownPlayer(models.Model):
     name = models.CharField(max_length=100, blank=True, null=True, db_index=True, help_text="Player's friendly name, e.g. common discord handle")
     discord_id = models.CharField(max_length=50, blank=True, null=True, help_text="DEPRECATED: Discord numeric id (use linked_accounts instead)")
     creator_code = models.CharField(max_length=50, blank=True, null=True, help_text="Creator/supporter code to promote in shop")
+    creator_categories = models.ManyToManyField(
+        "CreatorCategory", blank=True, related_name="creators", help_text="What this creator is known for (staff); filters on the Creator Codes page"
+    )
+    # db_default too, so processes still running the code from before this column existed can keep saving players
+    creator_note = models.CharField(
+        max_length=150,
+        blank=True,
+        default="",
+        db_default="",
+        help_text="One line about this creator shown on the Creator Codes page (staff), e.g. 'Project Rend, the stats tracker'",
+    )
     approved = models.BooleanField(blank=False, null=False, default=True, help_text="Has this entry been validated?")
     django_user = models.OneToOneField(
         User, null=True, blank=True, on_delete=models.SET_NULL, related_name="known_player", help_text="Linked Django user account"
@@ -110,6 +121,37 @@ class KnownPlayer(models.Model):
         return self.name or None
 
     history = HistoricalRecords()
+
+
+class CreatorCategory(models.Model):
+    """Something a creator is known for (Moderating, YouTube, Sheets & Tools, ...): staff-curated, and the filters
+    visitors pick on the Creator Codes page."""
+
+    name = models.CharField(max_length=40, unique=True)
+    sort_order = models.PositiveSmallIntegerField(default=0, help_text="Lower first in the page's filter list")
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+        verbose_name_plural = "creator categories"
+
+    def __str__(self):
+        return self.name
+
+
+class CreatorLink(models.Model):
+    """A staff-curated link for a creator on the Creator Codes page (YouTube, a website, ...), until the platform can
+    be linked by signing in; accounts the player links and makes public are shown as well."""
+
+    player = models.ForeignKey(KnownPlayer, on_delete=models.CASCADE, related_name="creator_links")
+    url = models.URLField(max_length=300)
+    label = models.CharField(max_length=40, blank=True, default="", help_text="Shown instead of the site's name (optional)")
+    sort_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+
+    def __str__(self):
+        return self.label or self.url
 
 
 class LinkedAccount(models.Model):

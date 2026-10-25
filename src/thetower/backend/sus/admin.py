@@ -13,7 +13,7 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from simple_history.admin import SimpleHistoryAdmin
 
-from ..sus.models import GameInstance, KnownPlayer, LinkedAccount, ModerationRecord, PlayerId, SusPerson
+from ..sus.models import CreatorCategory, CreatorLink, GameInstance, KnownPlayer, LinkedAccount, ModerationRecord, PlayerId, SusPerson
 
 # Import custom User admin
 from . import user_admin  # noqa: F401 - This registers the custom User admin
@@ -334,6 +334,26 @@ class GameInstanceInline(nested_admin.NestedStackedInline):
     inlines = [PlayerIdInline]
 
 
+class CreatorLinkInline(nested_admin.NestedTabularInline):
+    model = CreatorLink
+    verbose_name = "Creator link"
+    verbose_name_plural = "Creator links (Creator Codes page; staff-curated)"
+    extra = 0
+    fields = ("url", "label", "sort_order")
+
+
+@admin.register(CreatorCategory)
+class CreatorCategoryAdmin(admin.ModelAdmin):
+    list_display = ("name", "sort_order", "_creators")
+    list_editable = ("sort_order",)
+    search_fields = ("name",)
+
+    def _creators(self, obj):
+        return obj.creators.count()
+
+    _creators.short_description = "Creators"
+
+
 @admin.register(KnownPlayer)
 class KnownPlayerAdmin(SimpleHistoryAdmin, nested_admin.NestedModelAdmin):
     def _ids(self, obj):
@@ -376,7 +396,8 @@ class KnownPlayerAdmin(SimpleHistoryAdmin, nested_admin.NestedModelAdmin):
     list_editable = ("approved", "creator_code")
     search_fields = ("name", "creator_code", "game_instances__player_ids__id", "django_user__username", "linked_accounts__account_id")
     readonly_fields = ()
-    inlines = (LinkedAccountInline, GameInstanceInline)
+    filter_horizontal = ("creator_categories",)
+    inlines = (LinkedAccountInline, GameInstanceInline, CreatorLinkInline)
 
 
 @admin.register(ModerationRecord)

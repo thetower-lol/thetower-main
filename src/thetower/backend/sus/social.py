@@ -8,9 +8,34 @@ the website and the bot name and link accounts the same way, for every platform 
 
 from __future__ import annotations
 
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 PRIVATE_MARK = "🔒 private"
+
+# Sites named by their brand when a link points at them; any other link is named by its domain
+_SITE_NAMES = {
+    "youtube.com": "YouTube",
+    "youtu.be": "YouTube",
+    "twitch.tv": "Twitch",
+    "reddit.com": "Reddit",
+    "x.com": "X",
+    "twitter.com": "X",
+    "tiktok.com": "TikTok",
+    "github.com": "GitHub",
+    "discord.gg": "Discord",
+    "discord.com": "Discord",
+    "kick.com": "Kick",
+}
+
+
+def link_site_name(url: str) -> str:
+    """What a link is called when nothing better is given: the site's brand ("YouTube"), else its domain."""
+    host = (urlparse(url).hostname or url).lower()
+    host = host[4:] if host.startswith("www.") else host
+    for domain, name in _SITE_NAMES.items():
+        if host == domain or host.endswith("." + domain):
+            return name
+    return host
 
 
 def account_text(platform: str, account_id: str, name: str | None) -> str:
