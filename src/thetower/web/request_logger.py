@@ -174,6 +174,11 @@ def _get_client_ip() -> str:
     return "unknown"
 
 
+def _loggable_query_params() -> dict[str, str]:
+    """The page's query params minus Cloudflare's challenge tokens (__cf_chl_tk, __cf_chl_rt_tk, ...), which must never be logged."""
+    return {k: v for k, v in st.query_params.items() if not k.startswith("__cf_chl")}
+
+
 def log_request() -> tuple[str, str]:
     """Log a web request, skipping duplicate logs within the same session.
 
@@ -194,7 +199,7 @@ def log_request() -> tuple[str, str]:
         path = urlparse(current_url).path or "/"
     except Exception:
         try:
-            path = f"/?{dict(st.query_params)}"
+            path = f"/?{_loggable_query_params()}"
         except Exception:
             path = "/"
         current_url = path
@@ -218,7 +223,7 @@ def log_request() -> tuple[str, str]:
         _purge_stale_sessions()
 
     try:
-        query_params = dict(st.query_params)
+        query_params = _loggable_query_params()
     except Exception:
         query_params = {}
 
