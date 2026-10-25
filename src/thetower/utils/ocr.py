@@ -69,8 +69,8 @@ _ID_LINE_RE = re.compile(r"\bID[\s:;]+", re.IGNORECASE)
 # ("...765E9EiB"). _HEX_FIXES then launders those into hex digits, so requiring the whole
 # token to validate discards a candidate whose id was in fact read correctly. Match the
 # leading hex run instead: greedy up to the 16 characters the game emits, but still short
-# enough to accept the shorter ids is_valid_tower_id() allows.
-_HEX_RUN_RE = re.compile(r"[0-9A-F]{13,16}")
+# enough to accept the shorter ids is_valid_tower_id() allows. An id may also start with G.
+_HEX_RUN_RE = re.compile(r"[0-9A-FG][0-9A-F]{11,15}")
 
 # ---------------------------------------------------------------------------
 # Cost limits
@@ -253,9 +253,10 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         # characters.  In Exo 2 (the font used for player IDs in The Tower)
         # the main error sources are characters outside this set, so the
         # whitelist eliminates most phantom misreads without any training data.
-        # "I" is included because the "ID:" label prefix requires it.
+        # "I" is included because the "ID:" label prefix requires it, and "G"
+        # because an id may start with one.
         # Note: Tesseract 5 requires -c syntax for config variables.
-        _ID_CONFIG = r"--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789ABCDEFabcdefIi:; "
+        _ID_CONFIG = r"--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789ABCDEFabcdefGgIi:; "
         # Collect all valid 16-char hex candidates across every scale variant and
         # pick the plurality winner.  A single scale can bias toward artifacts
         # introduced by heavy upsampling, so voting across scales improves accuracy.
@@ -317,14 +318,17 @@ def _ensure_tesseract() -> None:
 
 
 def _fix_hex(s: str) -> str:
-    """Apply OCR correction map to a candidate hex string."""
-    return s.upper().translate(_HEX_FIXES).replace(" ", "")
+    """Apply OCR correction map to a candidate hex string; a leading G is part of the id, so it is kept."""
+    s = s.upper().replace(" ", "")
+    if s.startswith("G"):
+        return "G" + s[1:].translate(_HEX_FIXES)
+    return s.translate(_HEX_FIXES)
 
 
 def _parse_id_from_text(text: str) -> Optional[str]:
     """Search OCR output for the ID line and return a validated hex string.
 
-    Uses centralized is_valid_tower_id() validation (13-16 hex characters).
+    Uses centralized is_valid_tower_id() validation (12-16 hex characters, the first may also be G).
     """
     for line in text.splitlines():
         if not _ID_LINE_RE.search(line):

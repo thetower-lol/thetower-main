@@ -11,9 +11,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_HEX_DIGITS = frozenset("0123456789abcdef")
-_TOWER_ID_MIN_LEN = 13
-_TOWER_ID_MAX_LEN = 16
+# A Tower player ID: 12-16 characters, all hex except that the first may also be G (case-insensitive)
+TOWER_ID_RE = re.compile(r"[0-9A-FG][0-9A-F]{11,15}", re.IGNORECASE)
 
 
 def save_with_reason(account, reason: str) -> None:
@@ -24,9 +23,8 @@ def save_with_reason(account, reason: str) -> None:
 
 
 def is_valid_tower_id(text: str) -> bool:
-    """Return True if text is a valid Tower player ID (13–16 hex characters, case-insensitive)."""
-    stripped = text.strip().lower()
-    return _TOWER_ID_MIN_LEN <= len(stripped) <= _TOWER_ID_MAX_LEN and all(c in _HEX_DIGITS for c in stripped)
+    """Return True if text is a valid Tower player ID (12–16 hex characters, the first may also be G; case-insensitive)."""
+    return bool(TOWER_ID_RE.fullmatch(text.strip()))
 
 
 def create_or_update_player(
