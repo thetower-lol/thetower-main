@@ -9,8 +9,9 @@ version, keeping the older eras so historical pages show the rewards of their da
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import NamedTuple, Optional
+from typing import Iterable, NamedTuple, Optional
 
 
 class RewardTier(NamedTuple):
@@ -356,3 +357,39 @@ def get_league_rules(league: str, patch=None) -> LeagueRules:
                 rules = era_rules
                 break
     return rules.get(league, rules["Legend"])
+
+
+# Cut lines within one bracket. Ties take the last-in-tie rank: tied players all share the worst
+# rank of their group, so a tie straddling a cut line lands the whole group on the wrong side of it.
+
+
+def promotion_cutoff_wave(waves: Iterable[float], promote_cutoff: int) -> Optional[float]:
+    """Wave of the last player to actually promote under the last-in-tie rank rule.
+
+    Returns the minimum wave whose entire tied group still fits within the top
+    ``promote_cutoff`` slots, or None if nobody in the bracket promotes (e.g. more
+    than ``promote_cutoff`` players all tied at the top wave).
+    """
+    cumulative = 0
+    result = None
+    for wave, count in sorted(Counter(waves).items(), reverse=True):
+        if cumulative + count > promote_cutoff:
+            break
+        cumulative += count
+        result = wave
+    return result
+
+
+def relegation_cutoff_wave(waves: Iterable[float], relegate_cutoff: int) -> Optional[float]:
+    """Wave of the highest-ranked player who demotes under the last-in-tie rank rule.
+
+    Returns the first wave (going highest to lowest) where the cumulative player
+    count reaches ``relegate_cutoff`` — those players' last-in-tie rank is at least
+    the cutoff, so they demote. Returns None if the bracket has fewer players than that.
+    """
+    cumulative = 0
+    for wave, count in sorted(Counter(waves).items(), reverse=True):
+        cumulative += count
+        if cumulative >= relegate_cutoff:
+            return wave
+    return None

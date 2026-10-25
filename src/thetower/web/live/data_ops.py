@@ -23,6 +23,7 @@ from thetower.backend.tourney_results.archive_utils import (
 )
 from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.data import get_all_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_ids, get_tourneys
+from thetower.backend.tourney_results.league_rules import promotion_cutoff_wave, relegation_cutoff_wave
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
@@ -772,44 +773,10 @@ def get_bracket_stats(df):
         Dictionary containing bracket statistics, including salt/spoon ranking brackets
         (hardest/easiest promotion and relegation by 5th/25th place wave).
     """
-
-    def _promotion_cutoff_wave(group, n):
-        """Wave of the last player to actually promote under the last-in-tie rank rule.
-
-        Tied players all share the worst rank in their group. This returns the minimum
-        wave whose entire tied group still fits within the top n slots. Returns None if
-        nobody in the bracket promotes (e.g. > n players all tied at the top wave).
-        """
-        sorted_counts = group.value_counts().sort_index(ascending=False)
-        cumulative = 0
-        result = None
-        for wave, cnt in sorted_counts.items():
-            if cumulative + cnt <= n:
-                cumulative += cnt
-                result = wave
-            else:
-                break
-        return result
-
-    def _relegation_cutoff_wave(group, n):
-        """Wave of the highest-ranked player who demotes under the last-in-tie rank rule.
-
-        Returns the first wave (going highest to lowest) where the cumulative player
-        count reaches n — those players' last-in-tie rank >= n, so they demote.
-        Returns None if fewer than n players in the bracket.
-        """
-        sorted_counts = group.value_counts().sort_index(ascending=False)
-        cumulative = 0
-        for wave, cnt in sorted_counts.items():
-            cumulative += cnt
-            if cumulative >= n:
-                return wave
-        return None
-
     group_by_bracket = df.groupby("bracket", observed=True).wave
 
-    fourth_place = group_by_bracket.apply(lambda x: _promotion_cutoff_wave(x, 4)).dropna()
-    twenty_fifth_place = group_by_bracket.apply(lambda x: _relegation_cutoff_wave(x, 25)).dropna()
+    fourth_place = group_by_bracket.apply(lambda x: promotion_cutoff_wave(x, 4)).dropna()
+    twenty_fifth_place = group_by_bracket.apply(lambda x: relegation_cutoff_wave(x, 25)).dropna()
 
     stats = {
         "total_brackets": df.groupby("bracket", observed=True).ngroups,
