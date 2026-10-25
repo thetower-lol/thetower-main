@@ -300,13 +300,16 @@ def auto_link_secondary_provider(
     secondary_account_id: str,
     secondary_display_name: str,
     how: str = "website",
+    primary_display_name: str | None = None,
 ) -> bool:
     """Link a secondary social account to the player already linked via the primary platform.
 
     Called after OAuth when a user connects a second provider while already verified. The new account starts
     with the role source instance of the logged-in primary account it was linked through; when that has none,
     the player's primary game instance, else any active one. *how* (e.g. "website: Link Reddit") starts the
-    reason recorded for the link.
+    reason recorded for the link, which goes on "logged in as <platform>:<account id> (<name>)". The name is
+    *primary_display_name* (the name the platform gave at this login), else the one stored when the logged-in
+    account was linked, so the record still says who it was if that account is later deleted.
     Safe to call even if the link already exists — returns False in that case.
 
     Returns True if a new LinkedAccount was created, False if not needed.
@@ -331,6 +334,14 @@ def auto_link_secondary_provider(
         instance = player.game_instances.filter(active=True).order_by("-primary", "id").first()
         role_source_instance_id = instance.id if instance else None
 
+    reason = f"{how}, logged in as {primary_platform}:{primary_account_id}"
+    # Parentheses would end the name early for readers of the reason (the bot's link log parses it), and the name is
+    # shortened rather than losing its closing parenthesis to the reason's 100-character limit
+    logged_in_name = (primary_display_name or primary_link.display_name or "").replace("(", "").replace(")", "").strip()
+    logged_in_name = logged_in_name[: max(0, 100 - len(reason) - 3)]
+    if logged_in_name:
+        reason += f" ({logged_in_name})"
+
     save_with_reason(
         LinkedAccount(
             player=player,
@@ -341,7 +352,7 @@ def auto_link_secondary_provider(
             verified_at=timezone.now(),
             role_source_instance_id=role_source_instance_id,
         ),
-        f"{how}, logged in as {primary_platform}:{primary_account_id}",
+        reason,
     )
     logger.info(
         "Auto-linked %s %s to player pk=%d via %s (role source instance %s)",
