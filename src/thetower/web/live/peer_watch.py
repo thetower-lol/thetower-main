@@ -160,14 +160,14 @@ def peer_watch():
         st.error("No live tournament data available.")
         return
 
-    found_ids = set(peer_live_df["player_id"].unique())
-    missing_ids = [pid for pid in peer_ids if pid not in found_ids]
-
     render_data_status(focal_league, "peer_watch")
 
     if peer_live_df.empty:
         st.warning(f"None of the {len(peer_ids)} peers are currently participating in the live tournament.")
         return
+
+    found_ids = set(peer_live_df["player_id"].unique())
+    missing_ids = [pid for pid in peer_ids if pid not in found_ids]
 
     st.info(
         f"**{len(found_ids)}** of {len(peer_ids)} peers found in live tournament"

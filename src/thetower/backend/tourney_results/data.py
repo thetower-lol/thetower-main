@@ -60,20 +60,19 @@ def wave_to_role_in_patch(roles: list[Role], role_bot_top: list[tuple[int, int]]
 def patch_to_roles(league):
     patch_to_roles = defaultdict(list)
 
-    patches = get_patches()
-    last_patch_with_roles = None
+    # A patch without roles of its own uses the latest earlier patch that had them
+    last_roles = ()
 
-    for i, patch in enumerate(patches):
+    for patch in get_patches():
         roles = tuple(Role.objects.filter(patch=patch, league=league))
 
-        if not roles:
-            if not last_patch_with_roles:
-                last_patch_with_roles = i - 1
+        if roles:
+            last_roles = roles
+        else:
+            roles = last_roles
 
-            roles = patch_to_roles[patches[last_patch_with_roles]]
-
         if not roles:
-            print("WARNING")
+            logging.warning(f"No roles for {league} in patch {patch} or any earlier patch")
 
         patch_to_roles[patch] = roles
 

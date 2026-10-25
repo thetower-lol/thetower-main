@@ -2,15 +2,19 @@ from django.db import migrations
 
 
 def upgrade(apps, schema_editor):
-    from thetower.backend.sus.models import SusPerson
+    # Models as they were at this migration: importing the live models breaks a fresh DB once later migrations change it
+    SusPerson = apps.get_model("sus", "SusPerson")
+    HistoricalSusPerson = apps.get_model("sus", "HistoricalSusPerson")
 
     for sus in SusPerson.objects.all():
-        history = sus.history.all()
+        history = list(HistoricalSusPerson.objects.filter(player_id=sus.player_id))
         created = [hist for hist in history if hist.history_type == "+"]
 
-        sus.created = created[0].history_date
-        sus.modified = max([sus_entry.history_date for sus_entry in history])
-        sus.save()
+        # update(), not save(): modified is auto_now, which would overwrite the value taken from history
+        SusPerson.objects.filter(pk=sus.pk).update(
+            created=created[0].history_date,
+            modified=max([sus_entry.history_date for sus_entry in history]),
+        )
 
 
 class Migration(migrations.Migration):
