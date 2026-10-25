@@ -6,7 +6,9 @@ import streamlit as st
 from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.data import get_all_banned_ids
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
+from thetower.backend.tourney_results.results_config import get_results_limit
 from thetower.backend.tourney_results.tourney_utils import get_tourney_state
+from thetower.backend.tourney_results.visibility import is_hidden_site
 
 _DEFAULT_LEAGUES = leagues[:4]
 _PLACES = list(range(1, 31))
@@ -18,7 +20,8 @@ def _compute_cohort_stats(result: TourneyResult, banned_ids: set) -> tuple[list[
     of players who would occupy that place in a perfectly-distributed bracket assignment.
 
     Methodology (as per community analysis):
-      - Sort all players globally by wave descending.
+      - Sort the players the results page lists globally by wave descending (outside the hidden
+        site that is only the rows above the league's public cap).
       - n_brackets = total_players // 30  (remainder players are ignored).
       - The place-k cohort is waves[(k-1)*n_brackets : k*n_brackets].
       - Report median and mean of that cohort.
@@ -29,9 +32,11 @@ def _compute_cohort_stats(result: TourneyResult, banned_ids: set) -> tuple[list[
         global_median: median of all player waves
         global_mean: mean of all player waves
     """
-    waves = list(
-        TourneyRow.objects.filter(result=result, position__gt=0).exclude(player_id__in=banned_ids).values_list("wave", flat=True).order_by("-wave")
-    )
+    rows = TourneyRow.objects.filter(result=result, position__gt=0).exclude(player_id__in=banned_ids)
+    if not is_hidden_site():
+        # Stats over the whole field reveal participation past the cap: use only the rows the results page shows
+        rows = rows.filter(position__lt=get_results_limit(result.league))
+    waves = list(rows.values_list("wave", flat=True).order_by("-wave"))
     if not waves:
         return [None] * 30, 0, 0.0, 0.0
 
@@ -57,7 +62,7 @@ def _compute_cohort_stats(result: TourneyResult, banned_ids: set) -> tuple[list[
 def compute_static_placement():
     st.header("Static Global Placement")
     st.caption(
-        "What-if analysis: players are sorted globally by wave and distributed one-per-bracket into "
+        "What-if analysis: the players listed in the tournament's results are sorted globally by wave and distributed one-per-bracket into "
         "hypothetical brackets. Each row shows the median (or mean) wave for the cohort of players "
         "who would hold that bracket place — bracket luck removed."
     )

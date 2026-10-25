@@ -6,6 +6,8 @@ import streamlit as st
 
 from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
+from thetower.backend.tourney_results.results_config import get_results_limit
+from thetower.backend.tourney_results.visibility import is_hidden_site
 
 
 @st.cache_data(ttl=300, show_spinner="Loading tournament data...")
@@ -32,10 +34,17 @@ def _load_median_data(
             all_result_ids.append(r["id"])
             all_dates.add(str(r["date"]))
 
-    # Fetch all waves in one query
+    # Fetch waves one query per league: each league has its own public cap. Medians over the whole
+    # field reveal participation past the cap, so outside the hidden site only the rows the results
+    # page shows count.
     waves_by_result: dict[int, list[int]] = defaultdict(list)
-    for row in TourneyRow.objects.filter(result__in=all_result_ids, position__gt=0).values("result_id", "wave"):
-        waves_by_result[row["result_id"]].append(row["wave"])
+    hidden_site = is_hidden_site()
+    for league in selected_leagues:
+        rows = TourneyRow.objects.filter(result__in=list(league_to_date_id[league].values()), position__gt=0)
+        if not hidden_site:
+            rows = rows.filter(position__lt=get_results_limit(league))
+        for row in rows.values("result_id", "wave"):
+            waves_by_result[row["result_id"]].append(row["wave"])
 
     # Fetch BCs with prefetch_related to avoid N+1 queries
     result_bcs: dict[int, str] = {}
@@ -57,7 +66,7 @@ def _load_median_data(
 def compute_median_history():
     st.header("Median Wave History")
     st.caption(
-        "Median (and mean) wave across all brackets in a league for each tournament. "
+        "Median (and mean) wave of the players listed in each tournament's results, per league. "
         "Useful for tracking overall difficulty and wave inflation over time."
     )
 
