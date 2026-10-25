@@ -37,21 +37,23 @@ def _render_limits_section() -> None:
     configured = on_disk.get("leagues", {})
 
     new_limits: dict[str, int] = {}
-    cols = st.columns(3)
-    for i, league in enumerate(leagues):
-        with cols[i % 3]:
-            configured_value = configured.get(league)
-            value = st.number_input(
-                league,
-                min_value=100,
-                max_value=100_000,
-                value=int(configured_value) if configured_value is not None else None,
-                step=100,
-                placeholder=f"{how_many_results_public_site:,} (default)",
-                key=f"results_limit_{league}",
-            )
-            if value is not None:
-                new_limits[league] = int(value)
+    # One st.columns row per three leagues: narrow screens stack columns, so filling a single set of
+    # columns would list them column by column instead of in league order.
+    for row_start in range(0, len(leagues), 3):
+        for col, league in zip(st.columns(3), leagues[row_start : row_start + 3]):
+            with col:
+                configured_value = configured.get(league)
+                value = st.number_input(
+                    league,
+                    min_value=100,
+                    max_value=100_000,
+                    value=int(configured_value) if configured_value is not None else None,
+                    step=100,
+                    placeholder=f"{how_many_results_public_site:,} (default)",
+                    key=f"results_limit_{league}",
+                )
+                if value is not None:
+                    new_limits[league] = int(value)
 
     if st.button("💾 Save Limits", type="primary"):
         try:
@@ -73,11 +75,7 @@ def _render_participation_section() -> None:
 
     selected_date = st.selectbox("Tournament date", available_dates, format_func=str)
 
-    counts = (
-        TourneyRow.objects.filter(result__date=selected_date, position__gt=0)
-        .values("result__league")
-        .annotate(participants=Count("id"))
-    )
+    counts = TourneyRow.objects.filter(result__date=selected_date, position__gt=0).values("result__league").annotate(participants=Count("id"))
     participants_by_league = {row["result__league"]: row["participants"] for row in counts}
     public_by_league = dict(TourneyResult.objects.filter(date=selected_date).values_list("league", "public"))
 
