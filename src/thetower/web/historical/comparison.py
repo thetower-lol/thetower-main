@@ -159,21 +159,29 @@ def compute_comparison(player_id=None, canvas=st):
     hidden_ids = set() if hidden_features else get_all_banned_ids()
     if not include_sus_enabled_for("comparison"):
         hidden_ids = hidden_ids | sus_ids
-    player_ids = PlayerId.objects.filter(id__in=users).select_related("game_instance__player")
+    player_ids = PlayerId.objects.filter(id__in=users)
     if hidden_ids:
         player_ids = player_ids.exclude(id__in=hidden_ids)
-    # Get all game instances from the player_ids
-    game_instances = [pid.game_instance for pid in player_ids if pid.game_instance]
-    # Get all known players from these game instances
-    known_players = {gi.player for gi in game_instances if gi.player}
-    # Get all PlayerIds across all game instances for these players
-    all_player_ids = (set(PlayerId.objects.filter(game_instance__player__in=known_players).values_list("id", flat=True)) | set(users)) - hidden_ids
+    # Every tower ID of the given game accounts, so a player who changed IDs is followed through the change. The
+    # player's other game accounts stay out: each is a separate competitor, and pulling them in drew a bracket
+    # member's main account beside the alt that was actually in the bracket, both under one name.
+    instance_ids = list(
+        PlayerId.objects.filter(game_instance_id__in=player_ids.values("game_instance_id")).values_list("id", "game_instance_id", "primary")
+    )
+    all_player_ids = ({pid for pid, _, _ in instance_ids} | set(users)) - hidden_ids
+    # One line per game account: each ID is counted under its account's primary ID (the lowest ID if none is primary)
+    account_id = {}
+    for pid, instance_id, primary in sorted(instance_ids, key=lambda row: (not row[2], row[0])):
+        account_id.setdefault(instance_id, pid)
+    id_mapping = {pid: account_id[instance_id] for pid, instance_id, _ in instance_ids}
 
     # Cross-league query: uses the highest per-league cap rather than per-league bounds.
     hidden_query = {} if hidden_features else {"result__public": True, "position__lt": get_max_results_limit()}
     rows = TourneyRow.objects.filter(player_id__in=all_player_ids, **hidden_query)
 
     player_df = get_details(rows)
+    if not player_df.empty:
+        player_df["id"] = player_df.id.map(lambda id_: id_mapping.get(id_, id_))
 
     patches_options = sorted([patch for patch in get_patches() if patch.version_minor], key=lambda patch: patch.start_date, reverse=True)
     graph_options = [st.session_state.options.default_graph.value] + [
