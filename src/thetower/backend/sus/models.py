@@ -159,6 +159,10 @@ class LinkedAccount(models.Model):
         default="",
         help_text="Reddit accounts only: special flair granted by the bot owner, e.g. 'Mod'; must match a flair template's text in the subreddit",
     )
+    public = models.BooleanField(
+        default=False,
+        help_text="Shown on the player's public profiles (website player page, bot /lookup and /profile); set by the player, off by default",
+    )
 
     class Meta:
         unique_together = [("platform", "account_id")]

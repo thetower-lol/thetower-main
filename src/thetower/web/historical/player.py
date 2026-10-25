@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from thetower.backend.sus.models import PlayerId
+from thetower.backend.sus.social import PRIVATE_MARK, profile_accounts
 from thetower.backend.tourney_results.constants import (
     Graph,
     leagues,
@@ -326,6 +327,20 @@ def render_player_action_links(container, player_id: str, joined_tourney: bool) 
         )
 
 
+def socials_html(accounts: list[dict]) -> str:
+    """The header line naming a player's linked accounts, each linked to its profile, or "" when there are none."""
+    if not accounts:
+        return ""
+    entries = []
+    for account in accounts:
+        text = escape(account["text"])
+        entry = f"<a href='{escape(account['url'])}' target='_blank'>{text}</a>" if account["url"] else text
+        if not account["public"]:
+            entry += f" {PRIVATE_MARK}"
+        entries.append(f"{escape(account['label'])}: {entry}")
+    return f"<div style='font-size: 15px'>{' · '.join(entries)}</div>"
+
+
 def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
     # Generate URLs
     player_url = f"https://{BASE_URL}/player?" + urlencode({"player": player_id}, doseq=True)
@@ -349,8 +364,9 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
     joined_tourney = bool(check_all_live_entry(player_df.iloc[0].id, excluded_ids=entry_excluded_ids()))
     tourney_join = "✅" if joined_tourney else "⛔"
 
-    # Get creator code from the player's KnownPlayer via GameInstance
+    # Get creator code and the linked accounts the player shows publicly from the player's KnownPlayer via GameInstance
     creator_code = ""
+    socials = ""
     try:
         # Look up the player by their player ID
         player_id_value = player_df.iloc[0].id
@@ -366,12 +382,15 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
 
             if known_player and known_player.creator_code:
                 creator_code = f"<div style='font-size: 15px'>Creator code: <span style='color:#cd4b3d; font-weight:bold;'>{known_player.creator_code}</span> <a href='https://store.techtreegames.com/thetower/' target='_blank' style='text-decoration: none;'>🏪</a></div>"
+            # Public accounts only; the staff site sees every account, the private ones marked
+            if known_player:
+                socials = socials_html(profile_accounts(known_player, include_private=bool(hidden_features)))
     except Exception:
-        # Silently fail if there's any issue looking up the creator code
+        # Silently fail if there's any issue looking up the creator code or linked accounts
         pass
 
     info_tab.write(
-        f"<table class='top'><tr><td>{avatar_string}</td><td><div style='font-size: 30px'><span style='vertical-align: middle;'>{real_name}</span></div><div style='font-size: 15px'>ID: {player_df.iloc[0].id} <a href='{player_url}' style='text-decoration: none;'>🔗</a></div><div style='font-size: 15px'>Joined the recent tourney {tourney_join}</div>{creator_code}</td><td>{relic_url}</td></tr></table>",
+        f"<table class='top'><tr><td>{avatar_string}</td><td><div style='font-size: 30px'><span style='vertical-align: middle;'>{real_name}</span></div><div style='font-size: 15px'>ID: {player_df.iloc[0].id} <a href='{player_url}' style='text-decoration: none;'>🔗</a></div><div style='font-size: 15px'>Joined the recent tourney {tourney_join}</div>{creator_code}{socials}</td><td>{relic_url}</td></tr></table>",
         unsafe_allow_html=True,
     )
 

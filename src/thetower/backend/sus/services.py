@@ -384,6 +384,22 @@ def get_linked_tower_ids(platform: str, account_id: str) -> list[str]:
     )
 
 
+def set_account_public(player, platform: str, account_id: str, public: bool, how: str) -> bool:
+    """Show or hide one of the player's active linked accounts on their public profiles (see sus.social).
+
+    *how* (e.g. "website", "bot") starts the reason recorded on the account's history. Returns True if the account
+    belongs to the player and the setting changed.
+    """
+    from thetower.backend.sus.models import LinkedAccount
+
+    account = LinkedAccount.objects.filter(player=player, platform=platform, account_id=str(account_id), active=True).first()
+    if account is None or account.public == public:
+        return False
+    account.public = public
+    save_with_reason(account, f"{how}: {'shown on' if public else 'hidden from'} profiles")
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Account management service functions
 # Used by both Discord bot UI and web UI — no direct ORM writes in the UI layer.

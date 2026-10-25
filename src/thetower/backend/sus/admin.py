@@ -279,6 +279,7 @@ class LinkedAccountInline(nested_admin.NestedTabularInline):
         "role_source_instance",
         "reddit_flair",
         "reddit_flair_role",
+        "public",
     )
     readonly_fields = ("verified_at",)
 
