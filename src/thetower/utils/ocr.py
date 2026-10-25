@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 try:
     import cv2
-    import numpy as np  # noqa: F401  (required by cv2)
+    import numpy as np
     import pytesseract
 
     _OCR_LIBS_AVAILABLE = True
@@ -126,6 +126,7 @@ class OcrResult:
     version: Optional[str] = None  # e.g. "27.5.0"
     build: Optional[str] = None  # e.g. "843"
     error: Optional[str] = None  # set if something went wrong during analysis
+    edge_sharpness: Optional[float] = None  # see _edge_sharpness; native screenshots score about 2.3 or more
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +165,9 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
         img = cv2.imread(str(image_path))
         if img is None:
             return OcrResult(error=f"Could not load image: {image_path}")
+
+        # Measured on the image as uploaded: downscaling below would make soft edges look sharper.
+        edge_sharpness = _edge_sharpness(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
 
         # Bring oversized screenshots down to the resolution the scale factors below
         # are tuned for, before any of them run.
@@ -276,6 +280,7 @@ def analyze_verification_screenshot(image_path: str) -> OcrResult:
             player_id=player_id,
             version=version,
             build=build,
+            edge_sharpness=edge_sharpness,
         )
 
     except Exception as exc:
@@ -315,6 +320,25 @@ def _ensure_tesseract() -> None:
     except Exception:
         # Don't raise here; pytesseract will raise with a clear error later.
         pass
+
+
+def _edge_sharpness(gray) -> float:
+    """How abruptly the strongest edges change, relative to the image's contrast range.
+
+    The mean Sobel magnitude of the strongest 0.5% of pixels, divided by the spread between the
+    0.5th and 99.5th brightness percentiles. A native screenshot's UI edges switch within a pixel
+    or two; photos of a screen, frames from a stream or recording, and upscaled crops smear them.
+    Measured 2026-10-25 on 400 approved submissions and 141 wrong-screen rejections: every native
+    screenshot scored about 2.3 or more, and everything below 2.2 was visibly soft: photos of
+    screens, emulator-window captures, zoomed crops, a 0.4 Mbps stream frame (1.9). Some photos
+    of screens score above 2.2. Unlike a whole-image blur score, it doesn't drop for dark, flat screens.
+    """
+    g = gray.astype(np.float32)
+    magnitude = cv2.magnitude(cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3), cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)).ravel()
+    k = max(1, magnitude.size // 200)
+    strongest = np.partition(magnitude, -k)[-k:]
+    contrast = float(np.percentile(g, 99.5) - np.percentile(g, 0.5)) or 1.0
+    return float(strongest.mean()) / contrast
 
 
 def _fix_hex(s: str) -> str:

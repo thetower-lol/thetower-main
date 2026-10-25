@@ -62,6 +62,11 @@ REVIEW_DB_PATH = UPLOAD_DIR / "review_queue.db"
 # Terminal statuses (submissions that are complete and should not be re-actioned)
 _TERMINAL_STATUSES = ("approved", "passed", "rejected", "abandoned", "failed")
 
+# A wrong-screen rejection below this edge sharpness (utils/ocr._edge_sharpness) is reported as
+# unclear_screenshot: the capture is too soft to read (a photo of a screen, a stream or recording
+# frame, a zoomed crop), so the user needs a native screenshot rather than a different screen.
+_UNCLEAR_SCREENSHOT_SHARPNESS = 2.2
+
 
 class ImageTooLargeError(ValueError):
     """Raised when a verification image exceeds MAX_UPLOAD_BYTES.
@@ -97,6 +102,7 @@ def run_ocr(image_path: Path, player_id: str) -> dict[str, Any]:
         - version: str | None - Game version
         - build: str | None - Game build
         - has_valid_labels: bool - True if correct screen detected
+        - edge_sharpness: float | None - How crisp the capture is (see utils/ocr._edge_sharpness)
         - error: str | None - Error message if OCR failed
         - error_category: str | None - Error category for user-facing messages:
             - "ocr_disabled" - OCR not available
@@ -126,6 +132,7 @@ def run_ocr(image_path: Path, player_id: str) -> dict[str, Any]:
                 "version": ocr.version,
                 "build": ocr.build,
                 "has_valid_labels": ocr.has_valid_labels,
+                "edge_sharpness": ocr.edge_sharpness,
                 "error": f"Invalid ID format: {ocr.player_id}",
                 "error_category": "invalid_id_format",
             }
@@ -147,6 +154,7 @@ def run_ocr(image_path: Path, player_id: str) -> dict[str, Any]:
             "version": ocr.version,
             "build": ocr.build,
             "has_valid_labels": ocr.has_valid_labels,
+            "edge_sharpness": ocr.edge_sharpness,
             "error": ocr.error,
             "error_category": error_category,
         }
@@ -272,8 +280,18 @@ def determine_initial_status(ocr_result: dict[str, Any], submitted_player_id: st
                 "return_to_caller": {"status": "mod_intent_review", "reason": f"ocr_unavailable_{intent}"},
             }
 
-    # Rule 2: Wrong screen → rejected (user uploaded wrong screen type)
+    # Rule 2: Wrong screen → rejected (user uploaded wrong screen type). A capture too soft to read
+    # gets its own reason, so the user is told to take a native screenshot instead.
     if not has_valid_labels:
+        edge_sharpness = ocr_result.get("edge_sharpness")
+        if edge_sharpness is not None and edge_sharpness < _UNCLEAR_SCREENSHOT_SHARPNESS:
+            reason = "unclear_screenshot"
+            user_message = (
+                "Your screenshot is too blurry to read. Open Settings in the game, take a screenshot on that device, and upload it uncropped"
+            )
+        else:
+            reason = "wrong_screen"
+            user_message = "Please upload a screenshot of your Settings screen showing your Player ID"
         return {
             "status": "rejected",
             "ocr_player_id": None,
@@ -281,8 +299,8 @@ def determine_initial_status(ocr_result: dict[str, Any], submitted_player_id: st
             "build": None,
             "return_to_caller": {
                 "status": "rejected",
-                "reason": "wrong_screen",
-                "user_message": "Please upload a screenshot of your Settings screen showing your Player ID",
+                "reason": reason,
+                "user_message": user_message,
             },
         }
 
@@ -2582,6 +2600,8 @@ def process_verification(
         # OCR diagnostic fields — helps diagnose failures on the event timeline
         if not ocr_result.get("has_valid_labels", True):
             event_data["valid_screen"] = False
+        if ocr_result.get("edge_sharpness") is not None:
+            event_data["edge_sharpness"] = round(ocr_result["edge_sharpness"], 2)
         if ocr_result.get("error"):
             event_data["ocr_error_detail"] = ocr_result["error"]
         add_event(stem, event_data)
