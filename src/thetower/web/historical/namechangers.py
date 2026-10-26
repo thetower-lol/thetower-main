@@ -11,10 +11,11 @@ from django.db.models import Count, Max
 
 from thetower.backend.sus.models import PlayerId
 from thetower.backend.tourney_results.constants import leagues
-from thetower.backend.tourney_results.data import get_sus_ids
+from thetower.backend.tourney_results.data import get_all_banned_ids, get_sus_ids
 from thetower.backend.tourney_results.formatting import make_player_url
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
+from thetower.backend.tourney_results.visibility import is_hidden_site
 
 COLUMNS = ["real_name", "id", "namechanged_times", "total"]
 
@@ -38,13 +39,14 @@ def top_league_result_ids(results: Iterable[tuple[int, date, str]]) -> list[int]
     return ids
 
 
-def summarize_namechangers(name_counts: pd.DataFrame, player_ids: pd.DataFrame, sus_ids: set) -> pd.DataFrame:
+def summarize_namechangers(name_counts: pd.DataFrame, player_ids: pd.DataFrame, excluded_ids: set) -> pd.DataFrame:
     """Players with more than one tournament nickname, from per-(player_id, nickname) row counts.
 
     name_counts: one row per (player_id, nickname) with the number of results under that name.
     player_ids: one row per known tower id with its person (player), real_name and primary flag.
     Every tower id a person owns counts toward that person, who is listed under their primary id;
-    unknown ids, people without a primary id and (unless included) sus players are dropped.
+    unknown ids, people without a primary id and every excluded id (a row's own tower id or the person's
+    primary id) are dropped.
     """
     if name_counts.empty or player_ids.empty:
         return pd.DataFrame(columns=COLUMNS)
@@ -53,7 +55,7 @@ def summarize_namechangers(name_counts: pd.DataFrame, player_ids: pd.DataFrame, 
     known = name_counts.merge(ids[["tower_id", "player", "real_name"]], left_on="player_id", right_on="tower_id")
     primary_id = ids[ids.primary].drop_duplicates("player").set_index("player")["tower_id"]
     known["id"] = known["player"].map(primary_id)
-    known = known[known["id"].notna() & ~known["id"].isin(sus_ids)]
+    known = known[known["id"].notna() & ~known["id"].isin(excluded_ids) & ~known["tower_id"].isin(excluded_ids)]
 
     summary = (
         known.groupby("id").agg(real_name=("real_name", "first"), namechanged_times=("nickname", "nunique"), total=("total", "sum")).reset_index()
@@ -63,13 +65,15 @@ def summarize_namechangers(name_counts: pd.DataFrame, player_ids: pd.DataFrame, 
 
 
 @st.cache_data(ttl=6 * 3600, persist="disk", show_spinner="Finding name changers...")
-def load_namechangers(latest_result_date, include_sus: bool) -> pd.DataFrame:
+def load_namechangers(latest_result_date, include_sus: bool, hide_banned: bool) -> pd.DataFrame:
     """The name-changer table, keyed on the newest result so it is rebuilt only after an import.
 
     The database does the heavy lifting: it collapses every row into one count per (player_id, nickname),
     tens of thousands of rows instead of the 1.7M the old page pulled into pandas on every visit. The rows
     are selected by result id on purpose: filtering by league through the result join makes SQLite scan
     the whole 22M-row table via the player_id index (75s); result ids use the result_id index (seconds).
+
+    hide_banned is part of the cache key on purpose: the persisted cache may be shared by both sites.
     """
     result_ids = top_league_result_ids(TourneyResult.objects.values_list("id", "date", "league"))
     name_counts = pd.DataFrame(
@@ -80,8 +84,10 @@ def load_namechangers(latest_result_date, include_sus: bool) -> pd.DataFrame:
         list(PlayerId.objects.values("id", "game_instance__player__id", "game_instance__player__name", "primary")),
         columns=["id", "game_instance__player__id", "game_instance__player__name", "primary"],
     ).rename(columns={"game_instance__player__id": "player", "game_instance__player__name": "real_name"})
-    sus_ids = set() if include_sus else set(get_sus_ids())
-    return summarize_namechangers(name_counts, player_ids, sus_ids)
+    excluded_ids = set() if include_sus else set(get_sus_ids())
+    if hide_banned:
+        excluded_ids |= get_all_banned_ids()
+    return summarize_namechangers(name_counts, player_ids, excluded_ids)
 
 
 def get_namechangers():
@@ -93,7 +99,8 @@ def get_namechangers():
     st.write(table_styling, unsafe_allow_html=True)
 
     latest_result_date = TourneyResult.objects.aggregate(latest=Max("date"))["latest"]
-    table = load_namechangers(latest_result_date, include_sus_enabled_for("namechangers"))
+    # The public site never shows a banned player, hard or soft; the hidden site shows everyone
+    table = load_namechangers(latest_result_date, include_sus_enabled_for("namechangers"), not is_hidden_site())
     if table.empty:
         st.info("No name changes found.")
         return

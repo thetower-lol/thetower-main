@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from thetower.backend.tourney_results.constants import leagues
+from thetower.backend.tourney_results.data import get_all_banned_ids
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
 from thetower.backend.tourney_results.results_config import get_results_limit
 from thetower.backend.tourney_results.visibility import is_hidden_site
@@ -36,15 +37,18 @@ def _load_median_data(
 
     # Fetch waves one query per league: each league has its own public cap. Medians over the whole
     # field reveal participation past the cap, so outside the hidden site only the rows the results
-    # page shows count.
+    # page shows count. Banned runs (hard or soft) stay out of the statistics on both sites; soft-banned
+    # rows keep their positions, so they are dropped here rather than by the position filter.
     waves_by_result: dict[int, list[int]] = defaultdict(list)
     hidden_site = is_hidden_site()
+    banned_ids = get_all_banned_ids()
     for league in selected_leagues:
         rows = TourneyRow.objects.filter(result__in=list(league_to_date_id[league].values()), position__gt=0)
         if not hidden_site:
             rows = rows.filter(position__lt=get_results_limit(league))
-        for row in rows.values("result_id", "wave"):
-            waves_by_result[row["result_id"]].append(row["wave"])
+        for row in rows.values("result_id", "player_id", "wave"):
+            if row["player_id"] not in banned_ids:
+                waves_by_result[row["result_id"]].append(row["wave"])
 
     # Fetch BCs with prefetch_related to avoid N+1 queries
     result_bcs: dict[int, str] = {}

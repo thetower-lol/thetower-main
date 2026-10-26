@@ -187,14 +187,15 @@ def compute_overview_stats() -> dict[str, Any]:
     serialisation.  Excludes sus/banned players.
     """
     from .constants import leagues
-    from .data import get_banned_ids, get_sus_ids
+    from .data import get_all_banned_ids, get_sus_ids
     from .models import TourneyResult
     from .sus_config import include_sus_enabled_for
 
     hidden_features = bool(os.environ.get("HIDDEN_FEATURES"))
     public = {"public": True} if not hidden_features else {}
 
-    excluded_ids = get_banned_ids()
+    # Soft bans too: both sites read this one file, and the public site never shows a banned player
+    excluded_ids = get_all_banned_ids()
     if not include_sus_enabled_for("overview_cache"):
         excluded_ids = excluded_ids | get_sus_ids()
 
