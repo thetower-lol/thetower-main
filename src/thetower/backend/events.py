@@ -53,6 +53,8 @@ CATALOGUE = frozenset(
         "instance.deleted",
         # stem, actor: a verification submission changed; its Discord messages need refreshing
         "verification.updated",
+        # date, result_ids: an import run finished with at least one league's results (and their rows) written
+        "results.imported",
     }
 )
 

@@ -16,6 +16,7 @@ django.setup()
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from thetower.backend.env_config import get_csv_data
+from thetower.backend.events import emit
 
 from ..constants import leagues, top_league
 from ..get_results import get_file_name, get_last_date
@@ -58,6 +59,8 @@ def update_summary(result):
 
 
 def execute():
+    imported_ids = []
+    summary_thread = None
     for league in leagues:
         last_date = get_last_date()
 
@@ -124,18 +127,27 @@ def execute():
             logging.info("No battle conditions to apply")
 
         create_tourney_rows(result)
+        imported_ids.append(result.id)
 
         # Generate summary for the top-league results
         if league == top_league:
             logging.info(f"Generating summary for {league} league results")
-            thread = threading.Thread(target=update_summary, args=(result,))
-            thread.start()
+            summary_thread = threading.Thread(target=update_summary, args=(result,))
+            summary_thread.start()
 
     # Regenerate overview cache after all leagues have been imported so the
     # page stats are up to date without any DB queries on the next page load.
     logging.info("Regenerating overview cache after import")
     regenerate_overview_cache()
     logging.info("Overview cache regeneration complete")
+
+    if imported_ids:
+        # The summary saves its result, which the bot's change check counts as an edit: let it land first,
+        # so the bot's reload on this event already includes it and the check doesn't reload a second time
+        if summary_thread:
+            summary_thread.join()
+        logging.info(f"Announcing {len(imported_ids)} imported result(s) for {last_date} to the bot")
+        emit("results.imported", date=last_date, result_ids=imported_ids)
 
 
 if __name__ == "__main__":
