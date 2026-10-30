@@ -26,7 +26,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 TOWER_SSH_DIR = Path("/var/lib/tower/.ssh")
 TOWER_USER = "tower"
 

@@ -199,7 +199,7 @@ class Results:
         if self.hidden_features:
             indices += ["id", "sus_me"]
 
-            def styling(row):
+            def styling(row):  # noqa: F811 - the admin page's styling replaces the public one above
                 # Match by id, not position: banned/unplaced rows have position replaced with "—"
                 matched_df = self.df[self.df["id"] == row["id"]]
                 wave_color = matched_df.wave_role_color.iloc[0] if not matched_df.empty else "#FFF"
