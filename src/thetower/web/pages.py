@@ -52,47 +52,47 @@ if st.session_state.get("options") is None:
     st.session_state.options = options
 
 home_info_pages = [
-    _page("historical/overview.py", title="Overview", icon="🏠", url_path="overview"),
-    _page("discord_bot.py", title="Discord Bot", icon="🆕", url_path="discordbot"),
-    _page("historical/creator_codes.py", title="Creator Codes", icon="🏪", url_path="creatorcodes"),
-    _page("historical/about.py", title="About", icon="👴", url_path="about"),
+    _page("historical/overview.py", title="Overview", icon=":material/home:", url_path="overview"),
+    _page("discord_bot.py", title="Discord Bot", icon=":material/smart_toy:", url_path="discordbot"),
+    _page("historical/creator_codes.py", title="Creator Codes", icon=":material/storefront:", url_path="creatorcodes"),
+    _page("historical/about.py", title="About", icon=":material/info:", url_path="about"),
 ]
 
 current_tournament_pages = [
-    _page("live/bcs.py", title="Battle Conditions", icon="🔮", url_path="bcs"),
-    _page("live/live_progress.py", title="Live Progress", icon="⏱️", url_path="liveprogress"),
-    _page("live/live_results.py", title="Live Results", icon="📋", url_path="liveresults"),
-    _page("live/live_bracket.py", title="Live Bracket View", icon="🔠", url_path="livebracketview"),
-    _page("live/peer_watch.py", title="Peer Watch", icon="👥", url_path="peerwatch"),
+    _page("live/bcs.py", title="Battle Conditions", icon=":material/tune:", url_path="bcs"),
+    _page("live/live_progress.py", title="Live Progress", icon=":material/timer:", url_path="liveprogress"),
+    _page("live/live_results.py", title="Live Results", icon=":material/list_alt:", url_path="liveresults"),
+    _page("live/live_bracket.py", title="Live Bracket View", icon=":material/grid_view:", url_path="livebracketview"),
+    _page("live/peer_watch.py", title="Peer Watch", icon=":material/group:", url_path="peerwatch"),
 ]
 
 live_analytics_pages = [
-    _page("live/live_bracket_analysis.py", title="Live Bracket Analysis", icon="📉", url_path="livebracketanalysis"),
-    _page("live/live_placement_analysis.py", title="Live Placement Analysis", icon="📈", url_path="liveplacement"),
-    _page("live/live_quantile_analysis.py", title="Live Quantile Analysis", icon="📊", url_path="livequantile"),
+    _page("live/live_bracket_analysis.py", title="Live Bracket Analysis", icon=":material/analytics:", url_path="livebracketanalysis"),
+    _page("live/live_placement_analysis.py", title="Live Placement Analysis", icon=":material/trending_up:", url_path="liveplacement"),
+    _page("live/live_quantile_analysis.py", title="Live Quantile Analysis", icon=":material/bar_chart:", url_path="livequantile"),
 ]
 
 player_statistics_pages = [
-    _page("historical/player.py", title="Individual Player Stats", icon="⛹️", url_path="player"),
-    _page("historical/comparison.py", title="Player Comparison", icon="🔃", url_path="comparison"),
-    _page("historical/namechangers.py", title="Namechangers", icon="💩", url_path="namechangers"),
+    _page("historical/player.py", title="Individual Player Stats", icon=":material/person:", url_path="player"),
+    _page("historical/comparison.py", title="Player Comparison", icon=":material/compare_arrows:", url_path="comparison"),
+    _page("historical/namechangers.py", title="Namechangers", icon=":material/badge:", url_path="namechangers"),
 ]
 
 historical_data_pages = [
-    _page("historical/results.py", title="League Standings", icon="🐳", url_path="results"),
-    _page("historical/counts.py", title="Wave Cutoffs", icon="🐈", url_path="counts"),
-    _page("historical/winners.py", title="Winners", icon="🔥", url_path="winners"),
-    _page("historical/median_history.py", title="Median History", icon="📉", url_path="medianhistory"),
-    _page("historical/static_placement.py", title="Static Global Placement", icon="🌐", url_path="staticplacement"),
-    _page("historical/regression_analysis.py", title="Tournament Trends", icon="📈", url_path="tournamenttrends"),
-    _page("historical/bc_filter.py", title="Battle Condition Filter", icon="🔎", url_path="bcfilter"),
+    _page("historical/results.py", title="League Standings", icon=":material/leaderboard:", url_path="results"),
+    _page("historical/counts.py", title="Wave Cutoffs", icon=":material/waves:", url_path="counts"),
+    _page("historical/winners.py", title="Winners", icon=":material/emoji_events:", url_path="winners"),
+    _page("historical/median_history.py", title="Median History", icon=":material/show_chart:", url_path="medianhistory"),
+    _page("historical/static_placement.py", title="Static Global Placement", icon=":material/public:", url_path="staticplacement"),
+    _page("historical/regression_analysis.py", title="Tournament Trends", icon=":material/insights:", url_path="tournamenttrends"),
+    _page("historical/bc_filter.py", title="Battle Condition Filter", icon=":material/filter_alt:", url_path="bcfilter"),
 ]
 
 archive_pages = [
-    _page("historical/deprecated/top_scores.py", title="Top Scores", icon="🤑", url_path="top"),
-    _page("historical/deprecated/breakdown.py", title="Breakdown", icon="🪁", url_path="breakdown"),
-    _page("historical/deprecated/various.py", title="Relics and Avatars", icon="👽", url_path="relics"),
-    _page("historical/deprecated/fallen_defenders.py", title="Fallen Defenders", icon="🪦", url_path="fallen"),
+    _page("historical/deprecated/top_scores.py", title="Top Scores", icon=":material/star:", url_path="top"),
+    _page("historical/deprecated/breakdown.py", title="Breakdown", icon=":material/pie_chart:", url_path="breakdown"),
+    _page("historical/deprecated/various.py", title="Relics and Avatars", icon=":material/diamond:", url_path="relics"),
+    _page("historical/deprecated/fallen_defenders.py", title="Fallen Defenders", icon=":material/person_off:", url_path="fallen"),
 ]
 
 # Hidden admin pages (only available when HIDDEN_FEATURES env var is set)
@@ -103,31 +103,31 @@ admin_analytics_pages: list[st.Page] = []
 
 if hidden_features:
     admin_analytics_pages = [
-        st.Page("historical/league_stats.py", title="League Statistics", icon="📊", url_path="leaguestats"),
+        st.Page("historical/league_stats.py", title="League Statistics", icon=":material/query_stats:", url_path="leaguestats"),
     ]
 
     admin_system_health_pages = [
-        st.Page("admin/service_status.py", title="Service Status", icon="🔧", url_path="services"),
-        st.Page("admin/codebase_status.py", title="Codebase Status", icon="📦", url_path="codebase"),
-        st.Page("admin/migrations.py", title="Migrations", icon="🔄", url_path="migrations"),
-        st.Page("admin/site_settings.py", title="Site Settings", icon="⚙️", url_path="sitesettings"),
-        st.Page("admin/site_popups.py", title="Site Popups", icon="📣", url_path="sitepopups"),
-        st.Page("admin/results_limits.py", title="Results Limits", icon="🔢", url_path="resultslimits"),
-        st.Page("admin/access_log.py", title="Access Log Viewer", icon="🌐", url_path="accesslog"),
-        st.Page("admin/access_log_stats.py", title="Access Log Stats", icon="📊", url_path="accesslogstats"),
-        st.Page("admin/api_log.py", title="API Request Log", icon="🔑", url_path="apilog"),
-        st.Page("admin/backup_status.py", title="Backup Status", icon="☁️", url_path="backupstatus"),
-        st.Page("admin/resource_monitor.py", title="Resource Monitor", icon="📉", url_path="resourcemonitor"),
+        st.Page("admin/service_status.py", title="Service Status", icon=":material/dns:", url_path="services"),
+        st.Page("admin/codebase_status.py", title="Codebase Status", icon=":material/inventory_2:", url_path="codebase"),
+        st.Page("admin/migrations.py", title="Migrations", icon=":material/sync:", url_path="migrations"),
+        st.Page("admin/site_settings.py", title="Site Settings", icon=":material/settings:", url_path="sitesettings"),
+        st.Page("admin/site_popups.py", title="Site Popups", icon=":material/campaign:", url_path="sitepopups"),
+        st.Page("admin/results_limits.py", title="Results Limits", icon=":material/pin:", url_path="resultslimits"),
+        st.Page("admin/access_log.py", title="Access Log Viewer", icon=":material/list:", url_path="accesslog"),
+        st.Page("admin/access_log_stats.py", title="Access Log Stats", icon=":material/monitoring:", url_path="accesslogstats"),
+        st.Page("admin/api_log.py", title="API Request Log", icon=":material/key:", url_path="apilog"),
+        st.Page("admin/backup_status.py", title="Backup Status", icon=":material/cloud_done:", url_path="backupstatus"),
+        st.Page("admin/resource_monitor.py", title="Resource Monitor", icon=":material/memory:", url_path="resourcemonitor"),
     ]
 
     admin_moderation_pages = [
-        st.Page("admin/visibility_admin.py", title="Moderation Visibility Config", icon="🛑", url_path="visibilityadmin"),
-        st.Page("admin/sus_moderation.py", title="Sus Moderation", icon="🚫", url_path="susmoderation"),
-        st.Page("admin/active_bans.py", title="Active Bans", icon="⛔", url_path="activebans"),
-        st.Page("admin/multiple_moderation.py", title="Multiple Moderation", icon="⚠️", url_path="multiplemoderation"),
-        st.Page("admin/league_progression.py", title="League Progression", icon="📈", url_path="leagueprogression"),
-        st.Page("admin/duplicate_tournaments.py", title="Duplicate Tournaments", icon="🔍", url_path="duplicates"),
-        st.Page("admin/bc_mismatch.py", title="BC Mismatch Analysis", icon="⚖️", url_path="bcmismatch"),
+        st.Page("admin/visibility_admin.py", title="Moderation Visibility Config", icon=":material/visibility_off:", url_path="visibilityadmin"),
+        st.Page("admin/sus_moderation.py", title="Sus Moderation", icon=":material/gavel:", url_path="susmoderation"),
+        st.Page("admin/active_bans.py", title="Active Bans", icon=":material/block:", url_path="activebans"),
+        st.Page("admin/multiple_moderation.py", title="Multiple Moderation", icon=":material/warning:", url_path="multiplemoderation"),
+        st.Page("admin/league_progression.py", title="League Progression", icon=":material/stairs:", url_path="leagueprogression"),
+        st.Page("admin/duplicate_tournaments.py", title="Duplicate Tournaments", icon=":material/content_copy:", url_path="duplicates"),
+        st.Page("admin/bc_mismatch.py", title="BC Mismatch Analysis", icon=":material/balance:", url_path="bcmismatch"),
     ]
 
 
@@ -243,7 +243,7 @@ if not st.session_state.get("tz_initialized"):
         st.session_state.tz_initialized = True
 
 with st.sidebar:
-    _tz_label = "Timezone ✏️" if st.session_state.tz_is_user_set else "Timezone"
+    _tz_label = "Timezone (set by you)" if st.session_state.tz_is_user_set else "Timezone"
     _can_reset = st.session_state.tz_is_user_set and st.session_state.tz_sniffed
     if _can_reset:
         st.markdown(f"**{_tz_label}**")
@@ -257,7 +257,7 @@ with st.sidebar:
                 label_visibility="collapsed",
             )
         with _tz_reset_col:
-            st.button("🔁", help="Reset to browser-detected timezone", on_click=_reset_tz, type="tertiary")
+            st.button(":material/restart_alt:", help="Reset to browser-detected timezone", on_click=_reset_tz, type="tertiary")
     else:
         st.selectbox(_tz_label, options=_all_timezones, key="user_timezone", on_change=_on_tz_change)
     st.toggle("24-hour clock", key="time_24h", on_change=_on_time_format_change)
@@ -310,21 +310,22 @@ except BaseException as _exc:  # re-raised below; BaseException so Streamlit's c
 finally:
     _render_stats = log_render_complete(_render_id, _path, _render_clock, _render_status)
 # Unlabeled on purpose: wall ms | cpu ms | runs in flight, same order as the render log line.
-_render_badge = f"⚡ {_render_stats.elapsed_ms} ms | {_render_stats.cpu_ms} | {_render_stats.inflight}"
+_render_badge = f"{_render_stats.elapsed_ms} ms | {_render_stats.cpu_ms} | {_render_stats.inflight}"
 st.sidebar.markdown(
-    """<div style="text-align:center; margin-bottom:0.5em; font-size:0.9em; padding:0.5em; background-color:rgba(30,144,255,0.1); border-radius:0.5em; border:1px solid rgba(30,144,255,0.3);">
-        <b>🐟 Support the fishy!</b><br>
-        Use code <span style="color:#cd4b3d; font-weight:bold;">thedisasterfish</span> in the <a href="https://store.techtreegames.com/thetower/">TechTree Store</a>
+    """<div style="margin-bottom:8px; padding:12px; font-size:14px; line-height:20px; color:#a3a8b8; border-radius:8px; border:1px solid rgba(250,250,250,0.08);">
+        <div style="color:#fafafa; font-weight:500;">🐟 Support the fishy</div>
+        Use code <span style="color:#fafafa; font-family:'Source Code Pro',ui-monospace,monospace;">thedisasterfish</span>
+        in the <a href="https://store.techtreegames.com/thetower/">TechTree Store</a>
     </div>""",
     unsafe_allow_html=True,
 )
 try:
     _pkg_version = version("thetower")
-    _prefix = "🔧 " if hidden_features else ""
+    _prefix = "Admin · " if hidden_features else ""
     _version_line = f"{_prefix}Version: {_pkg_version} &nbsp;·&nbsp; {_render_badge}"
 except Exception:
     _version_line = _render_badge
 st.sidebar.markdown(
-    f'<div style="text-align:center; font-size:0.75em; color:#888888; margin-bottom:0.5em;">{_version_line}</div>',
+    f'<div style="font-size:12px; color:#8b90a0; margin-bottom:8px; font-variant-numeric:tabular-nums;">{_version_line}</div>',
     unsafe_allow_html=True,
 )

@@ -1,5 +1,7 @@
 [theme]
 base = "dark"
+# Cyan from the logo; replaces Streamlit's default red on toggles, radios, focus and selection
+primaryColor = "#52b9e4"
 
 
 [server]

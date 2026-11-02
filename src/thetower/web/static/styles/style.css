@@ -1,6 +1,6 @@
 :root {
     --secondary-background: #262730;
-    --active-element: #ff4b4b;
+    --hairline: rgba(250, 250, 250, 0.08);
     --text: #fafafa;
 }
 
@@ -16,9 +16,10 @@ a:hover {
 
 table {
     width: 100%;
-    border: 1px var(--active-element) solid !important;
+    border: 1px var(--hairline) solid !important;
     border-collapse: collapse;
-    margin-bottom: 10px !important;
+    margin-bottom: 12px !important;
+    font-variant-numeric: tabular-nums;
 }
 
 tbody {

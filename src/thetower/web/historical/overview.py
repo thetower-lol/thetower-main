@@ -40,7 +40,7 @@ def render_tournament_countdown():
       Results Available In → Next Tournament Starts In (for tourney_date).
     """
     if not TOWERBCS_AVAILABLE:
-        st.info("ℹ️ Tournament countdown unavailable - thetower-bcs package not installed")
+        st.info("Tournament countdown unavailable - thetower-bcs package not installed")
         return
 
     try:
@@ -54,9 +54,9 @@ def render_tournament_countdown():
                 if top_bcs:
                     bc_names = " • ".join(top_bcs)
                     bcs_html = f"""
-<div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.2);">
-    <div style="font-size: 0.85rem; color: #f0f0f0; margin-bottom: 0.3rem;">{top_league} Battle Conditions:</div>
-    <div style="font-size: 0.95rem; color: white; font-weight: 500;">{bc_names}</div>
+<div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(250,250,250,0.08);">
+    <div style="font-size: 13px; line-height: 20px; color: #a3a8b8; margin-bottom: 4px;">{top_league} battle conditions</div>
+    <div style="font-size: 14px; line-height: 20px; color: #fafafa;">{bc_names}</div>
 </div>"""
             except Exception:
                 pass  # Silently fail BC prediction
@@ -100,42 +100,50 @@ def render_tournament_countdown():
             prev_short = prev_tourney_date.strftime("%b %d")
             phases.append(
                 {
-                    "label": f"📊 {prev_short} Results Available In",
+                    "label": f"{prev_short} results available in",
                     "sub": "Tournament complete — awaiting import",
                     "t": int(prev_results_available.timestamp() * 1000),
                 }
             )
-        phases.append({"label": "⏰ Tournament Starts In", "sub": tourney_date_str, "t": int(tourney_start.timestamp() * 1000)})
-        phases.append({"label": "🎮 Entry Closes In", "sub": "Tournament is live — join now!", "t": int(entry_closes.timestamp() * 1000)})
-        phases.append({"label": "⏱️ Tournament Ends In", "sub": "Entry closed — finishing runs only", "t": int(tourney_ends.timestamp() * 1000)})
+        phases.append({"label": "Tournament starts in", "sub": tourney_date_str, "t": int(tourney_start.timestamp() * 1000)})
+        phases.append({"label": "Entry closes in", "sub": "Tournament is live, entry open", "t": int(entry_closes.timestamp() * 1000)})
+        phases.append({"label": "Tournament ends in", "sub": "Entry closed — finishing runs only", "t": int(tourney_ends.timestamp() * 1000)})
         tourney_short = tourney_date.strftime("%b %d")
         phases.append(
             {
-                "label": f"📊 {tourney_short} Results Available In",
+                "label": f"{tourney_short} results available in",
                 "sub": "Tournament complete — awaiting import",
                 "t": int(results_available.timestamp() * 1000),
             }
         )
-        phases.append({"label": "⏰ Next Tournament Starts In", "sub": next_tourney_date_str, "t": int(next_tourney_start.timestamp() * 1000)})
+        phases.append({"label": "Next tournament starts in", "sub": next_tourney_date_str, "t": int(next_tourney_start.timestamp() * 1000)})
 
         phases_json = json.dumps(phases, ensure_ascii=False)
 
         components.html(
             f"""<!DOCTYPE html>
 <html><head><style>
-body{{margin:0;padding:0;font-family:sans-serif;}}
+body{{margin:0;padding:0;font-family:"Source Sans 3","Source Sans Pro",system-ui,sans-serif;}}
+.cd{{margin:2px;padding:24px;text-align:center;background:#161922;border:1px solid rgba(250,250,250,.08);border-radius:16px;}}
+.sub{{margin:0 0 4px 0;color:#a3a8b8;font-size:14px;line-height:20px;}}
+.label{{margin:0;color:#fafafa;font-size:20px;line-height:28px;font-weight:500;}}
+.row{{display:flex;justify-content:center;align-items:flex-start;gap:12px;margin-top:16px;flex-wrap:wrap;}}
+.num,.sep{{font-family:"Source Code Pro",ui-monospace,monospace;font-size:40px;line-height:1;}}
+.num{{font-variant-numeric:tabular-nums;font-weight:500;color:#52b9e4;}}
+.sep{{color:rgba(250,250,250,.24);}}
+.unit{{margin-top:4px;font-size:12px;line-height:16px;color:#8b90a0;}}
 </style></head><body>
-<div style="text-align:center;padding:1.5rem;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:10px;margin:2px;box-shadow:0 4px 6px rgba(0,0,0,.3);">
-    <p id="phase-sub" style="margin:0 0 .6rem 0;color:#f0f0f0;font-size:1.05rem;font-weight:500;"></p>
-    <h2 id="phase-label" style="margin:0;color:white;font-size:1.5rem;"></h2>
-    <div style="display:flex;justify-content:center;align-items:flex-start;gap:.8rem;margin-top:1rem;flex-wrap:wrap;">
-        <div style="text-align:center;"><div id="cd-d" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Days</div></div>
-        <div style="font-size:2.4rem;font-weight:bold;color:rgba(255,255,255,.4);line-height:1;">:</div>
-        <div style="text-align:center;"><div id="cd-h" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Hours</div></div>
-        <div style="font-size:2.4rem;font-weight:bold;color:rgba(255,255,255,.4);line-height:1;">:</div>
-        <div style="text-align:center;"><div id="cd-m" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Mins</div></div>
-        <div style="font-size:2.4rem;font-weight:bold;color:rgba(255,255,255,.4);line-height:1;">:</div>
-        <div style="text-align:center;"><div id="cd-s" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Secs</div></div>
+<div class="cd">
+    <p id="phase-sub" class="sub"></p>
+    <h2 id="phase-label" class="label"></h2>
+    <div class="row">
+        <div><div id="cd-d" class="num">--</div><div class="unit">Days</div></div>
+        <div class="sep">:</div>
+        <div><div id="cd-h" class="num">--</div><div class="unit">Hours</div></div>
+        <div class="sep">:</div>
+        <div><div id="cd-m" class="num">--</div><div class="unit">Mins</div></div>
+        <div class="sep">:</div>
+        <div><div id="cd-s" class="num">--</div><div class="unit">Secs</div></div>
     </div>
     {bcs_html}
 </div>
@@ -158,7 +166,7 @@ body{{margin:0;padding:0;font-family:sans-serif;}}
 }})();
 </script>
 </body></html>""",
-            height=290 if bcs_html else 230,
+            height=268 if bcs_html else 192,
         )
 
         if bcs_html:
@@ -168,20 +176,68 @@ body{{margin:0;padding:0;font-family:sans-serif;}}
                 st.page_link("live/bcs.py", label="View all league BCs →")
 
     except Exception as e:
-        st.warning(f"⚠️ Could not load tournament countdown: {str(e)}")
+        st.warning(f"Could not load tournament countdown: {str(e)}")
 
 
 # ---------------------------------------------------------------------------
 # Shared pill-building helpers
 # ---------------------------------------------------------------------------
 
-_MEDAL_ICONS = ["🥇", "🥈", "🥉"]
-_PILL_COLORS = [
-    "linear-gradient(135deg, #FFD700 0%, #FFA500 100%)",
-    "linear-gradient(135deg, #C0C0C0 0%, #A8A8A8 100%)",
-    "linear-gradient(135deg, #CD7F32 0%, #B87333 100%)",
-    "#2a2a3e",
-]
+_MEDAL_COLORS = ["#d4af37", "#b8bcc4", "#c0804a"]
+_MEDAL_LABELS = ["1st", "2nd", "3rd"]
+_MONO = "font-family: 'Source Code Pro', ui-monospace, monospace; font-variant-numeric: tabular-nums;"
+
+
+def _podium_html(top: list[tuple[str, str]], rest: list[tuple[int, str, str]]) -> str:
+    """Flat podium cards for the top three plus one card listing the runners-up.
+
+    *top* holds ``(name, value)`` for places 1-3, *rest* holds ``(place, name, value)``.
+    Names must already be escaped.
+    """
+    cards = []
+    for idx, (name, value) in enumerate(top):
+        color = _MEDAL_COLORS[idx]
+        cards.append(
+            f'<div style="flex: 1; min-width: 112px; padding: 12px; background: #1c1f29; border: 1px solid rgba(250,250,250,0.08); '
+            f'border-top: 3px solid {color}; border-radius: 8px;">'
+            f'<div style="{_MONO} font-size: 12px; line-height: 16px; color: {color};">{_MEDAL_LABELS[idx]}</div>'
+            f'<div style="font-size: 15px; line-height: 20px; font-weight: 500; color: #fafafa; margin-top: 4px;">{name}</div>'
+            f'<div style="{_MONO} font-size: 13px; line-height: 20px; color: #a3a8b8;">{value}</div>'
+            "</div>"
+        )
+    if rest:
+        rows = "".join(
+            f'<div style="padding: 4px 0;">'
+            f'<div style="display: flex; gap: 8px; align-items: baseline;">'
+            f'<span style="{_MONO} font-size: 12px; color: #8b90a0; width: 12px;">{place}</span>'
+            f'<span style="font-size: 14px; line-height: 20px; color: #fafafa; overflow-wrap: anywhere;">{name}</span></div>'
+            f'<div style="{_MONO} font-size: 13px; line-height: 20px; color: #a3a8b8; padding-left: 20px;">{value}</div>'
+            "</div>"
+            for place, name, value in rest
+        )
+        cards.append(
+            f'<div style="flex: 1; min-width: 112px; padding: 8px 12px; background: #1c1f29; border: 1px solid rgba(250,250,250,0.08); '
+            f'border-radius: 8px;">{rows}</div>'
+        )
+    return f'<div style="display: flex; flex-wrap: wrap; gap: 8px;">{"".join(cards)}</div>'
+
+
+def _leaderboard_panel(title: str, meta: str, podium: str) -> str:
+    """Panel holding a titled podium, used for the patch-wide leaderboards."""
+    return (
+        '<div style="margin: 24px 0; padding: 16px; background: #161922; border: 1px solid rgba(250,250,250,0.08); border-radius: 16px;">'
+        '<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-bottom: 12px;">'
+        f'<span style="font-size: 16px; line-height: 24px; font-weight: 500; color: #fafafa;">{title}</span>'
+        f'<span style="font-size: 13px; color: #8b90a0;">{meta}</span></div>'
+        f"{podium}</div>"
+    )
+
+
+def _wins_text(first_wins: int, second_wins: int) -> str:
+    text = f"{first_wins} win{'s' if first_wins > 1 else ''}"
+    if second_wins > 0:
+        text += f" +{second_wins} 2nd"
+    return text
 
 
 def render_patch_leaderboard(top_5: list[dict]) -> None:
@@ -195,48 +251,9 @@ def render_patch_leaderboard(top_5: list[dict]) -> None:
         return
     try:
         patch_name = top_5[0].get("patch_name", "")
-        pills = []
-        for idx in range(min(3, len(top_5))):
-            p = top_5[idx]
-            name = _esc(p["real_name"])
-            fw, sw = p["first_wins"], p["second_wins"]
-            wins_text = f"{fw} Win{'s' if fw > 1 else ''}"
-            if sw > 0:
-                wins_text += f" (+{sw} 2nd)"
-            bg = _PILL_COLORS[idx]
-            pills.append(
-                f'<div style="flex: 1; min-width: 110px; text-align: center; padding: 0.75rem; background: {bg}; border-radius: 7px; box-shadow: 0 1.5px 3px rgba(0,0,0,0.2);">'
-                f'<div style="font-size: 1.5rem;">{_MEDAL_ICONS[idx]}</div>'
-                f'<div style="font-size: 0.85rem; font-weight: bold; color: #1a1a1a; margin: 0.375rem 0;">{name}</div>'
-                f'<div style="font-size: 0.8rem; font-weight: bold; color: #333333;">{wins_text}</div>'
-                "</div>"
-            )
-        if len(top_5) >= 4:
-            inner = ""
-            for idx in range(3, min(5, len(top_5))):
-                p = top_5[idx]
-                name = _esc(p["real_name"])
-                fw, sw = p["first_wins"], p["second_wins"]
-                wins_text = f"{fw} Win{'s' if fw > 1 else ''}"
-                if sw > 0:
-                    wins_text += f" (+{sw} 2nd)"
-                inner += (
-                    f'<div style="margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(255,255,255,0.05); border-radius: 5px;">'
-                    f'<div style="font-size: 0.85rem; color: #e0e0e0;"><strong>#{idx + 1}</strong> {name}</div>'
-                    f'<div style="font-size: 0.75rem; color: #a0a0a0;">{wins_text}</div>'
-                    "</div>"
-                )
-            pills.append(
-                f'<div style="flex: 1; min-width: 110px; padding: 0.75rem; background: {_PILL_COLORS[3]}; border-radius: 7px; box-shadow: 0 1.5px 3px rgba(0,0,0,0.2);">'
-                f"{inner}</div>"
-            )
-        pills_html = "".join(pills)
-        st.html(
-            f'<div style="margin: 1.5rem 0; padding: 1.125rem; background: #1e1e2e; border-radius: 8px; box-shadow: 0 3px 4.5px rgba(0,0,0,0.3);">'
-            f'<h3 style="margin: 0 0 0.75rem 0; color: #667eea; text-align: center; font-size: 1.1rem;">🏆 {top_league} - Most First Place Finishes (Patch {_esc(patch_name)})</h3>'
-            f'<div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 0.75rem;">{pills_html}</div>'
-            "</div>"
-        )
+        top = [(_esc(p["real_name"]), _wins_text(p["first_wins"], p["second_wins"])) for p in top_5[:3]]
+        rest = [(idx + 1, _esc(p["real_name"]), _wins_text(p["first_wins"], p["second_wins"])) for idx, p in enumerate(top_5[3:5], start=3)]
+        st.html(_leaderboard_panel(f"{top_league}: most first place finishes", f"Patch {_esc(patch_name)}", _podium_html(top, rest)))
     except Exception:
         pass
 
@@ -250,46 +267,9 @@ def render_top_league_avg_wave_leaderboard(top_5: list[dict]) -> None:
         st.info(f"Missing {top_league} data: no {top_league} tournaments in the current patch yet.")
         return
     try:
-        pills = []
-        for idx in range(min(3, len(top_5))):
-            p = top_5[idx]
-            name = _esc(p["real_name"])
-            avg_wave = p["avg_wave"]
-            tc = p["tournaments"]
-            bg = _PILL_COLORS[idx]
-            pills.append(
-                f'<div style="flex: 1; min-width: 110px; text-align: center; padding: 0.75rem; background: {bg}; border-radius: 7px; box-shadow: 0 1.5px 3px rgba(0,0,0,0.2);">'
-                f'<div style="font-size: 1.5rem;">{_MEDAL_ICONS[idx]}</div>'
-                f'<div style="font-size: 0.85rem; font-weight: bold; color: #1a1a1a; margin: 0.375rem 0;">{name}</div>'
-                f'<div style="font-size: 0.8rem; font-weight: bold; color: #333333;">{avg_wave:.1f} avg wave<br>'
-                f'<span style="font-size:0.8em; color:{bg}">({tc} tournaments)</span></div>'
-                "</div>"
-            )
-        if len(top_5) >= 4:
-            inner = ""
-            for idx in range(3, min(5, len(top_5))):
-                p = top_5[idx]
-                name = _esc(p["real_name"])
-                avg_wave = p["avg_wave"]
-                tc = p["tournaments"]
-                inner += (
-                    f'<div style="margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(255,255,255,0.05); border-radius: 5px;">'
-                    f'<div style="font-size: 0.85rem; color: #e0e0e0;"><strong>#{idx + 1}</strong> {name}</div>'
-                    f'<div style="font-size: 0.75rem; color: #a0a0a0;">{avg_wave:.1f} avg wave '
-                    f'<span style="font-size:0.8em; color:#888">({tc} tournaments)</span></div>'
-                    "</div>"
-                )
-            pills.append(
-                f'<div style="flex: 1; min-width: 110px; padding: 0.75rem; background: {_PILL_COLORS[3]}; border-radius: 7px; box-shadow: 0 1.5px 3px rgba(0,0,0,0.2);">'
-                f"{inner}</div>"
-            )
-        pills_html = "".join(pills)
-        st.html(
-            '<div style="margin: 1.5rem 0; padding: 1.125rem; background: #1e1e2e; border-radius: 8px; box-shadow: 0 3px 4.5px rgba(0,0,0,0.3);">'
-            f'<h3 style="margin: 0 0 0.75rem 0; color: #667eea; text-align: center; font-size: 1.1rem;">📈 {top_league} - Highest Average Wave (Latest Patch, min 2 tournaments)</h3>'
-            f'<div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 0.75rem;">{pills_html}</div>'
-            "</div>"
-        )
+        top = [(_esc(p["real_name"]), f"{p['avg_wave']:.1f} avg · {p['tournaments']} tourneys") for p in top_5[:3]]
+        rest = [(idx + 1, _esc(p["real_name"]), f"{p['avg_wave']:.1f}") for idx, p in enumerate(top_5[3:5], start=3)]
+        st.html(_leaderboard_panel(f"{top_league}: highest average wave", "Latest patch, min 2 tournaments", _podium_html(top, rest)))
     except Exception:
         pass
 
@@ -304,45 +284,17 @@ def render_league_standings(league: str, players: list[dict], is_top: bool = Fal
 
     league_query = league.replace(" ", "%20")
     st.markdown(
-        f'<div style="margin-top: 2rem; margin-bottom: 0.75rem;">'
-        f'<h2 style="color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 0.5rem; font-size: 1.3rem;">'
-        f'<a href="results?league={league_query}" target="_self" style="text-decoration: none; color: #667eea;">{_esc(league)} 🔗</a>'
-        "</h2></div>",
+        '<div style="margin-top: 32px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid rgba(250,250,250,0.08);">'
+        f'<a href="results?league={league_query}" target="_self" style="text-decoration: none; font-size: 18px; font-weight: 500;">'
+        f'{_esc(league)} <span style="color: #8b90a0;">→</span></a>'
+        "</div>",
         unsafe_allow_html=True,
     )
 
     max_display = 5 if is_top else 3
-    pills = []
-    for idx in range(min(3, len(players))):
-        p = players[idx]
-        name = _esc(p["real_name"])
-        wave = p["wave"]
-        bg = _PILL_COLORS[idx]
-        pills.append(
-            f'<div style="flex: 1; min-width: 110px; text-align: center; padding: 0.75rem; background: {bg}; border-radius: 7px; box-shadow: 0 1.5px 3px rgba(0,0,0,0.2);">'
-            f'<div style="font-size: 1.5rem;">{_MEDAL_ICONS[idx]}</div>'
-            f'<div style="font-size: 0.85rem; font-weight: bold; color: #1a1a1a; margin: 0.375rem 0;">{name}</div>'
-            f'<div style="font-size: 0.8rem; font-weight: bold; color: #333333;">Wave {format_wave(wave)}</div>'
-            "</div>"
-        )
-    if len(players) >= 4:
-        inner = ""
-        for idx in range(3, min(max_display, len(players))):
-            p = players[idx]
-            name = _esc(p["real_name"])
-            wave = p["wave"]
-            inner += (
-                f'<div style="margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(255,255,255,0.05); border-radius: 5px;">'
-                f'<div style="font-size: 0.85rem; color: #e0e0e0;"><strong>#{idx + 1}</strong> {name}</div>'
-                f'<div style="font-size: 0.75rem; color: #a0a0a0;">Wave {format_wave(wave)}</div>'
-                "</div>"
-            )
-        pills.append(
-            f'<div style="flex: 1; min-width: 110px; padding: 0.75rem; background: {_PILL_COLORS[3]}; border-radius: 7px; box-shadow: 0 1.5px 3px rgba(0,0,0,0.2);">'
-            f"{inner}</div>"
-        )
-    pills_html = "".join(pills)
-    st.html(f'<div style="display: flex; justify-content: space-around; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem;">{pills_html}</div>')
+    top = [(_esc(p["real_name"]), f"Wave {format_wave(p['wave'])}") for p in players[:3]]
+    rest = [(idx + 1, _esc(p["real_name"]), format_wave(p["wave"])) for idx, p in enumerate(players[3:max_display], start=3)]
+    st.html(f'<div style="margin-bottom: 16px;">{_podium_html(top, rest)}</div>')
 
 
 def _load_overview_stats() -> Optional[dict]:
@@ -383,8 +335,8 @@ def compute_overview(options: Options) -> None:
         return
 
     st.markdown(
-        "<div style='text-align: center; margin: 0.5rem 0 1.2rem 0;'>"
-        "<a href='#league-results' style='font-size: 0.92rem; color: #ffd700; text-decoration: underline;'>↓ Jump to League Results</a>"
+        "<div style='text-align: center; margin: 8px 0 20px 0;'>"
+        "<a href='#league-results' style='font-size: 14px;'>Jump to league results ↓</a>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -408,8 +360,8 @@ def compute_overview(options: Options) -> None:
     last_tourney_date_str = stats.get("last_tourney_date", "")
     st.markdown(
         f"<a id='league-results'></a>"
-        f"<div style='margin: 2.5rem 0 1.5rem 0; text-align: center;'>"
-        f"<span style='font-size: 1.25rem; color: #667eea; font-weight: 600;'>Results for {_esc(last_tourney_date_str)}</span>"
+        f"<div style='margin: 40px 0 8px 0;'>"
+        f"<span style='font-size: 24px; line-height: 32px; color: #fafafa; font-weight: 500;'>Results for {_esc(last_tourney_date_str)}</span>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -432,8 +384,8 @@ options = Options(links_toggle=False, default_graph=Graph.last_16.value, average
 compute_overview(options)
 st.markdown(
     """
-<div style='text-align: center; margin: 2.5rem 0 1.5rem 0;'>
-    <a href='#top' style='font-size: 0.92rem; color: #667eea; text-decoration: underline;'>↑ Back to Top</a>
+<div style='text-align: center; margin: 40px 0 24px 0;'>
+    <a href='#top' style='font-size: 14px;'>Back to top ↑</a>
 </div>
 """,
     unsafe_allow_html=True,

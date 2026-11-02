@@ -50,23 +50,33 @@ if days_until > BC_DAYS_EARLY:
     bc_dt = datetime.datetime.combine(tourney_date, datetime.time.min, tzinfo=datetime.timezone.utc) - datetime.timedelta(days=BC_DAYS_EARLY)
     tourney_date_str = tourney_date.strftime("%A, %B %d, %Y")
     phases = [
-        {"label": "🔮 Battle Conditions Revealed In", "sub": tourney_date_str, "t": int(bc_dt.timestamp() * 1000)},
+        {"label": "Battle conditions revealed in", "sub": tourney_date_str, "t": int(bc_dt.timestamp() * 1000)},
     ]
     phases_json = json.dumps(phases)
     components.html(
         f"""<!DOCTYPE html>
-<html><head><style>body{{margin:0;padding:0;font-family:sans-serif;}}</style></head><body>
-<div style="text-align:center;padding:1.5rem;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:10px;margin:2px;box-shadow:0 4px 6px rgba(0,0,0,.3);">
-    <p id="phase-sub" style="margin:0 0 .6rem 0;color:#f0f0f0;font-size:1.05rem;font-weight:500;"></p>
-    <h2 id="phase-label" style="margin:0;color:white;font-size:1.5rem;"></h2>
-    <div style="display:flex;justify-content:center;align-items:flex-start;gap:.8rem;margin-top:1rem;flex-wrap:wrap;">
-        <div style="text-align:center;"><div id="cd-d" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Days</div></div>
-        <div style="font-size:2.4rem;font-weight:bold;color:rgba(255,255,255,.4);line-height:1;">:</div>
-        <div style="text-align:center;"><div id="cd-h" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Hours</div></div>
-        <div style="font-size:2.4rem;font-weight:bold;color:rgba(255,255,255,.4);line-height:1;">:</div>
-        <div style="text-align:center;"><div id="cd-m" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Mins</div></div>
-        <div style="font-size:2.4rem;font-weight:bold;color:rgba(255,255,255,.4);line-height:1;">:</div>
-        <div style="text-align:center;"><div id="cd-s" style="font-size:2.4rem;font-weight:bold;color:white;font-family:monospace;line-height:1;">--</div><div style="font-size:.7rem;color:#ddd;text-transform:uppercase;letter-spacing:.08em;margin-top:.2rem;">Secs</div></div>
+<html><head><style>
+body{{margin:0;padding:0;font-family:"Source Sans 3","Source Sans Pro",system-ui,sans-serif;}}
+.cd{{margin:2px;padding:24px;text-align:center;background:#161922;border:1px solid rgba(250,250,250,.08);border-radius:16px;}}
+.sub{{margin:0 0 4px 0;color:#a3a8b8;font-size:14px;line-height:20px;}}
+.label{{margin:0;color:#fafafa;font-size:20px;line-height:28px;font-weight:500;}}
+.row{{display:flex;justify-content:center;align-items:flex-start;gap:12px;margin-top:16px;flex-wrap:wrap;}}
+.num,.sep{{font-family:"Source Code Pro",ui-monospace,monospace;font-size:40px;line-height:1;}}
+.num{{font-variant-numeric:tabular-nums;font-weight:500;color:#52b9e4;}}
+.sep{{color:rgba(250,250,250,.24);}}
+.unit{{margin-top:4px;font-size:12px;line-height:16px;color:#8b90a0;}}
+</style></head><body>
+<div class="cd">
+    <p id="phase-sub" class="sub"></p>
+    <h2 id="phase-label" class="label"></h2>
+    <div class="row">
+        <div><div id="cd-d" class="num">--</div><div class="unit">Days</div></div>
+        <div class="sep">:</div>
+        <div><div id="cd-h" class="num">--</div><div class="unit">Hours</div></div>
+        <div class="sep">:</div>
+        <div><div id="cd-m" class="num">--</div><div class="unit">Mins</div></div>
+        <div class="sep">:</div>
+        <div><div id="cd-s" class="num">--</div><div class="unit">Secs</div></div>
     </div>
 </div>
 <script>
@@ -88,7 +98,7 @@ if days_until > BC_DAYS_EARLY:
 }})();
 </script>
 </body></html>""",
-        height=230,
+        height=192,
     )
 else:
     st.markdown(f"## Tournament {'is today!' if days_until == 0 else f'is on {tourney_date}'}")
