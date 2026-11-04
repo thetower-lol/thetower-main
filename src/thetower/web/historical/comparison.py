@@ -29,6 +29,13 @@ from thetower.web.util import escape_df_html, get_league_selection
 sus_ids = get_sus_ids()
 hidden_features = os.environ.get("HIDDEN_FEATURES")
 
+# Player order options, each scoring one player's rows within the selected range
+SORT_KEYS = {
+    "Highest": lambda df: df.wave.max(),
+    "Average": lambda df: df.wave.mean(),
+    "Last": lambda df: df.loc[df.date.idxmax(), "wave"],
+}
+
 
 def compute_comparison(player_id=None, canvas=st):
     # The league is only known once the patch selectbox below has rendered, so the title is filled in then
@@ -191,12 +198,14 @@ def compute_comparison(player_id=None, canvas=st):
     if player_id:
         patch = graph_options[0]
         filter_bcs = None
+        sort_by = "Highest"
     else:
-        patch_col, bc_col = canvas.columns([1, 1])
+        patch_col, bc_col, sort_col = canvas.columns([2, 2, 1])
         patch = patch_col.selectbox("Limit results to a patch? (see side bar to change default)", graph_options)
         # Get all available battle conditions from the database, not just those in current results
         all_battle_conditions = sorted(BattleCondition.objects.all(), key=lambda bc: bc.shortcut)
         filter_bcs = bc_col.multiselect("Filter by battle conditions?", all_battle_conditions, format_func=lambda bc: f"{bc.name} ({bc.shortcut})")
+        sort_by = sort_col.selectbox("Sort players by", list(SORT_KEYS), key="comparison_sort_by")
 
     datas = [(sdf, player_id) for player_id, sdf in player_df.groupby("id") if len(sdf) >= 2]
     datas = filter_plot_datas(datas, patch, filter_bcs)
@@ -212,7 +221,8 @@ def compute_comparison(player_id=None, canvas=st):
     if not datas:
         return
 
-    datas = sorted([(data, user) for data, user in datas if not data.empty], key=lambda datum: max(datum[0].wave), reverse=True)
+    # Sets the order of the legend and both tables
+    datas = sorted([(data, user) for data, user in datas if not data.empty], key=lambda datum: SORT_KEYS[sort_by](datum[0]), reverse=True)
 
     summary = pd.DataFrame(
         [
