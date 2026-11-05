@@ -225,6 +225,17 @@ def compute_regression_analysis():
     st.plotly_chart(fig, width="stretch")
 
     # ------------------------------------------------------------------
+    # Data points table: one row per tournament, newest first
+    # ------------------------------------------------------------------
+    points_df = pd.DataFrame([{"Date": pt["date"], **{place_label(place): pt[place] for place in key_places}} for pt in reversed(data_points)])
+    st.dataframe(
+        points_df,
+        hide_index=True,
+        width="stretch",
+        column_config={"Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD")},
+    )
+
+    # ------------------------------------------------------------------
     # Summary table
     # ------------------------------------------------------------------
     st.markdown("### Regression Summary — Latest Tournament")
@@ -271,8 +282,7 @@ def compute_regression_analysis():
     st.dataframe(styled, hide_index=True, width="stretch", column_config=col_config)
 
     with st.expander("How to read this"):
-        st.markdown(
-            f"""
+        st.markdown(f"""
 **Slope** — how many waves the cutoff rises per tournament on average across this patch.
 A slope of 8 means the trend line climbs 8 waves each tournament.
 
@@ -287,8 +297,7 @@ If Slope > Prev Slope the trend is accelerating; if less, it is decelerating.
 
 **Key places shown for {league}:**
 {chr(10).join(f"- {place_label(p)}" for p in key_places)}
-"""
-        )
+""")
 
 
 compute_regression_analysis()
