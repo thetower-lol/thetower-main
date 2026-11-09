@@ -574,6 +574,7 @@ def auto_complete_if_eligible(stem: str) -> dict[str, Any]:
                     return {
                         "eligible": True,
                         "status": "rejected",
+                        "reason": "refresh_id_mismatch",
                         "message": "Refresh rejected: verified ID does not match any existing Tower ID on this account",
                     }
         except Exception as e:
@@ -2628,8 +2629,10 @@ def process_verification(
             if auto_result["eligible"]:
                 # Successfully auto-completed — notify Discord of the final state
                 log_submission_update(stem)
+                # reason (an automatic rejection's, e.g. refresh_id_mismatch) lets the caller tell the user why
                 return {
                     "status": auto_result["status"],
+                    "reason": auto_result.get("reason"),
                     "player_created": True,
                     "auto_complete": True,
                 }
