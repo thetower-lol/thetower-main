@@ -1,4 +1,5 @@
 import logging
+import math
 from time import perf_counter
 from typing import Callable
 
@@ -50,9 +51,12 @@ def live_results():
         prior_waves = dict(zip(prior_df["player_id"], prior_df["wave"]))
         prior_joined_ids = set(prior_df["player_id"])
 
-    def _rank_formatter(delta: int | None) -> Callable[[int], str]:
+    def _rank_formatter(delta: float | None) -> Callable[[int], str]:
         if delta is None:
             return lambda pos: f"{pos} 🆕"
+        if delta == math.inf:
+            # Climbed from past the public cap: the size of the climb would give away the earlier rank
+            return lambda pos: f"{pos} ↑"
         if delta > 0:
             return lambda pos: f"{pos} ↑{delta}"
         return lambda pos: f"{pos} ↓{abs(delta)}"
@@ -98,11 +102,17 @@ def live_results():
                 limited_df = limited_df[limited_df["player_id"].isin(active_ids)]
         display_df = limited_df[display_cols].style.format(format_wave, subset=["wave"])
         if tourney_active:
-            rank_deltas: dict = {}  # row label -> places moved (positive = up), None = new since last checkpoint
+            # row label -> places moved (positive = up), None = new since last checkpoint, inf = up from past the cap
+            rank_deltas: dict = {}
             wave_deltas: dict = {}  # row label -> waves gained since last checkpoint
+            # A prior rank past the public cap is never shown, and neither is a climb measured from it:
+            # rank + climb would be a floor on the league's size at the last checkpoint
+            prior_rank_cap = math.inf if results_full else get_results_limit(league)
             for label, pos, wave, pid in zip(limited_df.index, limited_df["#"], limited_df["wave"], limited_df["player_id"]):
                 if pid not in prior_positions:
                     rank_deltas[label] = None
+                elif prior_positions[pid] > prior_rank_cap:
+                    rank_deltas[label] = math.inf
                 elif prior_positions[pid] != pos:
                     rank_deltas[label] = prior_positions[pid] - pos
                 if pid in prior_waves and wave != prior_waves[pid]:
