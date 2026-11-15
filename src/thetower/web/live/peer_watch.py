@@ -146,7 +146,13 @@ def peer_watch():
     peer_ids, focal_name, focal_league, focal_date = get_proximal_players(resolved_id, peer_n)
 
     if not peer_ids:
-        st.error(f"No historical tournament data found for player ID: `{resolved_id}`")
+        if focal_name:
+            # Found, but placed past the public results cap: no peer group on the public site
+            st.info(
+                f"Peer Watch is only available to players who placed within the published results. **{focal_name}** did not in {focal_league} on {focal_date}."
+            )
+        else:
+            st.error(f"No historical tournament data found for player ID: `{resolved_id}`")
         st.session_state.pop("pw_player_id", None)
         return
 

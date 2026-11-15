@@ -128,6 +128,13 @@ def compute_comparison(player_id=None, canvas=st):
             if proximal_league:
                 st.session_state.selected_league = proximal_league
                 st.session_state.pop("league_selector", None)
+        elif proximal_focal_name:
+            # Found, but placed past the public results cap: no peer group on the public site
+            st.info(
+                "Proximal comparison is only available to players who placed within the published results. "
+                f"**{proximal_focal_name}** did not in {proximal_league} on {proximal_date}."
+            )
+            st.stop()
         else:
             st.error(f"Player ID `{proximal_player_id}` was not found in any recent tournament.")
             st.stop()
