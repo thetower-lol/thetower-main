@@ -2,8 +2,9 @@ import logging
 import os
 from time import perf_counter
 
+import numpy as np
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from thetower.backend.tourney_results.league_rules import get_league_rules
@@ -11,12 +12,15 @@ from thetower.backend.tourney_results.shun_config import include_shun_enabled_fo
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.live.data_ops import (
     get_bracket_stats,
-    get_cached_plot_data,
     get_latest_bracket_filtered_df,
     require_tournament_data,
     tie_positions,
+    whole_percent_shares,
 )
 from thetower.web.live.ui_components import render_data_status, setup_common_ui
+
+# Wave bins of the top-positions histogram
+HISTOGRAM_BINS = 40
 
 
 def show_bracket_table(ldf: pd.DataFrame, bracket_id: str) -> None:
@@ -62,29 +66,40 @@ def bracket_analysis():
     group_by_bracket = ldf.groupby("bracket", observed=True).wave
     stats_dict = {f"Top {n}": group_by_bracket.apply(lambda x: get_top_n(x, n)) for n in [1, 4, 10, 15]}
 
-    # Create stats dataframe with proper column names
-    stats_df = pd.DataFrame(stats_dict).reset_index()
-    stats_df_melted = stats_df.melt(id_vars=["bracket"], var_name="Position", value_name="Waves")
+    # One column of waves per top position, one row per bracket
+    stats_df = pd.DataFrame(stats_dict)
 
-    # Create histogram using cached plot data
-    plot_data = get_cached_plot_data(stats_df_melted)
-    # Percent-normalized with a %-only hover: raw per-bin counts would sum to the total
-    # bracket count, which the public site must not reveal
-    fig1 = px.histogram(
-        plot_data,
-        x="Waves",
-        color="Position",
-        barmode="overlay",
-        opacity=0.7,
-        histnorm="percent",
-        title="Distribution of Top Positions per Bracket",
-        labels={"Waves": "Wave Reached", "Position": "Position"},
-        height=300,
-    )
+    # Binned and rounded to whole percents here, not by plotly in the browser: a histogram trace carries
+    # one raw value per bracket, and exact shares divide back to the bracket count, which the public
+    # site must not reveal
+    all_waves = stats_df.to_numpy(dtype=float).ravel()
+    edges = np.histogram_bin_edges(all_waves[~np.isnan(all_waves)], bins=HISTOGRAM_BINS)
+    fig1 = go.Figure()
+    for position in stats_df.columns:
+        counts, _ = np.histogram(stats_df[position].dropna().astype(float), bins=edges)
+        shares = whole_percent_shares(counts)
+        shown = shares > 0
+        fig1.add_trace(
+            go.Bar(
+                x=((edges[:-1] + edges[1:]) / 2)[shown],
+                y=shares[shown],
+                width=np.diff(edges)[shown],
+                name=position,
+                opacity=0.7,
+                customdata=np.column_stack([edges[:-1], edges[1:]])[shown],
+                hovertemplate="%{customdata[0]:.0f}–%{customdata[1]:.0f}: %{y:.0f}%",
+            )
+        )
 
+    fig1.update_xaxes(title_text="Wave Reached")
     fig1.update_yaxes(title_text="% of brackets")
-    fig1.update_traces(hovertemplate="%{x}: %{y:.1f}%")
-    fig1.update_layout(margin=dict(l=20, r=20, t=40, b=20), legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99))
+    fig1.update_layout(
+        title="Distribution of Top Positions per Bracket",
+        barmode="overlay",
+        height=300,
+        margin=dict(l=20, r=20, t=40, b=20),
+        legend=dict(title_text="Position", yanchor="top", y=0.99, xanchor="right", x=0.99),
+    )
     st.plotly_chart(fig1, width="stretch")
 
     # Display bracket statistics in columns

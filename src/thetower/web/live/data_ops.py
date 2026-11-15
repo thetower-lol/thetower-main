@@ -6,6 +6,7 @@ from functools import wraps
 from pathlib import Path
 from time import perf_counter
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 from django.db.models import Max
@@ -1001,16 +1002,18 @@ def require_tournament_data(func):
     return wrapper
 
 
-@cache_data_if_enabled(ttl=CACHE_TTL_SECONDS)
-def get_cached_plot_data(df):
-    """Process dataframe for plotting, with better error handling."""
-    plot_data = df.copy()
+def whole_percent_shares(counts) -> np.ndarray:
+    """Counts as whole-number percentages of their total.
 
-    # Only convert datetime if the column exists
-    if "datetime" in plot_data.columns:
-        plot_data["datetime"] = pd.to_datetime(plot_data["datetime"])
-
-    return plot_data
+    A "share of brackets" chart is sent to the browser as data. An exact share k/N gives the bracket
+    count N away as soon as one bar stands for a single bracket, so the public site must never plot raw
+    counts, raw per-bracket values or unrounded shares: bin and count here, then plot what this returns.
+    """
+    counts = np.asarray(counts, dtype=float)
+    total = counts.sum()
+    if not total:
+        return np.zeros(len(counts))
+    return np.round(counts / total * 100)
 
 
 def initialize_bracket_state(bracket_order, league):
