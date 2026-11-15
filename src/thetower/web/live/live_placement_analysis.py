@@ -14,6 +14,7 @@ from thetower.web.live.data_ops import (
     get_placement_analysis_data,
     process_display_names,
     require_tournament_data,
+    whole_percent_shares,
 )
 from thetower.web.live.ui_components import render_data_status, setup_common_ui
 from thetower.web.util import add_player_id, fmt_dt, get_user_tz
@@ -494,7 +495,11 @@ def live_placement_analysis():
     relegate_pct = relegate_n / total_brackets * 100 if total_brackets else 0
     safe_pct = safe_n / total_brackets * 100 if total_brackets else 0
 
-    pos_counts["Pct"] = pos_counts["Brackets"] / total_brackets * 100 if total_brackets else 0
+    # Whole percents only: the bar heights are sent to the browser, and an exact share would divide back
+    # to the bracket count. A share that rounds to nothing is not drawn, except the player's own placement.
+    pos_counts["Pct"] = whole_percent_shares(pos_counts["Brackets"])
+    pos_counts.loc[(pos_counts["Position"] == player_position) & (pos_counts["Pct"] < 1), "Pct"] = 1
+    pos_counts = pos_counts[pos_counts["Pct"] > 0]
 
     # X-range: show 3 positions on either side of the actual data (handles oversized brackets with 31/32 people)
     data_min = int(pos_counts["Position"].min())
@@ -530,7 +535,7 @@ def live_placement_analysis():
             x=pos_counts["Position"],
             y=pos_counts["Pct"],
             marker_color=bar_colors,
-            hovertemplate="Position %{x}: %{y:.1f}% of brackets<extra></extra>",
+            hovertemplate="Position %{x}: %{y:.0f}% of brackets<extra></extra>",
         )
     )
 
