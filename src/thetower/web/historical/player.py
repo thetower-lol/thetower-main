@@ -27,7 +27,7 @@ from thetower.backend.tourney_results.formatting import BASE_URL, color_position
 from thetower.backend.tourney_results.models import BattleCondition
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyRow
-from thetower.backend.tourney_results.results_config import get_max_results_limit
+from thetower.backend.tourney_results.results_config import get_max_results_limit, mask_positions_past_results_limits
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.backend.tourney_results.tourney_utils import check_all_live_entry
 from thetower.web.historical.search import compute_search
@@ -72,7 +72,7 @@ def compute_player_lookup():
     player_ids = PlayerId.objects.filter(id=options.current_player).select_related("game_instance__player")
     print(f"{player_ids=} {options.current_player=}")
 
-    # Cross-league query: uses the highest per-league cap rather than per-league bounds.
+    # Cross-league query: bounded by the highest per-league cap; positions past each row's own league cap are blanked below.
     hidden_query = {} if hidden_features else {"result__public": True, "position__lte": get_max_results_limit()}
 
     if player_ids:
@@ -111,6 +111,8 @@ def compute_player_lookup():
         return
 
     player_df = get_details(rows)
+    if not hidden_features:
+        player_df = mask_positions_past_results_limits(player_df)
 
     if player_df.empty:
         st.error(f"No results found for the player {player_id}.")
@@ -143,6 +145,7 @@ def compute_player_lookup():
             .style.apply(lambda _: wave_colors, subset=["wave"])
             .map(color_position, subset=["#"])
             .format(format_wave, subset=["wave"])
+            .format(lambda pos: "" if pd.isna(pos) else str(int(pos)), subset=["#"])
         )
 
     player_df = player_df.rename({"tourney_name": "name", "position": "#"}, axis=1)
@@ -405,9 +408,6 @@ def write_for_each_patch(patch_tab, player_df):
         max_wave = patch_df.wave.max()
         max_wave_data = patch_df[patch_df.wave == max_wave].iloc[0]
 
-        max_pos = patch_df["#"].min()
-        max_pos_data = patch_df[patch_df["#"] == max_pos].iloc[0]
-
         # Convert patch to string using its __str__ method
         patch_str = str(patch)
 
@@ -421,10 +421,16 @@ def write_for_each_patch(patch_tab, player_df):
             }
         )
 
+        # Positions past the league's public cap are blank; a patch with none left has no best position
+        max_pos = patch_df["#"].min()
+        if pd.isna(max_pos):
+            continue
+        max_pos_data = patch_df[patch_df["#"] == max_pos].iloc[0]
+
         position_data.append(
             {
                 "patch": patch_str,
-                "max_position": max_pos,
+                "max_position": int(max_pos),
                 "tourney_name": max_pos_data["name"],
                 "date": max_pos_data.date,
                 "battle_conditions": ", ".join(bc.shortcut for bc in max_pos_data.bcs),
@@ -435,7 +441,7 @@ def write_for_each_patch(patch_tab, player_df):
     position_data = sorted(position_data, key=lambda x: x["date"], reverse=True)
 
     wave_df = pd.DataFrame(wave_data).reset_index(drop=True)
-    position_df = pd.DataFrame(position_data).reset_index(drop=True)
+    position_df = pd.DataFrame(position_data, columns=["patch", "max_position", "tourney_name", "date", "battle_conditions"]).reset_index(drop=True)
 
     # Set index to start from 1 instead of 0
     wave_df.index = wave_df.index + 1

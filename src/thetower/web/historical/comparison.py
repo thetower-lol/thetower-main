@@ -19,7 +19,7 @@ from thetower.backend.tourney_results.formatting import BASE_URL, format_wave, m
 from thetower.backend.tourney_results.models import BattleCondition
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyResult, TourneyRow
-from thetower.backend.tourney_results.results_config import get_max_results_limit
+from thetower.backend.tourney_results.results_config import get_max_results_limit, mask_positions_past_results_limits
 from thetower.backend.tourney_results.shun_config import include_shun_enabled_for
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
 from thetower.web.historical.proximal_utils import get_proximal_players
@@ -182,11 +182,13 @@ def compute_comparison(player_id=None, canvas=st):
         account_id.setdefault(instance_id, pid)
     id_mapping = {pid: account_id[instance_id] for pid, instance_id, _ in instance_ids}
 
-    # Cross-league query: uses the highest per-league cap rather than per-league bounds.
+    # Cross-league query: bounded by the highest per-league cap; positions past each row's own league cap are blanked below.
     hidden_query = {} if hidden_features else {"result__public": True, "position__lt": get_max_results_limit()}
     rows = TourneyRow.objects.filter(player_id__in=all_player_ids, **hidden_query)
 
     player_df = get_details(rows)
+    if not hidden_features:
+        player_df = mask_positions_past_results_limits(player_df)
     if not player_df.empty:
         player_df["id"] = player_df.id.map(lambda id_: id_mapping.get(id_, id_))
 
@@ -303,7 +305,9 @@ def compute_comparison(player_id=None, canvas=st):
     pd_datas = pd_datas.drop_duplicates()
 
     # Build the main plot (wave over time)
-    wave_fig = px.line(pd_datas, x="date", y="wave", color="real_name", markers=True, custom_data=["bcs", "position"])
+    # Hover text: a position past the league's public cap is blank, not "NaN"
+    pd_datas["position_text"] = pd_datas.position.map(lambda pos: "" if pd.isna(pos) else str(int(pos)))
+    wave_fig = px.line(pd_datas, x="date", y="wave", color="real_name", markers=True, custom_data=["bcs", "position_text"])
     wave_fig.update_layout(showlegend=show_legend)
     wave_fig.update_yaxes(title_text=None)
     wave_fig.update_layout(margin=dict(l=20))
@@ -321,7 +325,7 @@ def compute_comparison(player_id=None, canvas=st):
     placement_fig.update_layout(showlegend=show_legend)
     placement_fig.update_yaxes(title_text=None)
     placement_fig.update_layout(margin=dict(l=20))
-    placement_fig.update_yaxes(range=[max(pd_datas.position), min(pd_datas.position)])
+    placement_fig.update_yaxes(range=[pd_datas.position.max(), pd_datas.position.min()])
 
     # Respect mobile view: render sequentially when mobile, else show tabs
     is_mobile = st.session_state.get("mobile_view", False)

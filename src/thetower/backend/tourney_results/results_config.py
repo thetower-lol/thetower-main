@@ -4,6 +4,8 @@ import threading
 import time
 from typing import Any, Dict
 
+import pandas as pd
+
 from thetower.backend.env_config import get_django_data
 from thetower.backend.tourney_results.constants import how_many_results_public_site, leagues
 
@@ -82,6 +84,22 @@ def get_max_results_limit(ttl_seconds: int = 300) -> int:
     mapping = _get_mapping(ttl_seconds)
     league_limits = mapping.get("leagues", {})
     return max(int(league_limits.get(league, how_many_results_public_site)) for league in leagues)
+
+
+def mask_positions_past_results_limits(df: pd.DataFrame) -> pd.DataFrame:
+    """Blank (NaN) every position past the public cap of its row's own league; the rows themselves stay.
+
+    For cross-league frames (a player's history, comparison) that were fetched with the single
+    `get_max_results_limit()` bound: a position past its own league's cap would let a viewer read off
+    that league's participation. Display-time only, against the caps as they are now, so a raised cap
+    shows the positions again. Expects `position` and `league` columns; `position` becomes float.
+    """
+    if df.empty:
+        return df
+    caps = {league: get_results_limit(league) for league in df["league"].unique()}
+    df = df.copy()
+    df["position"] = df["position"].where(df["position"] <= df["league"].map(caps))
+    return df
 
 
 def results_limits_invalidate() -> None:
