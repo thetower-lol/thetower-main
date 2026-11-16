@@ -4,9 +4,15 @@ For each key placement position (determined by league promotion/relegation rules
 this page charts the wave required at that position across all tournaments in a
 selected patch, fits a linear regression, and shows a summary table comparing the
 latest tournament's actual vs predicted values.
+
+The public site shows each place as a whole-percent change since the patch's first
+tournament instead of waves: a wave at a bracket place can be looked up in the capped
+results table, and its rank there gives away the size of the field. The admin site
+keeps the waves.
 """
 
 import datetime
+import os
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +25,8 @@ from thetower.backend.tourney_results.archive_utils import STRING_COLUMN_DTYPES
 from thetower.backend.tourney_results.constants import leagues
 from thetower.backend.tourney_results.league_rules import get_league_rules
 from thetower.backend.tourney_results.models import PatchNew as Patch
+
+hidden_features = os.environ.get("HIDDEN_FEATURES")
 
 
 def _fetch_patch_data(league: str, patch: Patch, key_places: list[int]) -> list[dict] | None:
@@ -92,6 +100,16 @@ def _linregress(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     return float(coeffs[0]), float(coeffs[1])
 
 
+def _as_percent_change(data_points: list[dict], key_places: list[int]) -> list[dict]:
+    """Replace each place's wave with its whole-percent change since the first tournament.
+
+    Everything the page draws or lists afterwards (points, trend lines, tables) is derived
+    from these rounded values, so no wave reaches the browser.
+    """
+    first = data_points[0]
+    return [{**pt, **{place: round((pt[place] / max(first[place], 1) - 1) * 100) for place in key_places}} for pt in data_points]
+
+
 # Distinct colours for up to 4 key places
 _PLACE_COLORS = [
     "#4C9BE8",  # blue
@@ -109,10 +127,18 @@ _PLACE_COLORS = [
 
 def compute_regression_analysis():
     st.header("Tournament Trends (Linear Regression)")
-    st.caption(
-        "Linear regression of wave requirements at key placement positions over a patch. "
-        "The slope is how many waves the cutoff rises per tournament."
-    )
+    relative = not hidden_features
+    if relative:
+        st.caption(
+            "Linear regression of the wave requirement at key placement positions over a patch, "
+            "shown as percent change since the patch's first tournament. "
+            "The slope is how many percentage points the cutoff rises per tournament."
+        )
+    else:
+        st.caption(
+            "Linear regression of wave requirements at key placement positions over a patch. "
+            "The slope is how many waves the cutoff rises per tournament."
+        )
 
     col1, col2, col3 = st.columns([2, 2, 2])
     league = col1.selectbox("League", leagues, index=0)
@@ -155,6 +181,8 @@ def compute_regression_analysis():
     if data_points is None:
         st.warning(f"Not enough tournament data for {league} · {selected_patch} (need at least 2 tournaments).")
         return
+    if relative:
+        data_points = _as_percent_change(data_points, key_places)
 
     n = len(data_points)
     dates = [pt["date"] for pt in data_points]
@@ -204,7 +232,7 @@ def compute_regression_analysis():
         fig.add_trace(
             go.Scatter(
                 x=dates,
-                y=y_line,
+                y=[round(v, 1) for v in y_line] if relative else y_line,
                 mode="lines",
                 name=f"{place_label(place)} trend",
                 line=dict(color=color, dash="dash", width=2),
@@ -216,7 +244,7 @@ def compute_regression_analysis():
     fig.update_layout(
         title=f"{league} — Wave Trends by Place ({selected_patch})",
         xaxis_title="Tournament Date",
-        yaxis_title="Wave",
+        yaxis_title="Change since the patch's first tournament (%)" if relative else "Wave",
         hovermode="x unified",
         height=460,
         margin=dict(l=20, r=20, t=50, b=20),
@@ -232,7 +260,10 @@ def compute_regression_analysis():
         points_df,
         hide_index=True,
         width="stretch",
-        column_config={"Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD")},
+        column_config={
+            "Date": st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
+            **({place_label(place): st.column_config.NumberColumn(format="%+d%%") for place in key_places} if relative else {}),
+        },
     )
 
     # ------------------------------------------------------------------
@@ -247,8 +278,8 @@ def compute_regression_analysis():
         row: dict = {
             "Place": place_label(place),
             "Actual": int(round(reg["actual_latest"])),
-            "Predicted": int(round(reg["predicted_latest"])),
-            "Difference": int(round(reg["difference"])),
+            "Predicted": round(reg["predicted_latest"], 1) if relative else int(round(reg["predicted_latest"])),
+            "Difference": round(reg["difference"], 1) if relative else int(round(reg["difference"])),
             "Slope": round(reg["slope"], 2),
         }
         if has_prev_slope:
@@ -258,7 +289,7 @@ def compute_regression_analysis():
     summary_df = pd.DataFrame(table_rows)
 
     def _colour_diff(val: object) -> str:
-        if isinstance(val, int):
+        if isinstance(val, (int, float)):
             if val > 0:
                 return "color: green"
             if val < 0:
@@ -274,6 +305,15 @@ def compute_regression_analysis():
         "Difference": st.column_config.NumberColumn("Difference", help="Actual minus Predicted — green = harder than trend, red = easier"),
         "Slope": st.column_config.NumberColumn("Slope (waves/tourney)", help="Waves the trend rises per tournament"),
     }
+    if relative:
+        col_config["Actual"] = st.column_config.NumberColumn(
+            "Actual (%)", help="Change at this place in the latest tournament since the patch's first tournament", format="%+d%%"
+        )
+        col_config["Predicted"] = st.column_config.NumberColumn("Predicted (%)", help="Regression line value for this tournament", format="%+.1f%%")
+        col_config["Difference"] = st.column_config.NumberColumn(
+            "Difference (points)", help="Actual minus Predicted — green = harder than trend, red = easier", format="%+.1f"
+        )
+        col_config["Slope"] = st.column_config.NumberColumn("Slope (points/tourney)", help="Percentage points the trend rises per tournament")
     if has_prev_slope:
         col_config["Prev Slope"] = st.column_config.NumberColumn(
             "Prev Slope", help="Slope computed without the latest tournament — compare to Slope to see if trend is accelerating"
@@ -282,9 +322,16 @@ def compute_regression_analysis():
     st.dataframe(styled, hide_index=True, width="stretch", column_config=col_config)
 
     with st.expander("How to read this"):
+        units = (
+            "All values are percent change since the patch's first tournament, so the first tournament is always 0%.\n\n"
+            "**Slope** — how many percentage points the cutoff rises per tournament on average across this patch.\n"
+            "A slope of 0.8 means the trend line climbs 0.8 points each tournament."
+            if relative
+            else "**Slope** — how many waves the cutoff rises per tournament on average across this patch.\n"
+            "A slope of 8 means the trend line climbs 8 waves each tournament."
+        )
         st.markdown(f"""
-**Slope** — how many waves the cutoff rises per tournament on average across this patch.
-A slope of 8 means the trend line climbs 8 waves each tournament.
+{units}
 
 **Predicted** — where the regression line sits for the most recent tournament.
 
