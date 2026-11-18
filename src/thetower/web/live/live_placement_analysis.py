@@ -131,6 +131,9 @@ def live_placement_analysis():
         selected_player = ""
         player_id_input = ""
 
+    # Set when the Player ID box resolves to exactly one player, so the name search below is skipped
+    resolved_by_id = False
+
     # Handle player_id input with partial match and cross-league search
     if player_id_input and not selected_player:
         # Normalize to uppercase to align with stored player IDs
@@ -170,7 +173,7 @@ def live_placement_analysis():
             return
         else:
             # Single match found
-            selected_player_name = all_matches[0][0]
+            matched_player_id = all_matches[0][1]
             target_league = all_matches[0][2]
             if target_league != league:
                 # Reload data for the correct league
@@ -178,9 +181,10 @@ def live_placement_analysis():
                 df = process_display_names(df)
                 league = target_league
             # Set selected_player to continue with analysis
-            match_df = df[df["real_name"] == selected_player_name]
+            match_df = df[df["player_id"] == matched_player_id]
             if not match_df.empty:
                 selected_player = match_df.iloc[0]["display_name"]
+                resolved_by_id = True
             else:
                 st.error("Error loading player data.")
                 return
@@ -223,8 +227,8 @@ def live_placement_analysis():
         st.info("Enter a player name or Player ID to analyze placement")
         return
 
-    # Only do name-based search if player wasn't found via session state or query params
-    if not (selected_id_from_session or initial_player):
+    # Only do name-based search if player wasn't found via session state, query params or the Player ID box
+    if not (selected_id_from_session or initial_player or resolved_by_id):
         # Store search term for later
         st.session_state.player_search_term = selected_player
 
