@@ -19,58 +19,11 @@ from thetower.web.live.data_ops import (
     require_tournament_data,
     tie_positions,
 )
+from thetower.web.live.player_search import find_live_players, no_match_message, show_player_choices
 from thetower.web.live.ui_components import render_data_status
-from thetower.web.util import add_player_id, clear_other_search_boxes
+from thetower.web.util import clear_other_search_boxes
 
 logger = logging.getLogger(__name__)
-
-
-def _search_live_data_for_player(name: str = "", player_id: str = "") -> tuple[str | None, str | None]:
-    """Search all leagues' live data for a player by name or ID.
-
-    Returns:
-        (player_id, league) if a unique match is found, (None, None) otherwise.
-        Writes st.warning/st.error for disambiguation or not-found cases.
-    """
-    include_shun = include_shun_enabled_for("peer_watch")
-    include_sus = include_sus_enabled_for("peer_watch")
-    matches: list[tuple[str, str, str]] = []  # (real_name, player_id, league)
-
-    for lg in ALL_LEAGUES:
-        try:
-            # Latest snapshot only — searching needs current membership, not the full history.
-            # Bracket-filtered so partial brackets stay hidden while entry is open (anti-snipe).
-            df_tmp = get_latest_bracket_filtered_df(lg, include_shun, include_sus)
-            if df_tmp.empty:
-                continue
-            if player_id:
-                pid_upper = player_id.strip().upper()
-                match_df = df_tmp[df_tmp["player_id"].str.contains(pid_upper, na=False, regex=False)]
-            else:
-                name_lower = name.strip().lower()
-                match_df = df_tmp[df_tmp["real_name"].str.lower().str.contains(name_lower, na=False, regex=False)]
-            for _, row in match_df.drop_duplicates(subset=["player_id"]).iterrows():
-                matches.append((row["real_name"], row["player_id"], lg))
-        except Exception:
-            continue
-
-    if not matches:
-        return None, None
-
-    if len(matches) == 1:
-        return matches[0][1], matches[0][2]
-
-    # Multiple matches — show disambiguation list
-    matches.sort(key=lambda x: x[0].lower())
-    st.warning("Multiple players match. Please select one:")
-    for m_name, m_id, m_league in matches:
-        c1, c2, c3, c4 = st.columns([3, 2, 1, 1])
-        c1.write(m_name)
-        c2.write(m_id)
-        c3.write(m_league)
-        if c4.button("Select", key=f"pw_select_{m_id}_{m_league}", on_click=add_player_id, args=(m_id,)):
-            pass
-    return None, None
 
 
 @require_tournament_data
@@ -124,25 +77,27 @@ def peer_watch():
         )
         id_input = id_col.text_input("Or by Player ID", key="pw_id_input", on_change=clear_other_search_boxes, args=("pw_id_input", box_keys))
 
-        if id_input.strip():
-            found_id, _ = _search_live_data_for_player(player_id=id_input.strip())
-            if found_id:
-                resolved_id = found_id
-                st.session_state["pw_player_id"] = resolved_id
-            else:
-                # Try treating the input directly as a player ID (for historical lookup)
-                resolved_id = id_input.strip().upper()
-                st.session_state["pw_player_id"] = resolved_id
-        elif name_input.strip():
-            st.session_state["pw_player_search_term"] = name_input.strip()
-            found_id, _ = _search_live_data_for_player(name=name_input.strip())
-            if found_id:
-                resolved_id = found_id
-                st.session_state["pw_player_id"] = resolved_id
-            elif "pw_player_id" not in st.session_state:
-                # No match found, stop here
-                st.info("Enter a player name or ID to find their peer group.")
+        name_term, id_term = name_input.strip(), id_input.strip()
+        if name_term or id_term:
+            search_by, term = ("name", name_term) if name_term else ("id", id_term)
+            if search_by == "name":
+                st.session_state["pw_player_search_term"] = term
+            include_shun = include_shun_enabled_for("peer_watch")
+            include_sus = include_sus_enabled_for("peer_watch")
+            # Latest snapshot, bracket-filtered so partial brackets stay hidden while entry is open (anti-snipe)
+            matches = find_live_players(term, search_by, lambda lg: get_latest_bracket_filtered_df(lg, include_shun, include_sus))
+            if len(matches) > 1:
+                show_player_choices(matches, "pw")
                 return
+            if matches:
+                resolved_id = matches[0].player_id
+            elif search_by == "id":
+                # Not in the current tourney: peers come from the last completed one, so look the ID up there
+                resolved_id = id_term.upper()
+            else:
+                st.error(no_match_message(term, search_by))
+                return
+            st.session_state["pw_player_id"] = resolved_id
 
     if not resolved_id:
         st.info("Enter a player name or ID to find their peer group.")

@@ -125,6 +125,9 @@ def search_players_optimized(search_term, page=20, advanced_search=False, by: st
     Returns results prioritized by relevance.
     If advanced_search is True, also runs P3/P4 (contains) passes after the startswith passes.
     by="id" or by="name" searches only that field; None guesses from the term.
+
+    With advanced_search off this is the site-wide player search rule, shared with the live pages
+    (thetower.web.live.player_search); change both together.
     """
     t0 = time.perf_counter()
     search_term = search_term.strip()

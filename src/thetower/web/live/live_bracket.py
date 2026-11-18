@@ -21,6 +21,7 @@ from thetower.web.live.data_ops import (
     require_tournament_data,
     tie_positions,
 )
+from thetower.web.live.player_search import find_live_players, no_match_message, show_player_choices
 from thetower.web.live.ui_components import get_league_for_player, render_data_status, setup_common_ui
 from thetower.web.util import add_player_id, clear_other_search_boxes, fmt_dt
 
@@ -138,105 +139,27 @@ def live_bracket():
     elif options.current_player_id:
         selected_player_id = options.current_player_id
     else:
-        # Process inputs with cross-league search
-        if selected_player_id_input.strip():
-            pid_search = selected_player_id_input.strip().upper()
-
-            # Search across all leagues for partial player ID matches
-            from thetower.backend.tourney_results.constants import leagues as ALL_LEAGUES
-
-            all_matches = []  # Store (player_name, player_id, league) tuples
-
-            include_shun = include_shun_enabled_for("live_bracket")
-            include_sus = include_sus_enabled_for("live_bracket")
-            for lg in ALL_LEAGUES:
-                try:
-                    df_tmp = get_latest_bracket_filtered_df(lg, include_shun, include_sus)
-                    if not df_tmp.empty:
-                        # Partial match on player_id
-                        match_df = df_tmp[df_tmp["player_id"].str.contains(pid_search, na=False, regex=False)]
-                        # Add unique players from this league
-                        for _, row in match_df.drop_duplicates(subset=["player_id"]).iterrows():
-                            all_matches.append((row["real_name"], row["player_id"], lg))
-                except Exception:
-                    continue
-
-            if not all_matches:
-                st.error(f"No player IDs found matching '{pid_search}' in any active league.")
+        # Player search across all leagues (shared rule in player_search); carry the matched ID, never the name,
+        # so a namesake can't be picked instead
+        name_term, id_term = selected_real_name_input.strip(), selected_player_id_input.strip()
+        if name_term or id_term:
+            search_by, term = ("name", name_term) if name_term else ("id", id_term)
+            if search_by == "name":
+                st.session_state.player_search_term = term
+            matches = find_live_players(term, search_by, lambda lg: get_latest_bracket_filtered_df(lg, include_shun, include_sus))
+            if not matches:
+                st.error(no_match_message(term, search_by))
                 return
-            elif len(all_matches) > 1:
-                # Show multiple matches sorted by player ID
-                all_matches.sort(key=lambda x: x[1])
-                st.warning("Multiple player IDs match. Please select one:")
-                for player_name, player_id, player_league in all_matches:
-                    name_col, id_col, league_col, button_col = st.columns([3, 1, 1, 1])
-                    name_col.write(player_name)
-                    id_col.write(player_id)
-                    league_col.write(player_league)
-                    if button_col.button("Select", key=f"select_id_{player_id}_{player_league}", on_click=add_player_id, args=(player_id,)):
-                        pass
+            if len(matches) > 1:
+                show_player_choices(matches, "bracket")
                 return
-            else:
-                # Single match found: carry the ID, not the name, so a namesake can't be picked instead
-                selected_player_id = all_matches[0][1]
-                league = all_matches[0][2]
-                # Reload data for the correct league (include flags computed above)
-                df = get_latest_bracket_filtered_df(league, include_shun, include_sus)
-                bracket_order, fullish_brackets = get_bracket_overview(league, include_shun, include_sus)
-                _fullish = set(fullish_brackets)
-                bracket_order = [b for b in bracket_order if b in _fullish]
-        elif selected_real_name_input.strip():
-            # Search across all leagues for partial matches
-            from thetower.backend.tourney_results.constants import leagues as ALL_LEAGUES
-
-            search_name = selected_real_name_input.strip()
-            name_lower = search_name.lower()
-            all_matches = []  # Store (player_name, player_id, league) tuples
-
-            include_shun = include_shun_enabled_for("live_bracket")
-            include_sus = include_sus_enabled_for("live_bracket")
-            for lg in ALL_LEAGUES:
-                try:
-                    df_tmp = get_latest_bracket_filtered_df(lg, include_shun, include_sus)
-                    if not df_tmp.empty:
-                        # Partial match on real_name and name
-                        match_df = df_tmp[(df_tmp["real_name"].str.lower().str.contains(name_lower, na=False, regex=False))]
-                        if "name" in df_tmp.columns:
-                            match_df_alt = df_tmp[(df_tmp["name"].str.lower().str.contains(name_lower, na=False, regex=False))]
-                            match_df = pd.concat([match_df, match_df_alt]).drop_duplicates()
-
-                        # Add unique players from this league
-                        for _, row in match_df.drop_duplicates(subset=["real_name"]).iterrows():
-                            all_matches.append((row["real_name"], row["player_id"], lg))
-                except Exception:
-                    continue
-
-            if not all_matches:
-                st.error(f"No players found matching '{search_name}' in any active league.")
-                return
-            elif len(all_matches) > 1:
-                # Show multiple matches sorted by name
-                all_matches.sort(key=lambda x: x[0].lower())
-                st.warning("Multiple players match. Please select one:")
-                for player_name, player_id, player_league in all_matches:
-                    name_col, id_col, league_col, button_col = st.columns([3, 1, 1, 1])
-                    name_col.write(player_name)
-                    id_col.write(player_id)
-                    league_col.write(player_league)
-                    if button_col.button("Select", key=f"select_{player_name}_{player_league}", on_click=add_player_id, args=(player_id,)):
-                        pass
-                return
-            else:
-                # Single match found
-                selected_real_name = all_matches[0][0]
-                league = all_matches[0][2]
-                # Reload data for the correct league (include flags computed above)
-                df = get_latest_bracket_filtered_df(league, include_shun, include_sus)
-                bracket_order, fullish_brackets = get_bracket_overview(league, include_shun, include_sus)
-                _fullish = set(fullish_brackets)
-                bracket_order = [b for b in bracket_order if b in _fullish]
-            # Store search term for later
-            st.session_state.player_search_term = search_name
+            selected_player_id = matches[0].player_id
+            league = matches[0].league
+            # Reload data for the correct league (include flags computed above)
+            df = get_latest_bracket_filtered_df(league, include_shun, include_sus)
+            bracket_order, fullish_brackets = get_bracket_overview(league, include_shun, include_sus)
+            _fullish = set(fullish_brackets)
+            bracket_order = [b for b in bracket_order if b in _fullish]
         elif selected_bracket_input.strip():
             # Search across all leagues for the bracket; the page's auto-detected league is
             # only a default, and bracket IDs are stored upper-case

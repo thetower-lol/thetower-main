@@ -732,8 +732,8 @@ def process_bracket_selection(df, selected_real_name, selected_player_id, select
             if player_match.empty:
                 raise ValueError(f"Player ID {selected_player_id} not found")
             selected_real_name = player_match.real_name.iloc[0]
-            sdf = df[df.real_name == selected_real_name]
-            bracket_id = sdf.bracket.iloc[0]
+            # The player's own row, not the first row with their name: a namesake may be in another bracket
+            bracket_id = player_match.bracket.iloc[0]
             tdf = df[df.bracket == bracket_id]
             bracket_index = bracket_order.index(bracket_id)
         elif selected_real_name:
