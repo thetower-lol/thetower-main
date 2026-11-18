@@ -193,6 +193,18 @@ SEARCH_NAME_KEY = "search_name_part"
 SEARCH_ID_KEY = "search_id_part"
 
 
+def clear_other_search_boxes(keep_key: str, box_keys: tuple[str, ...]) -> None:
+    """on_change callback for a page's search boxes: empty every box except the one just submitted.
+
+    Each box searches one thing (name, player ID, bracket ID), so only one may hold text at a time. Pressing Enter in
+    a box runs that search alone instead of losing to text left in another box. The page must not pass `value=` to
+    these boxes (pre-fill through session state instead), or Streamlit warns when a callback sets them.
+    """
+    for key in box_keys:
+        if key != keep_key:
+            st.session_state[key] = ""
+
+
 def add_player_id(player_id):
     st.session_state.player_id = player_id
 

@@ -23,7 +23,7 @@ from thetower.backend.tourney_results.models import TourneyRow
 # filters on the highest cap configured across leagues.
 from thetower.backend.tourney_results.results_config import get_max_results_limit
 from thetower.backend.tourney_results.sus_config import include_sus_enabled_for
-from thetower.web.util import SEARCH_ID_KEY, SEARCH_NAME_KEY, add_player_id, add_to_comparison
+from thetower.web.util import SEARCH_ID_KEY, SEARCH_NAME_KEY, add_player_id, add_to_comparison, clear_other_search_boxes
 
 
 def _next_prefix(s: str) -> str:
@@ -119,11 +119,12 @@ def _get_excluded_from_results(player_ids: list[str], include_sus: bool = False)
     return standalone | via_instance
 
 
-def search_players_optimized(search_term, page=20, advanced_search=False):
+def search_players_optimized(search_term, page=20, advanced_search=False, by: str | None = None):
     """
     Optimized search function that combines all searches into unified queries.
     Returns results prioritized by relevance.
     If advanced_search is True, also runs P3/P4 (contains) passes after the startswith passes.
+    by="id" or by="name" searches only that field; None guesses from the term.
     """
     t0 = time.perf_counter()
     search_term = search_term.strip()
@@ -132,12 +133,15 @@ def search_players_optimized(search_term, page=20, advanced_search=False):
 
     fragments = [part.strip() for part in search_term.split()]
 
-    # Check if this looks like a player ID search (mostly hex characters)
-    hex_chars = sum(1 for c in search_term.upper() if c in "ABCDEF0123456789")
-    is_player_id_search = (
-        len(search_term.replace(" ", "")) >= 12  # Player IDs are long
-        and hex_chars / len(search_term.replace(" ", "")) > 0.7  # Mostly hex characters
-    )
+    if by is not None:
+        is_player_id_search = by == "id"
+    else:
+        # Check if this looks like a player ID search (mostly hex characters)
+        hex_chars = sum(1 for c in search_term.upper() if c in "ABCDEF0123456789")
+        is_player_id_search = (
+            len(search_term.replace(" ", "")) >= 12  # Player IDs are long
+            and hex_chars / len(search_term.replace(" ", "")) > 0.7  # Mostly hex characters
+        )
 
     if is_player_id_search:
         # Normalize to uppercase to align with stored player IDs
@@ -342,19 +346,22 @@ def compute_search(player=False, comparison=False):
         name_label = "Enter beginning of the player name"
         id_label = "Enter beginning of the player id to be queried"
 
-    real_name_part = name_col.text_input(name_label, key=SEARCH_NAME_KEY)
-    player_id_part = id_col.text_input(id_label, key=SEARCH_ID_KEY)
+    # Only one box holds text at a time: submitting one clears the other
+    box_keys = (SEARCH_NAME_KEY, SEARCH_ID_KEY)
+    real_name_part = name_col.text_input(name_label, key=SEARCH_NAME_KEY, on_change=clear_other_search_boxes, args=(SEARCH_NAME_KEY, box_keys))
+    player_id_part = id_col.text_input(id_label, key=SEARCH_ID_KEY, on_change=clear_other_search_boxes, args=(SEARCH_ID_KEY, box_keys))
 
-    # Determine which search to perform
+    # Determine which search to perform; each box searches only its own field
     search_term = ""
+    search_by = None
     if real_name_part.strip():
-        search_term = real_name_part.strip()
+        search_term, search_by = real_name_part.strip(), "name"
     elif player_id_part.strip():
-        search_term = player_id_part.strip()
+        search_term, search_by = player_id_part.strip(), "id"
 
     if search_term:
         t_search = time.perf_counter()
-        nickname_ids = search_players_optimized(search_term, page, advanced_search=advanced_search)
+        nickname_ids = search_players_optimized(search_term, page, advanced_search=advanced_search, by=search_by)
         if not hidden_features:
             t_excl = time.perf_counter()
             page_key = "player" if player else "comparison" if comparison else "search"

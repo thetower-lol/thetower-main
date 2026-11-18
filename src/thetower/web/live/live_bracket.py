@@ -22,7 +22,7 @@ from thetower.web.live.data_ops import (
     tie_positions,
 )
 from thetower.web.live.ui_components import get_league_for_player, render_data_status, setup_common_ui
-from thetower.web.util import add_player_id, fmt_dt
+from thetower.web.util import add_player_id, clear_other_search_boxes, fmt_dt
 
 
 def _display_name(player_id: str) -> str:
@@ -96,11 +96,20 @@ def live_bracket():
 
     # Only show search inputs if no player is selected
     if not (selected_id_from_session or options.current_player or options.current_player_id):
+        # Only one box holds text at a time: submitting one clears the others
+        name_key, id_key, bracket_key = f"player_name_input_{league}", f"player_id_input_{league}", f"bracket_id_input_{league}"
+        box_keys = (name_key, id_key, bracket_key)
+        st.session_state.setdefault(name_key, search_term or "")
+
         name_col, id_col = st.columns(2)
-        selected_real_name_input = name_col.text_input("Search by Player Name", value=search_term or "", key=f"player_name_input_{league}")
-        selected_player_id_input = id_col.text_input("Or by Player ID", value="", key=f"player_id_input_{league}")
+        selected_real_name_input = name_col.text_input(
+            "Search by Player Name", key=name_key, on_change=clear_other_search_boxes, args=(name_key, box_keys)
+        )
+        selected_player_id_input = id_col.text_input("Or by Player ID", key=id_key, on_change=clear_other_search_boxes, args=(id_key, box_keys))
         # Optional bracket ID search
-        selected_bracket_input = st.text_input("Or search by Bracket ID", value="", key=f"bracket_id_input_{league}")
+        selected_bracket_input = st.text_input(
+            "Or search by Bracket ID", key=bracket_key, on_change=clear_other_search_boxes, args=(bracket_key, box_keys)
+        )
     else:
         selected_real_name_input = ""
         selected_player_id_input = ""
@@ -168,8 +177,8 @@ def live_bracket():
                         pass
                 return
             else:
-                # Single match found
-                selected_real_name = all_matches[0][0]
+                # Single match found: carry the ID, not the name, so a namesake can't be picked instead
+                selected_player_id = all_matches[0][1]
                 league = all_matches[0][2]
                 # Reload data for the correct league (include flags computed above)
                 df = get_latest_bracket_filtered_df(league, include_shun, include_sus)

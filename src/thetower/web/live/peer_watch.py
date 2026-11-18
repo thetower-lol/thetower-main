@@ -20,7 +20,7 @@ from thetower.web.live.data_ops import (
     tie_positions,
 )
 from thetower.web.live.ui_components import render_data_status
-from thetower.web.util import add_player_id
+from thetower.web.util import add_player_id, clear_other_search_boxes
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +114,15 @@ def peer_watch():
     if resolved_id:
         st.button("Search for another player?", on_click=clear_player, key="pw_search_new")
     else:
+        # Only one box holds text at a time: submitting one clears the other
+        box_keys = ("pw_name_input", "pw_id_input")
+        st.session_state.setdefault("pw_name_input", st.session_state.get("pw_player_search_term", ""))
+
         name_col, id_col = st.columns(2)
-        name_input = name_col.text_input("Search by Player Name", value=st.session_state.get("pw_player_search_term", ""), key="pw_name_input")
-        id_input = id_col.text_input("Or by Player ID", value="", key="pw_id_input")
+        name_input = name_col.text_input(
+            "Search by Player Name", key="pw_name_input", on_change=clear_other_search_boxes, args=("pw_name_input", box_keys)
+        )
+        id_input = id_col.text_input("Or by Player ID", key="pw_id_input", on_change=clear_other_search_boxes, args=("pw_id_input", box_keys))
 
         if id_input.strip():
             found_id, _ = _search_live_data_for_player(player_id=id_input.strip())

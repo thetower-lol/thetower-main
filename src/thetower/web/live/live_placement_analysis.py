@@ -17,7 +17,7 @@ from thetower.web.live.data_ops import (
     whole_percent_shares,
 )
 from thetower.web.live.ui_components import render_data_status, setup_common_ui
-from thetower.web.util import add_player_id, fmt_dt, get_user_tz
+from thetower.web.util import add_player_id, clear_other_search_boxes, fmt_dt, get_user_tz
 
 
 @require_tournament_data
@@ -118,15 +118,16 @@ def live_placement_analysis():
             # In desktop view, use side-by-side columns
             name_col, id_col = st.columns([2, 1])
 
+        # Only one box holds text at a time: submitting one clears the other
+        name_key, id_key = "player_name_input", f"player_id_input_{league}"
+        box_keys = (name_key, id_key)
+        st.session_state.setdefault(name_key, search_term or "")
+
         with name_col:
-            selected_player = st.text_input(
-                "Enter player name",
-                value=search_term or "",
-                key="player_name_input",
-            )
+            selected_player = st.text_input("Enter player name", key=name_key, on_change=clear_other_search_boxes, args=(name_key, box_keys))
 
         with id_col:
-            player_id_input = st.text_input("Or enter Player ID", value="", key=f"player_id_input_{league}")
+            player_id_input = st.text_input("Or enter Player ID", key=id_key, on_change=clear_other_search_boxes, args=(id_key, box_keys))
     else:
         selected_player = ""
         player_id_input = ""
