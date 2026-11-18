@@ -300,7 +300,7 @@ def render_player_action_links(container, player_id: str, joined_tourney: bool) 
     row_style = "display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.75rem;"
 
     def button_row(buttons: list[tuple[str, str]], style: str) -> None:
-        links = "".join(f'<a href="{url}" style="{style}">{label}</a>' for label, url in buttons)
+        links = "".join(f'<a href="{url}" target="_self" style="{style}">{label}</a>' for label, url in buttons)
         container.markdown(f'<div style="{row_style}">{links}</div>', unsafe_allow_html=True)
 
     placements_url = f"https://{BASE_URL}/player?" + urlencode({"player": player_id}, doseq=True)
