@@ -290,10 +290,18 @@ def filter_lower_leagues(df):
 
 
 def render_player_action_links(container, player_id: str, joined_tourney: bool) -> None:
-    """Render historical (red) and live (blue) action button rows for a player."""
-    historical_style = "display: inline-block; padding: 8px 16px; background-color: #FF4B4B; color: white; text-align: center; text-decoration: none; border-radius: 4px; font-weight: 500;"
-    live_style = "display: inline-block; padding: 8px 16px; background-color: #1F6FEB; color: white; text-align: center; text-decoration: none; border-radius: 4px; font-weight: 500;"
-    center_style = "text-align: center; margin-bottom: 1rem;"
+    """Render historical (red) and live (blue) action button rows for a player, every button the same size."""
+    button_style = (
+        "display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 11rem; height: 3.25rem;"
+        " padding: 4px 12px; color: white; text-align: center; line-height: 1.25; text-decoration: none; border-radius: 4px; font-weight: 500;"
+    )
+    historical_style = f"{button_style} background-color: #FF4B4B;"
+    live_style = f"{button_style} background-color: #1F6FEB;"
+    row_style = "display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.75rem;"
+
+    def button_row(buttons: list[tuple[str, str]], style: str) -> None:
+        links = "".join(f'<a href="{url}" style="{style}">{label}</a>' for label, url in buttons)
+        container.markdown(f'<div style="{row_style}">{links}</div>', unsafe_allow_html=True)
 
     placements_url = f"https://{BASE_URL}/player?" + urlencode({"player": player_id}, doseq=True)
     proximal_url = f"https://{BASE_URL}/comparison?proximal_player={player_id}"
@@ -304,29 +312,19 @@ def render_player_action_links(container, player_id: str, joined_tourney: bool) 
     quantile_url = f"https://{BASE_URL}/livequantile?player_id={player_id}"
 
     # Row 1: Historical — always shown (red)
-    hist_col1, hist_col2, *_ = container.columns([1, 2, 1])
-    hist_col1.markdown(
-        f'<div style="{center_style}"><a href="{placements_url}" style="{historical_style}">Placements</a></div>', unsafe_allow_html=True
-    )
-    hist_col2.markdown(
-        f'<div style="{center_style}"><a href="{proximal_url}" style="{historical_style}">Proximal Comparison</a></div>', unsafe_allow_html=True
-    )
+    button_row([("Placements", placements_url), ("Proximal Comparison", proximal_url)], historical_style)
 
     # Row 2: Live — only if player joined the recent tourney (blue)
     if joined_tourney:
-        live_col1, live_col2, live_col3, live_col4, live_col5 = container.columns(5)
-        live_col1.markdown(
-            f'<div style="{center_style}"><a href="{bracket_url}" style="{live_style}">Live Bracket View</a></div>', unsafe_allow_html=True
-        )
-        live_col2.markdown(
-            f'<div style="{center_style}"><a href="{comparison_url}" style="{live_style}">Live Bracket Comparison</a></div>', unsafe_allow_html=True
-        )
-        live_col3.markdown(f'<div style="{center_style}"><a href="{peerwatch_url}" style="{live_style}">Peer Watch</a></div>', unsafe_allow_html=True)
-        live_col4.markdown(
-            f'<div style="{center_style}"><a href="{placement_url}" style="{live_style}">Live Placement Analysis</a></div>', unsafe_allow_html=True
-        )
-        live_col5.markdown(
-            f'<div style="{center_style}"><a href="{quantile_url}" style="{live_style}">Live Quantile Analysis</a></div>', unsafe_allow_html=True
+        button_row(
+            [
+                ("Live Bracket View", bracket_url),
+                ("Live Bracket Comparison", comparison_url),
+                ("Peer Watch", peerwatch_url),
+                ("Live Placement Analysis", placement_url),
+                ("Live Quantile Analysis", quantile_url),
+            ],
+            live_style,
         )
 
 
