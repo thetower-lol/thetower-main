@@ -229,14 +229,13 @@ def create_or_update_player(
 
         elif action_type == "new_instance_retire_old":
             # Create new instance and retire old: Like merge but sets old instances to inactive
-            # Retire all existing instances
-            player.game_instances.update(primary=False, active=False)
-            # Create new primary instance
+            old_instance_ids = list(player.game_instances.values_list("id", flat=True))
             existing_names = player.game_instances.values_list("name", flat=True)
             max_num = max(
                 (int(m.group(1)) for name in existing_names for m in [re.match(r"^Instance (\d+)\b", name)] if m),
                 default=0,
             )
+            # The new instance comes first: saving it as primary demotes the old ones, and it is where their roles move
             primary_instance = GameInstance.objects.create(
                 player=player,
                 name=f"Instance {max_num + 1}",
@@ -244,9 +243,12 @@ def create_or_update_player(
                 active=True,
             )
             PlayerId.objects.create(id=player_id, game_instance=primary_instance, primary=True)
+            retire_game_instances(old_instance_ids, reason, replacement=primary_instance)
             if update_role_source:
-                linked_account.role_source_instance = primary_instance
-                linked_account.save()
+                linked_account.refresh_from_db()
+                if linked_account.role_source_instance_id != primary_instance.id:
+                    linked_account.role_source_instance = primary_instance
+                    save_with_reason(linked_account, reason)
             logger.info("Created new instance %s and retired old instances for player %d", primary_instance.name, player.pk)
 
         else:
@@ -430,18 +432,53 @@ def set_primary_game_instance(player_pk: int, instance_id: int) -> dict[str, Any
         return {"status": "error", "message": str(exc)}
 
 
-def toggle_game_instance_active(instance_id: int, active: bool) -> dict[str, Any]:
-    """Activate or deactivate a game instance.
+def retire_game_instances(instance_ids, reason: str, replacement=None) -> list[str]:
+    """Retire game instances and take their roles away.
+
+    A retired instance is inert: it gives no roles and end users no longer see it, though moderators and ban checks
+    still do. Each of *instance_ids* still active is saved inactive with *reason* on its history row (the save also
+    emits instance.retired). Every linked account whose role source is one of them moves to *replacement*, the
+    instance replacing them, or has its role source cleared when there is none, so its owner picks another.
+
+    Returns the moved accounts as "platform:account_id".
+    """
+    from thetower.backend.sus.models import GameInstance, LinkedAccount
+
+    instance_ids = list(instance_ids)
+    for instance in GameInstance.objects.filter(id__in=instance_ids, active=True):
+        instance.active = False
+        instance._change_reason = reason[:100]
+        instance.save(update_fields=["active"])
+    moved = []
+    for account in LinkedAccount.objects.filter(role_source_instance_id__in=instance_ids):
+        account.role_source_instance = replacement
+        save_with_reason(account, reason)
+        moved.append(f"{account.platform}:{account.account_id}")
+    if moved:
+        logger.info("Retired instances %s: role source of %s moved to %s", instance_ids, ", ".join(moved), replacement.pk if replacement else None)
+    return moved
+
+
+def toggle_game_instance_active(instance_id: int, active: bool, reason: str = "game instance toggled") -> dict[str, Any]:
+    """Activate or deactivate a game instance, with *reason* (who did it, and where) on its history row.
+
+    Deactivating retires it (see retire_game_instances): accounts taking roles from it are left with no role source.
 
     Returns dict with 'status' ('ok' or 'error') and optional 'message'.
     """
     from thetower.backend.sus.models import GameInstance
 
     try:
-        updated = GameInstance.objects.filter(id=instance_id).update(active=active)
-        if not updated:
+        instance = GameInstance.objects.filter(id=instance_id).first()
+        if instance is None:
             return {"status": "error", "message": "Game instance not found"}
-        logger.info("Toggled game instance active: instance=%d active=%s", instance_id, active)
+        if not active:
+            retire_game_instances([instance_id], reason)
+        elif not instance.active:
+            instance.active = True
+            instance._change_reason = reason[:100]
+            instance.save(update_fields=["active"])
+        logger.info("Toggled game instance active: instance=%d active=%s (%s)", instance_id, active, reason)
         return {"status": "ok", "active": active}
     except Exception as exc:
         logger.exception("toggle_game_instance_active failed: instance=%d", instance_id)

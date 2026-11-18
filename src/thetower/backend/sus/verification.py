@@ -2047,7 +2047,7 @@ def mod_resolve_intent(stem: str, action_type: str, resolved_by: str, resolved_n
             update_role_source=False,
             action_type=action_type,
             old_player_id=old_player_id,
-            reason=f"verification #{row.get('id')}",
+            reason=f"verification #{row.get('id')}, mod {resolved_by}",
         )
 
         if "error" in result:
