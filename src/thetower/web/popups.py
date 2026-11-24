@@ -34,6 +34,27 @@ setTimeout(() => {
         dialog.focus();
     }
 }, 100);
+// Streamlit centers dialogs on the window, which looks off-center beside an open sidebar. Center the popup over
+// the page content instead, while there is room for it there; the sidebar's toggles and resizes resize the main area.
+{
+    const main = document.querySelector('[data-testid="stMain"]');
+    const centerOverContent = () => {
+        const dialog = document.querySelector(".thetower-site-popup")?.closest('[role="dialog"]');
+        if (!dialog || !main) {
+            return false;
+        }
+        const holder = dialog.parentElement;
+        dialog.dataset.naturalWidth ??= dialog.offsetWidth;
+        const left = main.getBoundingClientRect().left;
+        const fits = window.innerWidth - left >= Number(dialog.dataset.naturalWidth) + 32;
+        holder.style.paddingLeft = left > 0 && fits ? `${left}px` : "";
+        return true;
+    };
+    if (main && centerOverContent()) {
+        const observer = new ResizeObserver(() => centerOverContent() || observer.disconnect());
+        observer.observe(main);
+    }
+}
 if (!window.thetowerPopupGuard) {
     window.thetowerPopupGuard = true;
     const popupOpen = () => document.querySelector(".thetower-site-popup") !== null;
