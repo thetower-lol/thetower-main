@@ -21,8 +21,19 @@ COOKIE_PREFIX = "thetower_popup_"
 # (a document mousedown outside the dialog, Escape keydown/keyup) before they reach it. Other dialogs are unaffected.
 _DISMISS_GUARD_HTML = """
 <span class="thetower-site-popup"></span>
-<style>.stElementContainer:has(> .stHtml > .thetower-site-popup) { display: none; }</style>
+<style>
+.stElementContainer:has(> .stHtml > .thetower-site-popup) { display: none; }
+[role="dialog"]:has(.thetower-site-popup):focus { outline: none; }
+</style>
 <script>
+// The dialog focuses its first link or button when it opens, which draws a focus ring around it. Focus the
+// dialog itself instead (keyboard users still Tab from there).
+setTimeout(() => {
+    const dialog = document.querySelector(".thetower-site-popup")?.closest('[role="dialog"]');
+    if (dialog && dialog.contains(document.activeElement) && document.activeElement !== dialog) {
+        dialog.focus();
+    }
+}, 100);
 if (!window.thetowerPopupGuard) {
     window.thetowerPopupGuard = true;
     const popupOpen = () => document.querySelector(".thetower-site-popup") !== null;
