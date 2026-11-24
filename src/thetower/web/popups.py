@@ -51,21 +51,35 @@ def _enabled_popups() -> list[dict]:
     return list(SitePopup.objects.filter(enabled=True, end_at__gt=timezone.now()).values("key", "title", "body", "start_at", "end_at"))
 
 
+def clear_popup_cache() -> None:
+    """Drop this process's cached popup list (other site processes refresh within a minute)."""
+    _enabled_popups.clear()
+
+
 def _acknowledge(popup: dict) -> None:
     """Hide the popup for this session and queue the cookie that hides it in future sessions."""
     st.session_state.popups_acknowledged.add(popup["key"])
     st.session_state.popup_cookie_writes[popup["key"]] = http_date(popup["end_at"].timestamp())
 
 
-def _open_dialog(popup: dict) -> None:
+def render_popup_body(body: str) -> None:
+    """Render a popup's body text exactly as the popup shows it."""
+    st.markdown(body)
+
+
+def open_popup_dialog(popup: dict, preview: bool = False) -> None:
+    """Open the popup dialog. A preview looks the same but acknowledges nothing and sets no cookie."""
+
     def body() -> None:
         st.html(_DISMISS_GUARD_HTML, unsafe_allow_javascript=True)
-        st.markdown(popup["body"])
+        render_popup_body(popup["body"])
         if st.button("Got it", type="primary", key=f"popup_ack_{popup['key']}"):
-            _acknowledge(popup)
+            if not preview:
+                _acknowledge(popup)
             st.rerun()
 
-    st.dialog(popup["title"], width="medium", on_dismiss=functools.partial(_acknowledge, popup))(body)()
+    on_dismiss = "ignore" if preview else functools.partial(_acknowledge, popup)
+    st.dialog(popup["title"], width="medium", on_dismiss=on_dismiss)(body)()
 
 
 def show_site_popups() -> None:
@@ -96,5 +110,5 @@ def show_site_popups() -> None:
             continue
         if popup["key"] in st.session_state.popups_acknowledged or cookies.get(f"{COOKIE_PREFIX}{popup['key']}"):
             continue
-        _open_dialog(popup)
+        open_popup_dialog(popup)
         return
