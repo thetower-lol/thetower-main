@@ -319,6 +319,36 @@ class RainPeriod(models.Model):
         ordering = ["-start_date"]
 
 
+class SitePopup(models.Model):
+    """A one-time announcement shown as a popup on every page of the Streamlit site.
+
+    Shown from `start_at` until `end_at` (UTC) to visitors who have not acknowledged it yet. Acknowledging
+    sets a browser cookie named after `key` that expires at `end_at`; after `end_at` it is never shown again.
+    """
+
+    key = models.SlugField(
+        max_length=50, unique=True, help_text="Identifies this popup in visitors' cookies. Changing it shows the popup again to everyone."
+    )
+    title = models.CharField(max_length=100, help_text="Popup heading")
+    body = models.TextField(help_text="Popup text (Markdown)")
+    start_at = models.DateTimeField(help_text="Start showing at this time (UTC)")
+    end_at = models.DateTimeField(help_text="Stop showing at this time (UTC). Acknowledgment cookies expire then too.")
+    enabled = models.BooleanField(default=True, help_text="Uncheck to stop showing this popup without changing its dates")
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["start_at"]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.start_at and self.end_at and self.end_at <= self.start_at:
+            raise ValidationError({"end_at": "End must be after start."})
+
+    def __str__(self):
+        return f"{self.title} ({self.start_at:%Y-%m-%d %H:%M} - {self.end_at:%Y-%m-%d %H:%M} UTC)"
+
+
 class RoleWindow(models.Model):
     """A window of tournament data that Discord roles are computed from.
 

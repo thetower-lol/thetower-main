@@ -19,6 +19,7 @@ from .models import (
     RainPeriod,
     Role,
     RoleWindow,
+    SitePopup,
     TourneyResult,
     TourneyRow,
 )
@@ -526,3 +527,10 @@ class RainPeriodAdmin(SimpleHistoryAdmin):
     )
 
     list_filter = ["enabled", "start_date", "end_date"]
+
+
+@admin.register(SitePopup)
+class SitePopupAdmin(SimpleHistoryAdmin):
+    list_display = ("title", "key", "start_at", "end_at", "enabled")
+    search_fields = ("title", "key", "body")
+    list_filter = ["enabled", "start_at", "end_at"]

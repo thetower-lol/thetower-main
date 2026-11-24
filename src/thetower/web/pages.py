@@ -11,6 +11,7 @@ from streamlit_js_eval import streamlit_js_eval
 
 from thetower.backend.tourney_results.constants import Graph, Options
 from thetower.web.maintenance import get_maintenance_state
+from thetower.web.popups import show_site_popups
 from thetower.web.request_logger import log_render_complete, log_request, start_render
 from thetower.web.util import makeitrain
 
@@ -172,6 +173,8 @@ if active_period:
 
     if rainenabled:
         makeitrain()
+
+show_site_popups()
 
 # Read from localStorage and detect browser timezone (both return None on first render)
 _stored_tz = streamlit_js_eval(
