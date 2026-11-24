@@ -19,7 +19,6 @@ from thetower.web.popups import clear_popup_cache, open_popup_dialog, render_pop
 logger = logging.getLogger(__name__)
 
 UTC = datetime.timezone.utc
-FIELDS = ("title", "key", "body", "start_date", "start_time", "end_date", "end_time", "enabled")
 
 # A pair of unescaped dollar signs on one line renders as LaTeX math in Streamlit Markdown.
 _UNESCAPED_DOLLAR = re.compile(r"(?<!\\)\$")
@@ -32,6 +31,24 @@ def _suggest_key(title: str) -> str:
     """A cookie-safe key from the title's plain text."""
     plain = _SHORTCODE.sub("", _DIRECTIVE.sub(r"\1", title))
     return slugify(plain)[:50].strip("-")
+
+
+def _unique_key(key: str, own_pk: int | None) -> str:
+    """`key`, or key-2, key-3, ... when another popup has it or ever had it.
+
+    Deleted and renamed popups count (via the history table): visitors may still hold cookies for their old keys,
+    which would hide a new popup that reused one.
+    """
+    if not key:
+        return key
+    used = set(SitePopup.history.exclude(id=own_pk).values_list("key", flat=True))
+    used |= set(SitePopup.objects.exclude(pk=own_pk).values_list("key", flat=True))
+    candidate, n = key, 1
+    while candidate in used:
+        n += 1
+        suffix = f"-{n}"
+        candidate = key[: 50 - len(suffix)].rstrip("-") + suffix
+    return candidate
 
 
 MARKDOWN_HELP = r"""
@@ -157,10 +174,14 @@ def _render_editor(target: str, now: datetime.datetime) -> None:
             max_chars=50,
             placeholder=suggested_key or "letters-numbers-and-dashes",
             help="Names the cookie that remembers who acknowledged this popup. Leave blank to use the title. "
-            "Changing it later shows the popup again to everyone.",
+            "A number is added if another popup has used it. Changing it later shows the popup again to everyone.",
         ).strip()
         or suggested_key
     )
+    resolved_key = _unique_key(key, existing.pk if existing else None)
+    if resolved_key != key:
+        st.info(f"Another popup has used `{key}`, so this one saves as `{resolved_key}`.")
+        key = resolved_key
     if existing and key != existing.key:
         st.warning(f"Changing the key from `{existing.key}` shows this popup again to everyone who already acknowledged it.")
 
