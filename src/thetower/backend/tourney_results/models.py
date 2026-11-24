@@ -295,10 +295,10 @@ class RainPeriod(models.Model):
         today = timezone.now().date()
 
         if cached_periods is None:
-            # Cache all enabled periods
+            # Cache all enabled periods. The cache is per-process memory, so admin edits (made in another
+            # process) reach the sites only when this expires: keep it short.
             cached_periods = list(cls.objects.filter(enabled=True))
-            # Cache for 24 hours since cache is invalidated on any changes anyway
-            cache.set(cache_key, cached_periods, timeout=86400)  # 24 hours = 86400 seconds
+            cache.set(cache_key, cached_periods, timeout=60)
 
         # Check which period is active right now - don't cache this result
         for period in cached_periods:
@@ -306,11 +306,6 @@ class RainPeriod(models.Model):
                 return period
 
         return None
-
-    def save(self, *args, **kwargs):
-        """Override save to invalidate cache when a rain period is modified."""
-        cache.delete("rain_periods")
-        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.emoji} ({self.start_date} - {self.end_date})"
