@@ -1,60 +1,67 @@
+/* Site-wide styles for hand-written HTML. Loaded once by pages.py for every page.
+   The --tt-* values mirror [theme] in .streamlit/config.toml; change both together. */
 :root {
-    --secondary-background: #262730;
-    --hairline: rgba(250, 250, 250, 0.08);
-    --text: #fafafa;
+    --tt-bg: #0b1016;
+    --tt-surface: #121923;
+    --tt-raised: #18212d;
+    --tt-border: #2e3b4f; /* softer than theme.borderColor, which also fills unchecked radios */
+    --tt-hairline: rgba(230, 237, 243, 0.08);
+    --tt-text: #e6edf3;
+    --tt-muted: #9aa7b8;
+    --tt-faint: #7a8799;
+    --tt-accent: #52b9e4;
+    --tt-accent-soft: rgba(82, 185, 228, 0.14);
+    --tt-gold: #d4af37;
+    --tt-silver: #b8bcc4;
+    --tt-bronze: #c0804a;
+    --tt-mono: "IBM Plex Mono", "Source Code Pro", ui-monospace, monospace;
+    --tt-heading: "Barlow Semi Condensed", "IBM Plex Sans", sans-serif;
 }
 
-a {
-    color: var(--text) !important;
-    text-decoration: underline;
-    text-decoration-style: dotted;
-    text-decoration-color: #cccccc;
-}
-a:hover {
-    text-decoration: underline;
-}
-
+/* ---- Tables written as HTML (DataFrame.to_html and friends) ---- */
 table {
     width: 100%;
-    border: 1px var(--hairline) solid !important;
+    border: 1px solid var(--tt-border) !important;
     border-collapse: collapse;
     margin-bottom: 12px !important;
     font-variant-numeric: tabular-nums;
 }
-
-tbody {
-    border: 0 !important;
-}
-thead th {
-    background-color: var(--secondary-background);
-    text-align: center;
-    vertical-align: middle;
-    border: 0 !important;
-}
-tfoot {
-    border: 0 !important;
-}
-tr {
-    border: 0 !important;
-    height: 45px;
-}
+tbody,
+tfoot,
+tr,
 th,
 td {
     border: 0 !important;
 }
-
-tr:nth-child(even) {
-    background-color: var(--secondary-background);
-    border: 0 !important;
+thead th {
+    background-color: var(--tt-surface);
+    color: var(--tt-muted);
+    font-weight: 500;
+    text-align: center;
+    vertical-align: middle;
+}
+tr {
+    height: 44px;
+}
+tbody tr:nth-child(even) {
+    background-color: var(--tt-surface);
+}
+tbody tr:hover {
+    background-color: var(--tt-raised);
+}
+table a {
+    color: var(--tt-text) !important;
+    text-decoration: underline dotted var(--tt-faint);
+    text-underline-offset: 3px;
+}
+table a:hover {
+    color: var(--tt-accent) !important;
+    text-decoration-color: var(--tt-accent);
 }
 
-/* CSS for smaller screens */
 @media (max-width: 600px) {
     table {
-        margin-top: 0 !important;
-        margin-bottom: 10px !important;
-        margin-left: 0 !important;
-        margin-right: 0 !important;
+        margin: 0 0 12px 0 !important;
         padding: 0 !important;
     }
     tr {
@@ -62,15 +69,317 @@ tr:nth-child(even) {
         padding: 0 !important;
     }
     td {
-        margin: 5px !important;
-        padding: 5px !important;
+        margin: 4px !important;
+        padding: 4px !important;
     }
 }
 
+/* ---- Streamlit widgets the theme can't reach ---- */
+/* Primary buttons: Streamlit always writes white text, which is ~2.3:1 on the cyan accent */
+[data-testid="stBaseButton-primary"],
+[data-testid="stBaseButton-primary"] p,
+[data-testid="stBaseLinkButton-primary"],
+[data-testid="stBaseLinkButton-primary"] p {
+    color: var(--tt-bg) !important;
+}
+
+/* ---- Building blocks for hand-written HTML ---- */
+.tt-panel {
+    margin: 24px 0;
+    padding: 16px;
+    background: var(--tt-surface);
+    border: 1px solid var(--tt-border);
+    border-radius: 12px;
+}
+.tt-panel-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+    margin-bottom: 12px;
+}
+.tt-panel-title {
+    font-family: var(--tt-heading);
+    font-size: 18px;
+    line-height: 24px;
+    font-weight: 600;
+    color: var(--tt-text);
+}
+.tt-meta {
+    font-size: 13px;
+    color: var(--tt-faint);
+}
+.tt-muted {
+    color: var(--tt-muted);
+}
+.tt-mono {
+    font-family: var(--tt-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Podium: three medal cards plus one card listing the runners-up */
+.tt-podium {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.tt-card {
+    flex: 1;
+    min-width: 112px;
+    padding: 12px;
+    background: var(--tt-raised);
+    border: 1px solid var(--tt-border);
+    border-radius: 8px;
+}
+.tt-card--gold {
+    border-top: 3px solid var(--tt-gold);
+}
+.tt-card--silver {
+    border-top: 3px solid var(--tt-silver);
+}
+.tt-card--bronze {
+    border-top: 3px solid var(--tt-bronze);
+}
+.tt-card-place {
+    font-family: var(--tt-mono);
+    font-size: 12px;
+    line-height: 16px;
+}
+.tt-card--gold .tt-card-place {
+    color: var(--tt-gold);
+}
+.tt-card--silver .tt-card-place {
+    color: var(--tt-silver);
+}
+.tt-card--bronze .tt-card-place {
+    color: var(--tt-bronze);
+}
+.tt-card-name {
+    margin-top: 4px;
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 500;
+    color: var(--tt-text);
+    overflow-wrap: anywhere;
+}
+.tt-card-value {
+    font-family: var(--tt-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    line-height: 20px;
+    color: var(--tt-muted);
+}
+.tt-runners {
+    padding: 8px 12px;
+}
+.tt-runner {
+    padding: 4px 0;
+}
+.tt-runner-line {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+}
+.tt-runner-place {
+    width: 12px;
+    font-family: var(--tt-mono);
+    font-size: 12px;
+    color: var(--tt-faint);
+}
+.tt-runner-name {
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--tt-text);
+    overflow-wrap: anywhere;
+}
+.tt-runner .tt-card-value {
+    padding-left: 20px;
+}
+
+/* Section heading that links somewhere, with a hairline under it */
+.tt-section-link {
+    margin: 32px 0 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--tt-border);
+}
+.tt-section-link a {
+    font-family: var(--tt-heading);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--tt-text);
+    text-decoration: none;
+}
+.tt-section-link a:hover {
+    color: var(--tt-accent);
+}
+.tt-section-link .tt-arrow {
+    color: var(--tt-faint);
+}
+
+/* Link styled as a button. Primary is the cyan fill; quiet is an outline for secondary actions. */
+.tt-button-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+a.tt-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 11rem;
+    height: 3.25rem;
+    padding: 4px 12px;
+    text-align: center;
+    line-height: 1.25;
+    font-weight: 500;
+    text-decoration: none;
+    border-radius: 8px;
+    border: 1px solid var(--tt-accent);
+    background: var(--tt-accent);
+    color: var(--tt-bg) !important;
+}
+a.tt-button:hover {
+    background: #74c8ea;
+    border-color: #74c8ea;
+}
+a.tt-button--quiet {
+    background: transparent;
+    border-color: var(--tt-border);
+    color: var(--tt-text) !important;
+}
+a.tt-button--quiet:hover {
+    background: var(--tt-raised);
+    border-color: var(--tt-accent);
+}
+a.tt-button--warn {
+    width: auto;
+    height: auto;
+    padding: 8px 16px;
+    background: #d97706;
+    border-color: #d97706;
+    color: var(--tt-bg) !important;
+}
+
+/* Countdown box (web/countdown.py) */
+.tt-countdown {
+    margin: 2px;
+    padding: 24px;
+    text-align: center;
+    background: var(--tt-surface);
+    border: 1px solid var(--tt-border);
+    border-radius: 12px;
+}
+.tt-countdown-sub {
+    margin: 0 0 4px 0;
+    color: var(--tt-muted);
+    font-size: 14px;
+    line-height: 20px;
+}
+.tt-countdown-label {
+    margin: 0;
+    padding: 0 !important;
+    color: var(--tt-text);
+    font-family: var(--tt-heading);
+    font-size: 24px;
+    line-height: 28px;
+    font-weight: 600;
+}
+.tt-countdown-row {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 12px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+}
+.tt-countdown-num,
+.tt-countdown-sep {
+    font-family: var(--tt-mono);
+    font-size: 40px;
+    line-height: 1;
+}
+.tt-countdown-num {
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    color: var(--tt-accent);
+}
+.tt-countdown-sep {
+    color: var(--tt-border);
+}
+.tt-countdown-unit {
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--tt-faint);
+}
+.tt-countdown-bcs {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--tt-border);
+}
+.tt-countdown-bcs-title {
+    font-size: 13px;
+    line-height: 20px;
+    color: var(--tt-muted);
+    margin-bottom: 4px;
+}
+.tt-countdown-bcs-list {
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--tt-text);
+}
+
+@media (max-width: 480px) {
+    .tt-countdown {
+        padding: 16px;
+    }
+    .tt-countdown-row {
+        gap: 6px;
+    }
+    .tt-countdown-num,
+    .tt-countdown-sep {
+        font-size: 30px;
+    }
+}
+
+/* Sidebar support box */
+/* Accent-tinted so it reads as the one call to action in the sidebar, without a solid fill */
+.tt-support {
+    margin-bottom: 8px;
+    padding: 12px;
+    font-size: 14px;
+    line-height: 22px;
+    color: var(--tt-muted);
+    background: rgba(82, 185, 228, 0.08);
+    border: 1px solid rgba(82, 185, 228, 0.4);
+    border-radius: 8px;
+}
+.tt-support-title {
+    margin-bottom: 4px;
+    font-family: var(--tt-heading);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--tt-text);
+}
+.tt-support .tt-code {
+    padding: 1px 6px;
+    font-weight: 500;
+    color: var(--tt-accent);
+    background: rgba(82, 185, 228, 0.16);
+    border-radius: 4px;
+}
+.tt-code {
+    font-family: var(--tt-mono);
+    color: var(--tt-text);
+}
+
+/* ---- Image helpers ---- */
 .desaturated {
-    filter: grayscale(100%); /* Full desaturation */
+    filter: grayscale(100%);
 }
 
 .transparent {
-    opacity: 0.5; /* Adjust transparency as needed */
+    opacity: 0.5;
 }

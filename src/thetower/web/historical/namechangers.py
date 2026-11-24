@@ -2,7 +2,6 @@
 
 from collections import defaultdict
 from datetime import date
-from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
@@ -92,11 +91,6 @@ def load_namechangers(latest_result_date, include_sus: bool, hide_banned: bool) 
 
 def get_namechangers():
     st.markdown("# Namechangers")
-    css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-    with open(css_path, "r") as infile:
-        table_styling = f"<style>{infile.read()}</style>"
-
-    st.write(table_styling, unsafe_allow_html=True)
 
     latest_result_date = TourneyResult.objects.aggregate(latest=Max("date"))["latest"]
     # The public site never shows a banned player, hard or soft; the hidden site shows everyone

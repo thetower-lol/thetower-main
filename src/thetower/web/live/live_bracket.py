@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 from time import perf_counter
 
 import pandas as pd
@@ -311,11 +310,6 @@ def live_bracket():
     # Create table HTML; the index is hidden because the "#" column carries the placement now
     styled = display_df.style.format(make_player_url, subset=["player_id"]).format(format_wave, subset=["wave"]).hide(axis="index")
     st.write(styled.to_html(escape=False), unsafe_allow_html=True)
-
-    css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-    with open(css_path, "r") as infile:
-        table_styling = f"<style>{infile.read()}</style>"
-    st.write(table_styling, unsafe_allow_html=True)
 
     # Display comparison links
     comparison_container = st.container()

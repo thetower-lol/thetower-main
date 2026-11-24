@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 import pandas as pd
 import requests
@@ -210,10 +209,6 @@ def render_sus_moderation_page():
     """Render the sus moderation page with UI components."""
 
     # Apply styling
-    css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-    with open(css_path, "r") as infile:
-        table_styling = f"<style>{infile.read()}</style>"
-    st.write(table_styling, unsafe_allow_html=True)
 
     # Override centered layout — make this page use full width
     st.markdown(

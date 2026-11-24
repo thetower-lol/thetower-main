@@ -110,19 +110,8 @@ def _as_percent_change(data_points: list[dict], key_places: list[int]) -> list[d
     return [{**pt, **{place: round((pt[place] / max(first[place], 1) - 1) * 100) for place in key_places}} for pt in data_points]
 
 
-# Distinct colours for up to 4 key places
-_PLACE_COLORS = [
-    "#4C9BE8",  # blue
-    "#E87C4C",  # orange
-    "#4CE87C",  # green
-    "#E84C9B",  # pink
-    "#B04CE8",  # purple
-    "#E8D44C",  # yellow
-    "#4CE8D4",  # teal
-    "#E84C4C",  # red
-    "#8CE84C",  # lime
-    "#4C6CE8",  # indigo
-]
+# One colour per key place (dots and trend line share it), taken from the theme's chart palette in config.toml
+_PLACE_COLORS = st.get_option("theme.chartCategoricalColors") or ["#52b9e4", "#f2a541", "#7bd389", "#e5707e"]
 
 
 def compute_regression_analysis():

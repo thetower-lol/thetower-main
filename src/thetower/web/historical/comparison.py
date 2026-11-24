@@ -1,6 +1,5 @@
 import datetime
 import os
-from pathlib import Path
 from statistics import median, stdev
 from urllib.parse import urlencode
 
@@ -77,12 +76,6 @@ def compute_comparison(player_id=None, canvas=st):
         st.checkbox("Mobile view", value=is_mobile, key="mobile_view")
         if proximal_player_id:
             proximal_n = st.slider("Players above/below", min_value=1, max_value=25, value=10, key="proximal_n")
-
-    css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-    with open(css_path, "r") as infile:
-        table_styling = f"<style>{infile.read()}</style>"
-
-    canvas.write(table_styling, unsafe_allow_html=True)
 
     def display_comparison():
         st.session_state.display_comparison = True

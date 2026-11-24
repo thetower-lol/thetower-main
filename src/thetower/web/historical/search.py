@@ -9,7 +9,6 @@ django.setup()
 
 from collections import Counter
 from itertools import groupby
-from pathlib import Path
 
 import streamlit as st
 from django.db import connection
@@ -325,12 +324,6 @@ def search_players_optimized(search_term, page=20, advanced_search=False, by: st
 
 
 def compute_search(player=False, comparison=False):
-    css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-    with open(css_path, "r") as infile:
-        table_styling = f"<style>{infile.read()}</style>"
-
-    st.write(table_styling, unsafe_allow_html=True)
-
     hidden_features = os.environ.get("HIDDEN_FEATURES")
 
     advanced_search = False

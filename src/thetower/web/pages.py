@@ -298,6 +298,8 @@ st.html("""
     }
 </style>
 """)
+# Site stylesheet, once for every page (tables, podium cards, button links)
+st.html(current_dir / "static" / "styles" / "style.css")
 
 _path, _render_id = log_request()
 _render_clock = start_render()
@@ -312,9 +314,9 @@ finally:
 # Unlabeled on purpose: wall ms | cpu ms | runs in flight, same order as the render log line.
 _render_badge = f"{_render_stats.elapsed_ms} ms | {_render_stats.cpu_ms} | {_render_stats.inflight}"
 st.sidebar.markdown(
-    """<div style="margin-bottom:8px; padding:12px; font-size:14px; line-height:20px; color:#a3a8b8; border-radius:8px; border:1px solid rgba(250,250,250,0.08);">
-        <div style="color:#fafafa; font-weight:500;">🐟 Support the fishy</div>
-        Use code <span style="color:#fafafa; font-family:'Source Code Pro',ui-monospace,monospace;">thedisasterfish</span>
+    """<div class="tt-support">
+        <div class="tt-support-title">🐟 Support the fishy</div>
+        Use code <span class="tt-code">thedisasterfish</span>
         in the <a href="https://store.techtreegames.com/thetower/">TechTree Store</a>
     </div>""",
     unsafe_allow_html=True,
@@ -322,10 +324,11 @@ st.sidebar.markdown(
 try:
     _pkg_version = version("thetower")
     _prefix = "Admin · " if hidden_features else ""
-    _version_line = f"{_prefix}Version: {_pkg_version} &nbsp;·&nbsp; {_render_badge}"
+    # Timing on its own line, kept whole so it never wraps mid-figure
+    _version_line = f'{_prefix}Version: {_pkg_version}<br><span style="white-space:nowrap;">{_render_badge}</span>'
 except Exception:
     _version_line = _render_badge
 st.sidebar.markdown(
-    f'<div style="font-size:12px; color:#8b90a0; margin-bottom:8px; font-variant-numeric:tabular-nums;">{_version_line}</div>',
+    f'<div class="tt-meta" style="font-size:12px; margin-bottom:8px; font-variant-numeric:tabular-nums;">{_version_line}</div>',
     unsafe_allow_html=True,
 )

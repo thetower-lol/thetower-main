@@ -147,7 +147,7 @@ def compute_static_placement():
     df = pd.DataFrame(table)
 
     def _highlight_median(row: pd.Series) -> list[str]:
-        return ["font-weight: bold; background-color: rgba(100,100,200,0.15)" if row["Place"] == 15 else "" for _ in row]
+        return ["font-weight: bold; background-color: rgba(82,185,228,0.14)" if row["Place"] == 15 else "" for _ in row]
 
     styled = df.style.apply(_highlight_median, axis=1)
 

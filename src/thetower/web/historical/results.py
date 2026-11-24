@@ -1,6 +1,5 @@
 import datetime
 import os
-from pathlib import Path
 from typing import Optional
 
 import streamlit as st
@@ -42,14 +41,6 @@ class Results:
 
     def _make_sus_link(self, id, name):
         return f"<a href='https://admin.thetower.lol/admin/sus/moderationrecord/add/?tower_id={id}&name={name}' target='_blank'>🔗 sus</a>"
-
-    def _styler(self):
-        # Get the path to the CSS file relative to this module
-        css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-        with open(css_path, "r") as infile:
-            table_styling = f"<style>{infile.read()}</style>"
-
-        st.write(table_styling, unsafe_allow_html=True)
 
     def top_of_results(self) -> str:
         patch_col, tourney_col, self.results_col, self.results_col_page = st.columns([1.0, 2, 1, 1.2])
@@ -247,7 +238,6 @@ class Results:
         if self.show_hist:
             to_be_displayed_styler = self.show_hist_preparation(to_be_displayed, date)
         else:
-            self._styler()
             to_be_displayed_styler = self.regular_preparation(to_be_displayed)
 
         st.write(to_be_displayed_styler.hide(axis="index").to_html(escape=False), unsafe_allow_html=True)

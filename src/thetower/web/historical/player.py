@@ -1,7 +1,6 @@
 import datetime
 import os
 from html import escape
-from pathlib import Path
 from urllib.parse import urlencode
 
 import pandas as pd
@@ -50,12 +49,6 @@ def compute_player_lookup():
         st.session_state.options.current_player_id = None
         if "player_id" in st.session_state:
             st.session_state.pop("player_id")
-
-    css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-    with open(css_path, "r") as infile:
-        table_styling = f"<style>{infile.read()}</style>"
-
-    st.write(table_styling, unsafe_allow_html=True)
 
     if player_id := st.session_state.get("player_id"):
         options.current_player = player_id
@@ -233,11 +226,20 @@ def compute_player_lookup():
     selected_leagues = league_select if league_select else leagues
 
     fig = go.Figure()
-    colors = ["#CD7F32", "#C0C0C0", "#FFD700", "#E5E4E2", "#B9F2FF", "#FF6347", "#8A2BE2"]  # Colors for leagues: Bronze to Grandmaster
+    # Metal-tier colours by league name, so each league keeps its colour whatever the order of `leagues`
+    league_colors = {
+        "Copper": "#c0804a",
+        "Silver": "#c0c0c0",
+        "Gold": "#d4af37",
+        "Platinum": "#e5e4e2",
+        "Champion": "#b9f2ff",
+        "Legend": "#ff6347",
+        "Mythic": "#a970ff",
+    }
 
     y_col = "#" if league_graph_position else "wave"
 
-    for i, league in enumerate(leagues):
+    for league in leagues:
         if league in selected_leagues:
             league_data = league_filtered_df[league_filtered_df.league == league].sort_values("date")
             if not league_data.empty:
@@ -249,7 +251,7 @@ def compute_player_lookup():
                         y=league_data[y_col],
                         mode="lines+markers",
                         name=f"{league} - actual",
-                        line=dict(color=colors[i] if i < len(colors) else None),
+                        line=dict(color=league_colors.get(league)),
                     )
                 )
                 fig.add_trace(
@@ -258,7 +260,7 @@ def compute_player_lookup():
                         y=league_data["average"],
                         mode="lines",
                         name=f"{league} - {rolling_average} avg",
-                        line=dict(color=colors[i] if i < len(colors) else None, dash="dot"),
+                        line=dict(color=league_colors.get(league), dash="dot"),
                     )
                 )
 
@@ -290,18 +292,11 @@ def filter_lower_leagues(df):
 
 
 def render_player_action_links(container, player_id: str, joined_tourney: bool) -> None:
-    """Render historical (red) and live (blue) action button rows for a player, every button the same size."""
-    button_style = (
-        "display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 11rem; height: 3.25rem;"
-        " padding: 4px 12px; color: white; text-align: center; line-height: 1.25; text-decoration: none; border-radius: 4px; font-weight: 500;"
-    )
-    historical_style = f"{button_style} background-color: #FF4B4B;"
-    live_style = f"{button_style} background-color: #1F6FEB;"
-    row_style = "display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.75rem;"
+    """Render historical (filled) and live (outlined) action button rows for a player, every button the same size."""
 
-    def button_row(buttons: list[tuple[str, str]], style: str) -> None:
-        links = "".join(f'<a href="{url}" target="_self" style="{style}">{label}</a>' for label, url in buttons)
-        container.markdown(f'<div style="{row_style}">{links}</div>', unsafe_allow_html=True)
+    def button_row(buttons: list[tuple[str, str]], css_class: str) -> None:
+        links = "".join(f'<a href="{url}" target="_self" class="{css_class}">{label}</a>' for label, url in buttons)
+        container.markdown(f'<div class="tt-button-row">{links}</div>', unsafe_allow_html=True)
 
     placements_url = f"https://{BASE_URL}/player?" + urlencode({"player": player_id}, doseq=True)
     proximal_url = f"https://{BASE_URL}/comparison?proximal_player={player_id}"
@@ -311,10 +306,10 @@ def render_player_action_links(container, player_id: str, joined_tourney: bool) 
     placement_url = f"https://{BASE_URL}/liveplacement?player_id={player_id}"
     quantile_url = f"https://{BASE_URL}/livequantile?player_id={player_id}"
 
-    # Row 1: Historical — always shown (red)
-    button_row([("Placements", placements_url), ("Proximal Comparison", proximal_url)], historical_style)
+    # Row 1: Historical — always shown (filled)
+    button_row([("Placements", placements_url), ("Proximal Comparison", proximal_url)], "tt-button")
 
-    # Row 2: Live — only if player joined the recent tourney (blue)
+    # Row 2: Live — only if player joined the recent tourney (outlined)
     if joined_tourney:
         button_row(
             [
@@ -324,7 +319,7 @@ def render_player_action_links(container, player_id: str, joined_tourney: bool) 
                 ("Live Placement Analysis", placement_url),
                 ("Live Quantile Analysis", quantile_url),
             ],
-            live_style,
+            "tt-button tt-button--quiet",
         )
 
 
@@ -353,9 +348,8 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
     real_name = escape(player_df.iloc[0].real_name)
 
     if hidden_features:
-        sus_button_style = "display: inline-block; padding: 8px 16px; background-color: #FFA500; color: white; text-align: center; text-decoration: none; border-radius: 4px; font-weight: 500;"
         info_tab.markdown(
-            f"<div style='text-align: right; margin-bottom: 1rem;'><a href='https://admin.thetower.lol/admin/sus/moderationrecord/add/?tower_id={player_df.iloc[0].id}&moderation_type=sus' target='_blank' style='{sus_button_style}'>🔗 sus me</a></div>",
+            f"<div style='display: flex; justify-content: flex-end; margin-bottom: 1rem;'><a href='https://admin.thetower.lol/admin/sus/moderationrecord/add/?tower_id={player_df.iloc[0].id}&moderation_type=sus' target='_blank' class='tt-button tt-button--warn'>🔗 sus me</a></div>",
             unsafe_allow_html=True,
         )
 
@@ -382,7 +376,7 @@ def draw_info_tab(info_tab, user, player_id, player_df, hidden_features):
                 known_player = player_id_obj.game_instance.player
 
             if known_player and known_player.creator_code:
-                creator_code = f"<div style='font-size: 15px'>Creator code: <span style='color:#cd4b3d; font-weight:bold;'>{known_player.creator_code}</span> <a href='https://store.techtreegames.com/thetower/' target='_blank' style='text-decoration: none;'>🏪</a></div>"
+                creator_code = f"<div style='font-size: 15px'>Creator code: <span class='tt-code' style='font-weight: 500;'>{known_player.creator_code}</span> <a href='https://store.techtreegames.com/thetower/' target='_blank' style='text-decoration: none;'>🏪</a></div>"
             # Public accounts only; the staff site sees every account, the private ones marked
             if known_player:
                 socials = socials_html(profile_accounts(known_player, include_private=bool(hidden_features)))

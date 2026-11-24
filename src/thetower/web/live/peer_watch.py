@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 from time import perf_counter
 
 import pandas as pd
@@ -168,12 +167,9 @@ def peer_watch():
     display_cols = ["#"] + [c for c in ["player_id", "display_name", "wave", "league", "datetime"] if c in latest_df.columns]
     display_df = latest_df.loc[:, display_cols]
 
-    css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
     # The index is hidden because the "#" column carries the placement now
     styled = display_df.style.format(make_player_url, subset=["player_id"]).format(format_wave, subset=["wave"]).hide(axis="index")
     st.write(styled.to_html(escape=False), unsafe_allow_html=True)
-    with open(css_path, "r") as infile:
-        st.write(f"<style>{infile.read()}</style>", unsafe_allow_html=True)
 
     logger.info(f"peer_watch for {resolved_id} (n={peer_n}) took {perf_counter() - t_start:.3f}s")
 

@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pandas as pd
 import streamlit as st
 from django.db.models import Count
@@ -127,10 +125,6 @@ def render_multiple_moderation_page():
     """Render the multiple moderation page with UI components."""
 
     # Apply styling
-    css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-    with open(css_path, "r") as infile:
-        table_styling = f"<style>{infile.read()}</style>"
-    st.write(table_styling, unsafe_allow_html=True)
 
     st.markdown("# Multiple Active Moderation Records")
     st.markdown("All players with more than one active moderation record")

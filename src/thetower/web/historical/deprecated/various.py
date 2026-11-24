@@ -1,5 +1,4 @@
 from collections import Counter
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -14,12 +13,6 @@ def compute_various(df, options):
     width = 48
     legend_width = 128
     numerals = ["1st", "2nd", "3rd"]
-
-    css_path = Path(__file__).parent.parent.parent / "static" / "styles" / "style.css"
-    with open(css_path, "r") as infile:
-        table_styling = f"<style>{infile.read()}</style>"
-
-    st.write(table_styling, unsafe_allow_html=True)
 
     patches = list(Patch.objects.filter(version_minor__gte=20))
     df = df[df.patch.isin(patches)]

@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pandas as pd
 import streamlit as st
 from django.db.models import Count
@@ -14,10 +12,6 @@ def get_duplicate_tournaments():
     """Find players with multiple tournament entries on the same date."""
 
     # Apply styling
-    css_path = Path(__file__).parent.parent / "static" / "styles" / "style.css"
-    with open(css_path, "r") as infile:
-        table_styling = f"<style>{infile.read()}</style>"
-    st.write(table_styling, unsafe_allow_html=True)
 
     st.markdown("# Duplicate Tournament Entries")
     st.markdown("Players with multiple records for the same tournament date")
