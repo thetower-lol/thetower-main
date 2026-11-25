@@ -31,7 +31,7 @@ def show_operation_result(success: bool, title: str, message: str):
 
     st.code(message, language="bash")
 
-    if st.button("✅ Close & Refresh", use_container_width=True, type="primary"):
+    if st.button("✅ Close & Refresh", width="stretch", type="primary"):
         st.rerun()
 
 

@@ -322,7 +322,7 @@ def _render_local_cleanup() -> None:
             }
             for i in items
         ]
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.dataframe(rows, width="stretch", hide_index=True)
 
     for err in scan["errors"]:
         st.caption(f"⚠️ {err}")
@@ -396,7 +396,7 @@ def backup_status_page() -> None:
                     row["Age"] = _time_ago(last_mod)
                     rows.append(row)
 
-                st.dataframe(rows, use_container_width=True, hide_index=True)
+                st.dataframe(rows, width="stretch", hide_index=True)
 
                 if stats["count"] > 25:
                     st.caption(f"Showing 25 of {stats['count']} objects · Total: {_fmt_bytes(stats['total_size'])}")
@@ -490,7 +490,7 @@ def _render_activity_log() -> None:
             rows.append({"Time": ts, "Type": etype, "Detail": detail})
 
         if rows:
-            st.dataframe(rows, use_container_width=True, hide_index=True)
+            st.dataframe(rows, width="stretch", hide_index=True)
         else:
             st.info("No events match filter.")
 

@@ -9,7 +9,7 @@ def discord_bot_page():
         "all directly in your Discord server."
     )
 
-    st.link_button("➕ Add the bot to your server", "https://bot.thetower.lol", type="primary", use_container_width=True)
+    st.link_button("➕ Add the bot to your server", "https://bot.thetower.lol", type="primary", width="stretch")
 
     st.markdown("---")
     st.markdown("### Features")

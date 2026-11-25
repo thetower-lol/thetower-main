@@ -169,7 +169,7 @@ def render_resource_monitor() -> None:
         title=f"Memory Usage — {window_label}",
     )
     _finish_figure(fig, cutoff, latest)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # --- CPU ---
     st.subheader("CPU")
@@ -186,7 +186,7 @@ def render_resource_monitor() -> None:
             title=f"Average CPU per Sampling Interval — {window_label}",
         )
         _finish_figure(fig, cutoff, latest)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         _series_start_note("CPU", cpu_df, cutoff)
 
     # --- File descriptors ---
@@ -205,7 +205,7 @@ def render_resource_monitor() -> None:
             title=f"Open File Descriptors — {window_label} (hover shows socket count)",
         )
         _finish_figure(fig, cutoff, latest)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         _series_start_note("FD", fd_df, cutoff)
 
     # --- Latest readings ---
@@ -234,7 +234,7 @@ def render_resource_monitor() -> None:
         table = table.merge(clatest, on="Service", how="left")
 
     table = table.sort_values("RSS (MB)", ascending=False)
-    st.dataframe(table, hide_index=True, use_container_width=True)
+    st.dataframe(table, hide_index=True, width="stretch")
 
 
 render_resource_monitor()

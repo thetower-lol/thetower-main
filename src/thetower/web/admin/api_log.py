@@ -129,7 +129,7 @@ display["timestamp"] = display["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 st.dataframe(
     display,
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
     column_config={
         "timestamp": st.column_config.TextColumn("Timestamp", width="medium"),
@@ -147,4 +147,4 @@ st.dataframe(
 
 with st.expander("Breakdown by action"):
     breakdown = view.groupby(["action", "status"]).size().reset_index(name="count").sort_values(["action", "status"])
-    st.dataframe(breakdown, use_container_width=True, hide_index=True)
+    st.dataframe(breakdown, width="stretch", hide_index=True)

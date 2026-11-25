@@ -26,11 +26,13 @@ dependencies = [
     "boto3==1.37.37",
     "schedule==1.2.2",
     "psutil==7.0.0",
+    # tourney_results/data.py uses cachetools.func.ttl_cache. Streamlit used to pull it in, but stopped in 1.60.
+    "cachetools==6.2.6",
 ]
 
 [project.optional-dependencies]
 web = [
-    "streamlit==1.54.0",
+    "streamlit==1.67.0",
     "streamlit-extras==0.6.0",
     "streamlit-js-eval==1.0.0",
     "tzdata==2026.1",
