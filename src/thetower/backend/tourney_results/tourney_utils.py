@@ -325,8 +325,10 @@ def get_summary(last_date: datetime.datetime) -> str:
 
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=4096,
+        model="claude-haiku-5-5",
+        # Haiku 5.5 thinks by default and the thinking counts toward max_tokens, so leave room beyond the summary itself.
+        max_tokens=16000,
+        output_config={"effort": "medium"},
         messages=[
             {
                 "role": "user",
@@ -340,7 +342,11 @@ def get_summary(last_date: datetime.datetime) -> str:
         ],
     )
 
-    response = message.content[0].text
+    # The reply can start with thinking blocks, so keep only the text blocks.
+    response = "".join(block.text for block in message.content if block.type == "text").strip()
+    if message.stop_reason != "end_turn" or not response:
+        # A refusal, a cut-off reply or an empty one must not be saved as the overview.
+        raise ValueError(f"AI summary not usable: stop_reason={message.stop_reason}, {len(response)} chars of text")
     logging.info(f"AI summary done ({len(response)} chars): {response[:200]}...")
 
     return response
