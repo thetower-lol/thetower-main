@@ -10,7 +10,6 @@ from types import MappingProxyType
 from typing import Optional
 
 # Third-party imports
-import anthropic
 import pandas as pd
 from django.apps import apps
 from django.db.models import Case, IntegerField, Value, When
@@ -320,11 +319,14 @@ def get_summary(last_date: datetime.datetime) -> str:
     )
 
     logging.info("Starting to generate ai summary...")
+    # Imported here so a broken anthropic install only breaks summaries, not the many importers of this module
+    # (results imports, live data, the site and the bot).
+    import anthropic
+
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=4096,
-        temperature=1.0,
         messages=[
             {
                 "role": "user",
