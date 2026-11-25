@@ -23,6 +23,7 @@ from .data import get_banned_ids, get_player_id_lookup, get_shun_ids, get_sus_id
 from .models import PromptTemplate, TourneyResult, TourneyRow
 from .shun_config import include_shun_enabled_for
 from .sus_config import include_sus_enabled_for
+from .visibility import public_shows
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -285,7 +286,9 @@ def get_summary(last_date: datetime.datetime) -> str:
     if not tourney_dates:
         raise ValueError(f"Missing {top_league} data: no {top_league} tournaments on or before {last_date}")
 
-    df = get_tourneys(qs, offset=0, limit=50)
+    # The summary is published as the public writeup, so it shows the same players as the public results page,
+    # whichever process generates it (the admin action may run with hidden features).
+    df = get_tourneys(qs, offset=0, limit=50, filter_sus=not public_shows("sus"), filter_banned=True)
     logging.info(f"AI summary: got {len(df)} rows across {df['date'].nunique() if not df.empty else 0} dates")
 
     ranking = ""
