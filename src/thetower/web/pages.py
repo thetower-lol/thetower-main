@@ -13,7 +13,7 @@ from thetower.backend.tourney_results.constants import Graph, Options
 from thetower.web.maintenance import get_maintenance_state
 from thetower.web.popups import show_site_popups
 from thetower.web.request_logger import log_render_complete, log_request, start_render
-from thetower.web.util import makeitrain
+from thetower.web.util import RAIN_EFFECT_AVAILABLE, makeitrain
 
 # Django setup
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "thetower.backend.towerdb.settings")
@@ -164,7 +164,7 @@ if getattr(pg, "title", None) != "Overview":
 # Only show toggle and make it rain if there are active rain periods
 from thetower.backend.tourney_results.models import RainPeriod
 
-active_period = RainPeriod.get_active_period()
+active_period = RainPeriod.get_active_period() if RAIN_EFFECT_AVAILABLE else None
 
 if active_period:
     with st.sidebar:

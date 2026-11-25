@@ -5,7 +5,6 @@ import zoneinfo
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from streamlit_extras.let_it_rain import rain
 
 from thetower.backend.tourney_results.constants import Graph, Options, league_min_patch, leagues
 
@@ -230,35 +229,11 @@ def deprecated():
     )
 
 
-def makeitrain(icon: str | None = None, after: datetime.date | None = None, before: datetime.date | None = None):
-    """
-    Make it rain with emojis based on active rain periods from the database.
-    If specific parameters are provided, they override the database entries.
-    """
-    from django.utils import timezone
+# The rain effect came from streamlit-extras, which was dropped because that one function pulled in about 28
+# packages. Until rain is rebuilt or removed for good, the effect is off: pages.py skips the toggle and this is a no-op.
+RAIN_EFFECT_AVAILABLE = False
 
-    today = timezone.now().date()
 
-    if icon and after and before:
-        # Use provided parameters
-        if today >= after and today <= before:
-            rain(
-                emoji=icon,
-                font_size=27,
-                falling_speed=20,
-                animation_length="infinite",
-            )
-        return
-
-    # Use cached lookup for active period
-    from thetower.backend.tourney_results.models import RainPeriod
-
-    active_period = RainPeriod.get_active_period()
-
-    if active_period:
-        rain(
-            emoji=active_period.emoji,
-            font_size=27,
-            falling_speed=20,
-            animation_length="infinite",
-        )
+def makeitrain(icon: str | None = None, after: datetime.date | None = None, before: datetime.date | None = None) -> None:
+    """Make it rain with emojis during active rain periods. Currently a no-op (see RAIN_EFFECT_AVAILABLE)."""
+    return
