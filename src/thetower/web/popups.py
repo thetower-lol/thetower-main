@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 COOKIE_PREFIX = "thetower_popup_"
 
 # Streamlit's dismissible dialog also closes on a click outside it and on Escape. Only the X and the button
-# should acknowledge a popup, so while a site popup is open these swallow the events Streamlit closes on
-# (a document mousedown outside the dialog, Escape keydown/keyup) before they reach it. Other dialogs are unaffected.
+# should acknowledge a popup, so while a site popup is open these swallow the events Streamlit closes on (pointer
+# and click events outside the dialog, which React Aria listens for on the document, and Escape keydown/keyup)
+# before they reach it. Other dialogs are unaffected.
 _DISMISS_GUARD_HTML = """
 <span class="thetower-site-popup"></span>
 <style>
@@ -40,13 +41,18 @@ setTimeout(() => {
     const main = document.querySelector('[data-testid="stMain"]');
     const centerOverContent = () => {
         const dialog = document.querySelector(".thetower-site-popup")?.closest('[role="dialog"]');
-        if (!dialog || !main) {
+        // The full-window overlay that centers the dialog panel (its direct child).
+        const holder = dialog?.closest('[data-testid="stDialog"]');
+        if (!holder || !main) {
             return false;
         }
-        const holder = dialog.parentElement;
-        dialog.dataset.naturalWidth ??= dialog.offsetWidth;
+        let panel = dialog;
+        while (panel.parentElement && panel.parentElement !== holder) {
+            panel = panel.parentElement;
+        }
+        panel.dataset.naturalWidth ??= panel.offsetWidth;
         const left = main.getBoundingClientRect().left;
-        const fits = window.innerWidth - left >= Number(dialog.dataset.naturalWidth) + 32;
+        const fits = window.innerWidth - left >= Number(panel.dataset.naturalWidth) + 32;
         holder.style.paddingLeft = left > 0 && fits ? `${left}px` : "";
         return true;
     };
@@ -58,11 +64,13 @@ setTimeout(() => {
 if (!window.thetowerPopupGuard) {
     window.thetowerPopupGuard = true;
     const popupOpen = () => document.querySelector(".thetower-site-popup") !== null;
-    window.addEventListener("mousedown", (e) => {
-        if (popupOpen() && !(e.target instanceof Element && e.target.closest('[role="dialog"]'))) {
-            e.stopPropagation();
-        }
-    }, true);
+    for (const type of ["pointerdown", "mousedown", "pointerup", "click"]) {
+        window.addEventListener(type, (e) => {
+            if (popupOpen() && !(e.target instanceof Element && e.target.closest('[role="dialog"]'))) {
+                e.stopPropagation();
+            }
+        }, true);
+    }
     for (const type of ["keydown", "keyup"]) {
         window.addEventListener(type, (e) => {
             if (popupOpen() && e.key === "Escape") {
