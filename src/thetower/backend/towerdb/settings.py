@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+import importlib.util
 import os
 from pathlib import Path
 
@@ -88,13 +89,15 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "whitenoise.runserver_nostatic",
     "rest_framework",
-    "django_extensions",
     "thetower.backend.sus",
     "thetower.backend.tourney_results",
     "colorfield",
     "simple_history",
     "axes",
 ]
+# django-extensions (shell_plus and other dev commands) is in the dev extras only; enable it where it is installed.
+if importlib.util.find_spec("django_extensions"):
+    INSTALLED_APPS.append("django_extensions")
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

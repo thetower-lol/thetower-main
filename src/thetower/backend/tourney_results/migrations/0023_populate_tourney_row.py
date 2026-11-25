@@ -2,14 +2,13 @@ import re
 
 import pandas as pd
 from django.db import migrations
-from tqdm import tqdm
 
 
 def upgrade(apps, schema_editor):
     TourneyResult = apps.get_model("tourney_results", "TourneyResult")
     TourneyRow = apps.get_model("tourney_results", "TourneyRow")
 
-    for result in tqdm(TourneyResult.objects.all()):
+    for result in TourneyResult.objects.all():
         df = pd.read_csv(result.result_file, header=None)
         df = df.rename(columns={0: "id", 1: "tourney_name", 2: "wave"})
         df["tourney_name"] = df["tourney_name"].map(lambda x: x.strip())

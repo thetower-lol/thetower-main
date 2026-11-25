@@ -48,7 +48,6 @@ web = [
     "pyarrow==24.0.0",
     # Backend / admin plugins and utilities (kept in web so prod installs web+bot include them)
     "requests==2.32.5",
-    "django-extensions==4.1",
     "django-nested-admin==4.1.6",
     "django-simple-history==3.11.0",
     "djangorestframework==3.16.1",
@@ -56,7 +55,6 @@ web = [
     "django-colorfield==0.14.0",
     "django-axes==8.3.1",
     "anthropic==2.14.0",
-    "tqdm==4.67.3",
 ]
 
 ocr = [
@@ -67,6 +65,8 @@ ocr = [
 ]
 
 dev = [
+    # Dev-only Django commands (shell_plus etc.); settings.py adds the app only where this is installed.
+    "django-extensions==4.1",
     "pytest==9.0.2",
     "pytest-django==4.12.0",
     "pytest-sugar==1.1.1",

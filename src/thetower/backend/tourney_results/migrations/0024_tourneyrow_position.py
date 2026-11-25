@@ -1,5 +1,4 @@
 from django.db import migrations, models
-from tqdm import tqdm
 
 from thetower.backend.sus.models import SusPerson
 
@@ -10,7 +9,7 @@ def populate_positions(apps, schema_editor):
 
     sus_ids = set(SusPerson.objects.filter(sus=True).values_list("player_id", flat=True))
 
-    for result in tqdm(TourneyResult.objects.all()):
+    for result in TourneyResult.objects.all():
         rows = TourneyRow.objects.filter(result=result)
         rows.order_by("-wave")
 
