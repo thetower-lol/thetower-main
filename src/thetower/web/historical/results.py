@@ -8,10 +8,9 @@ from thetower.backend.tourney_results.constants import (
     Graph,
     Options,
     how_many_results_hidden_site,
-    sus_person,
 )
 from thetower.backend.tourney_results.data import get_all_banned_ids, get_results_for_patch, get_sus_ids, get_tourneys
-from thetower.backend.tourney_results.formatting import am_i_sus, color_position__top, format_wave, make_player_url, strike
+from thetower.backend.tourney_results.formatting import color_position__top, format_wave, make_player_url, strike
 from thetower.backend.tourney_results.models import PatchNew as Patch
 from thetower.backend.tourney_results.models import TourneyResult
 from thetower.backend.tourney_results.results_config import get_results_limit
@@ -106,14 +105,11 @@ class Results:
                         to_be_displayed.loc[to_be_displayed[to_be_displayed.position == position].index[0], "real_name"] + medal
                     )
 
-        to_be_displayed["real_name"] = [
-            sus_person if id_ in self.sus_ids else name for id_, name in zip(to_be_displayed.id, to_be_displayed.real_name)
-        ]
-
-        to_be_displayed["tourney_name"] = [
-            strike(name) if id_ in self.sus_ids else name for id_, name in zip(to_be_displayed.id, to_be_displayed.tourney_name)
-        ]
         if self.hidden_features:
+            # Sus markers are for staff only: the public site never shows that a player is sus
+            to_be_displayed["tourney_name"] = [
+                strike(name) if id_ in self.sus_ids else name for id_, name in zip(to_be_displayed.id, to_be_displayed.tourney_name)
+            ]
             # Banned players keep their rows here; they hold no position, so they show unplaced and flagged
             banned_ids = get_all_banned_ids()
             to_be_displayed["real_name"] = [
@@ -167,7 +163,6 @@ class Results:
                 axis=1,
             )
             .map(color_position__top, subset=["#"])
-            .map(am_i_sus, subset=["real_name"])
             .format(format_wave, subset=[date, *previous_4_dates])
         )
 
@@ -210,11 +205,7 @@ class Results:
             to_be_displayed["sus_me"] = [self._make_sus_link(id, name) for id, name in zip(to_be_displayed.id, to_be_displayed.tourney_name)]
 
         to_be_displayed = (
-            to_be_displayed[indices]
-            .style.apply(styling, axis=1)
-            .map(color_position__top, subset=["#"])
-            .map(am_i_sus, subset=["real_name"])
-            .format(format_wave, subset=["wave"])
+            to_be_displayed[indices].style.apply(styling, axis=1).map(color_position__top, subset=["#"]).format(format_wave, subset=["wave"])
         )
 
         return to_be_displayed

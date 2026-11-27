@@ -73,7 +73,6 @@ position_colors = [
     "#CCCCCC",
 ][::-1]
 
-sus_person = "sus!!!"
 
 stratas_boundaries = [0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2500, 3000, 100000]
 colors_017 = [

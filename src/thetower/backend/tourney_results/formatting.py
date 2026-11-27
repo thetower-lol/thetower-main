@@ -16,7 +16,6 @@ from .constants import (
     position_stratas,
     stratas,
     stratas_boundaries_018,
-    sus_person,
 )
 
 
@@ -61,11 +60,6 @@ detailed_format__top_position = partial(detailed_format, which=3, how_many=5)
 color_nickname = partial(color_nickname__detail, stratas=stratas, colors=colors, operator=ge, formatting_function=detailed_format__base)
 color_nickname__top = partial(color_nickname__detail, stratas=stratas, colors=colors, operator=ge, formatting_function=detailed_format__top)
 color_position__top = partial(color_strata, stratas=position_stratas, colors=position_colors, operator=le, formatting_function=simple_format)
-
-
-def am_i_sus(name):
-    if name == sus_person:
-        return "color: #FF6666"
 
 
 def color(value):
