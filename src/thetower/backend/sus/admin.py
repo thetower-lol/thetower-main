@@ -470,9 +470,9 @@ class ModerationRecordAdmin(SimpleHistoryAdmin):
             elif obj.zendesk_retry_count > 0:
                 return format_html('<span style="color: orange;">⏳ Retrying (attempt {})</span>', obj.zendesk_retry_count + 1)
             else:
-                return format_html('<span style="color: blue;">⏳ Pending</span>')
+                return mark_safe('<span style="color: blue;">⏳ Pending</span>')
         else:
-            return format_html('<span style="color: gray;">➖ Disabled</span>')
+            return mark_safe('<span style="color: gray;">➖ Disabled</span>')
 
     _zendesk_status_display.short_description = "Zendesk Status"
 
