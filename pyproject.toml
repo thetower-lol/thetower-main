@@ -23,7 +23,7 @@ dependencies = [
     # Core shared runtime (used by more than one area)
     "Django==5.2.12",
     "pydantic==2.14.4",
-    "boto3==1.37.37",
+    "boto3==1.44.12",
     "schedule==1.2.2",
     "psutil==7.2.2",
     # tourney_results/data.py uses cachetools.func.ttl_cache. Streamlit used to pull it in, but stopped in 1.60.
@@ -39,7 +39,7 @@ web = [
     # Required by plotly express trendlines (live_placement_analysis uses trendline="lowess").
     # plotly imports it lazily at render time and does not declare it, so a missing statsmodels
     # only surfaces as ModuleNotFoundError when that page is opened. Pulls scipy transitively.
-    "statsmodels==0.14.6",
+    "statsmodels==0.15.0",
     "pandas==2.3.3",
     # Pinned deliberately: arrives transitively via streamlit, so without this pin the version is
     # whatever pip happens to resolve. Never 25.0.0: its bundled mimalloc segfaults when libarrow is
@@ -60,7 +60,7 @@ web = [
 ocr = [
     "pytesseract==0.3.13",
     "opencv-python-headless==4.13.0.92",
-    "numpy==2.4.2",
+    "numpy==2.5.5",
     "Pillow>=11.3.0",
 ]
 
